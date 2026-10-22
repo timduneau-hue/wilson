@@ -1,22 +1,33 @@
-// Wilson — visage animé (Canvas 2D).
-// Visage original : deux grands yeux couleur miel, sourcils et bouche lumineux sur fond noir (AMOLED).
+// Wilson — moteur du visage animé (Canvas 2D), commun à tous les styles de visage.
 // Tout bouge par ressorts amortis : aucun saut, aucune image figée (anti-marquage).
+//
+// Anti-scintillement :
+//  - rendu Canvas synchronisé avec l'écran (le mode « desynchronized » de la 1re version provoquait du déchirement) ;
+//  - cadence régulière : 60, 30 ou 20 images/s exactement (une image sur 1, 2 ou 3), jamais de saut irrégulier ;
+//  - aucune texture fine (qui crénelle en bougeant) ; ressorts calculés en petits pas stables.
 
-const TAU = Math.PI * 2;
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const lerp = (a, b, t) => a + (b - a) * t;
-const rand = (a, b) => a + Math.random() * (b - a);
+import { TAU, clamp, lerp, rand } from './faces/util.js';
+import { Lumiere } from './faces/lumiere.js';
+import { Bouille } from './faces/bouille.js';
+import { Led } from './faces/led.js';
+import { Miel } from './faces/miel.js';
+
+export const STYLES = {
+  lumiere: { label: 'Lumière', desc: 'Deux yeux de lumière douce, épurés', cls: Lumiere },
+  bouille: { label: 'Bouille', desc: 'Petit personnage rond à antennes', cls: Bouille },
+  led: { label: 'Rétro', desc: 'Écran à LED ambrées', cls: Led },
+  miel: { label: 'Miel', desc: 'Grands yeux réalistes (corrigé)', cls: Miel },
+};
 
 class Spring {
   constructor(v = 0, k = 120, c = 2 * Math.sqrt(120)) { this.v = v; this.t = v; this.vel = 0; this.k = k; this.c = c; }
   step(dt) {
-    const a = this.k * (this.t - this.v) - this.c * this.vel;
-    this.vel += a * dt; this.v += this.vel * dt;
+    const n = Math.max(1, Math.ceil(dt / 0.012)), h = dt / n;
+    for (let i = 0; i < n; i++) { this.vel += (this.k * (this.t - this.v) - this.c * this.vel) * h; this.v += this.vel * h; }
     return this.v;
   }
 }
 
-// Paramètres du visage et leur raideur (plus c'est haut, plus c'est vif).
 const PARAMS = {
   open: [1, 260], lower: [0.05, 160], tilt: [0, 140], eyeScale: [1, 180], pupil: [1, 60],
   browY: [0, 170], browTilt: [0, 150], browAsym: [0, 140],
@@ -24,7 +35,6 @@ const PARAMS = {
   blush: [0, 40], headRot: [0, 50], bright: [1, 12],
 };
 
-// Expressions : cibles des paramètres (les absents reviennent au neutre).
 const NEUTRAL = { open: 1, lower: 0.06, tilt: 0, eyeScale: 1, pupil: 1, browY: 0, browTilt: 0, browAsym: 0,
   smile: 0.28, mouthW: 1, mouthO: 0, round: 0, blush: 0, headRot: 0 };
 
@@ -49,26 +59,18 @@ export const EXPRESSIONS = {
   dort: { open: 0, lower: 0, browY: -0.2, smile: 0.18, mouthW: 0.8, pupil: 1.2 },
 };
 
-// Correspondance des émotions que Gemini peut demander.
 export const EMOTION_ALIASES = {
-  heureux: 'joie', content: 'joie', joyeux: 'joie', amuse: 'rire', amusé: 'rire', triste: 'triste',
+  heureux: 'joie', content: 'joie', joyeux: 'joie', amuse: 'rire', amusé: 'rire',
   surpris: 'surprise', etonne: 'surprise', étonné: 'surprise', fache: 'colere', fâché: 'colere', colère: 'colere',
-  curieux: 'curieux', pensif: 'reflexion', réflexion: 'reflexion', amoureux: 'tendresse', touche: 'tendresse',
+  pensif: 'reflexion', réflexion: 'reflexion', amoureux: 'tendresse', touche: 'tendresse',
   touché: 'tendresse', timide: 'gene', gêné: 'gene', perplexe: 'confus', inquiet: 'peur', effraye: 'peur',
-  effrayé: 'peur', fier: 'fier', ennuye: 'ennui', ennuyé: 'ennui', fatigue: 'somnolent', fatigué: 'somnolent',
-};
-
-// Palette (couleurs originales de Wilson).
-const C = {
-  ivory: '#F3EBDD', ivoryDim: 'rgba(243,235,221,0.88)',
-  scleraIn: '#FFFBF4', scleraOut: '#E7DCCB', scleraEdge: '#A99A86',
-  irisIn: '#FFD889', irisMid: '#E39A3B', irisOut: '#7A3E12', limbal: '#3B1C08',
-  mouthIn: '#24090E', tongue: '#D9667A', blush: '255,150,170', listen: '255,190,110',
+  effrayé: 'peur', ennuye: 'ennui', ennuyé: 'ennui', fatigue: 'somnolent', fatigué: 'somnolent',
 };
 
 export class Face {
-  constructor(canvas) {
-    this.cv = canvas; this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+  constructor(canvas, opts = {}) {
+    this.cv = canvas; this.ctx = canvas.getContext('2d', { alpha: false });
+    this.maxDpr = opts.maxDpr || 1.5;
     this.p = {}; for (const [k, [v, s]] of Object.entries(PARAMS)) this.p[k] = new Spring(v, s, 2 * Math.sqrt(s) * 1.05);
     this.lookX = new Spring(0, 90, 2 * Math.sqrt(90)); this.lookY = new Spring(0, 90, 2 * Math.sqrt(90));
     this.headX = new Spring(0, 30, 2 * Math.sqrt(30)); this.headY = new Spring(0, 30, 2 * Math.sqrt(30));
@@ -77,15 +79,21 @@ export class Face {
     this.lookTarget = null; this.nextSaccade = 0; this.idleLook = [0, 0];
     this.blinkT = -1; this.nextBlink = performance.now() + 2500; this.wink = 0; this.winkT = -1;
     this.actions = []; this.zs = []; this.nextZ = 0;
-    this.fpsCap = 60; this.lastDraw = 0; this.t0 = performance.now(); this.last = this.t0;
-    this.brightTarget = 1;
-    this.irisTex = this._makeIris();
-    this._resize(); addEventListener('resize', () => this._resize());
+    this.fpsDiv = 1; this._n = 0; this.t0 = performance.now(); this.last = this.t0;
+    this.setStyle(opts.style);
+    this._resize();
+    addEventListener('resize', () => this._resize());
+    if (window.ResizeObserver) new ResizeObserver(() => this._resize()).observe(canvas);
     this._applyTargets();
     requestAnimationFrame((t) => this._frame(t));
   }
 
   // ---------- API publique ----------
+  setStyle(name) {
+    this.styleName = STYLES[name] ? name : 'lumiere';
+    this.style = new STYLES[this.styleName].cls(this);
+    if (this.W && this.style.resize) this.style.resize();
+  }
   setMood(name) { if (EXPRESSIONS[name]) { this.mood = name; this._applyTargets(); } }
   setEmotion(name, ms = 4000, intensity = 1) {
     name = EMOTION_ALIASES[name] || name;
@@ -101,9 +109,9 @@ export class Face {
   clearEmotion() { this.emotion = null; this._applyTargets(); }
   setLook(x, y) { this.lookTarget = (x == null) ? null : [clamp(x, -1, 1), clamp(y, -1, 1)]; }
   setTalk(level, round = 0) { this.talkTarget = clamp(level, 0, 1); this.roundTalk = clamp(round, 0, 1); }
-  setListen(level) { this.listen = level; }          // -1 = caché
-  setBrightness(b) { this.brightTarget = clamp(b, 0.03, 1); this.p.bright.t = this.brightTarget; }
-  setFps(f) { this.fpsCap = f; }
+  setListen(level) { this.listen = level; }
+  setBrightness(b) { this.p.bright.t = clamp(b, 0.03, 1); }
+  setFps(f) { this.fpsDiv = f >= 50 ? 1 : f >= 28 ? 2 : 3; }          // 60, 30 ou 20 images/s, régulières
   blink() { if (this.blinkT < 0) this.blinkT = performance.now(); }
   doWink(side = 1) { this.wink = side; this.winkT = performance.now(); }
   play(name) { this.actions.push({ name, t0: performance.now() }); if (name === 'nod' || name === 'shake') this.blink(); }
@@ -121,33 +129,13 @@ export class Face {
   }
 
   _resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 1.5);
-    this.dpr = dpr; this.W = innerWidth; this.H = innerHeight;
-    this.cv.width = Math.round(this.W * dpr); this.cv.height = Math.round(this.H * dpr);
-    this.cv.style.width = this.W + 'px'; this.cv.style.height = this.H + 'px';
-    // Le visage est dessiné dans un repère virtuel de 1000 × 740 (bouche grande ouverte comprise).
-    this.S = Math.min(this.W / 1000, this.H / 740) * dpr;
-  }
-
-  _makeIris() {
-    const s = 512, c = document.createElement('canvas'); c.width = c.height = s;
-    const g = c.getContext('2d'), r = s / 2;
-    const rg = g.createRadialGradient(r, r, r * 0.18, r, r, r);
-    rg.addColorStop(0, C.irisIn); rg.addColorStop(0.42, C.irisMid); rg.addColorStop(0.86, C.irisOut); rg.addColorStop(1, C.limbal);
-    g.fillStyle = rg; g.beginPath(); g.arc(r, r, r, 0, TAU); g.fill();
-    // Fibres de l'iris (motif fixe, dessiné une fois).
-    for (let i = 0; i < 260; i++) {
-      const a = (i / 260) * TAU + rand(-0.01, 0.01), r0 = r * rand(0.22, 0.36), r1 = r * rand(0.62, 0.97);
-      g.strokeStyle = Math.random() < 0.5 ? 'rgba(255,236,190,0.13)' : 'rgba(90,40,10,0.16)';
-      g.lineWidth = rand(1.2, 3.2); g.beginPath();
-      g.moveTo(r + Math.cos(a) * r0, r + Math.sin(a) * r0);
-      g.quadraticCurveTo(r + Math.cos(a + 0.06) * (r0 + r1) / 2, r + Math.sin(a + 0.06) * (r0 + r1) / 2, r + Math.cos(a) * r1, r + Math.sin(a) * r1);
-      g.stroke();
-    }
-    const ring = g.createRadialGradient(r, r, r * 0.8, r, r, r);
-    ring.addColorStop(0, 'rgba(0,0,0,0)'); ring.addColorStop(1, 'rgba(25,10,2,0.75)');
-    g.fillStyle = ring; g.beginPath(); g.arc(r, r, r, 0, TAU); g.fill();
-    return c;
+    const dpr = Math.min(devicePixelRatio || 1, this.maxDpr);
+    const w = this.cv.clientWidth || innerWidth, h = this.cv.clientHeight || innerHeight;
+    const W = Math.max(2, Math.round(w * dpr)), H = Math.max(2, Math.round(h * dpr));
+    if (W === this.W && H === this.H) return;
+    this.dpr = dpr; this.cv.width = this.W = W; this.cv.height = this.H = H;
+    this.S = Math.min(W / 1000, H / 740);           // repère virtuel 1000 × 740
+    if (this.style.resize) this.style.resize();
   }
 
   _actionOffsets(now) {
@@ -172,25 +160,20 @@ export class Face {
 
   _frame(now) {
     requestAnimationFrame((t) => this._frame(t));
-    if (this.fpsCap < 60 && now - this.lastDraw < 1000 / this.fpsCap - 2) return;
-    this.lastDraw = now;
-    const dt = Math.min((now - this.last) / 1000, 0.05); this.last = now;
+    const div = Math.max(this.fpsDiv, this.style.maxFps === 30 ? 2 : 1);
+    if (++this._n % div) return;
+    const dt = Math.min((now - this.last) / 1000, 0.1); this.last = now;
     const T = (now - this.t0) / 1000;
-
     if (this.emotion && now >= this.emotionUntil) { this.emotion = null; this._applyTargets(); }
 
-    // Regard : cible (personne suivie) ou petites saccades spontanées.
     if (this.lookTarget) {
       if (now > this.nextSaccade) { this.idleLook = [rand(-0.06, 0.06), rand(-0.05, 0.05)]; this.nextSaccade = now + rand(400, 1400); }
       this.lookX.t = this.lookTarget[0] + this.idleLook[0]; this.lookY.t = this.lookTarget[1] + this.idleLook[1];
     } else if (now > this.nextSaccade) {
-      const asleep = this.mood === 'dort';
-      this.idleLook = asleep ? [0, 0.1] : (Math.random() < 0.45 ? [0, 0] : [rand(-0.6, 0.6), rand(-0.35, 0.35)]);
+      this.idleLook = this.mood === 'dort' ? [0, 0.1] : (Math.random() < 0.45 ? [0, 0] : [rand(-0.6, 0.6), rand(-0.35, 0.35)]);
       this.nextSaccade = now + rand(1200, 4200);
       this.lookX.t = this.idleLook[0]; this.lookY.t = this.idleLook[1];
     }
-
-    // Clignements naturels (plus rares quand il somnole, jamais quand il dort).
     if (this.mood !== 'dort' && now > this.nextBlink && this.blinkT < 0) {
       this.blinkT = now; this.nextBlink = now + rand(2200, 6500) + (Math.random() < 0.18 ? -1800 : 0);
     }
@@ -199,181 +182,57 @@ export class Face {
     let wink = 0;
     if (this.winkT >= 0) { const b = (now - this.winkT) / 260; if (b >= 2.2) this.winkT = -1; else wink = b < 1 ? b : (b < 1.2 ? 1 : Math.max(0, 2.2 - b)); }
 
-    // Lèvres : montée rapide, descente plus douce.
-    const tk = this.talkTarget; this.talk += (tk - this.talk) * (tk > this.talk ? 0.55 : 0.28);
-    this.listenShown += ((this.listen >= 0 ? 1 : 0) - this.listenShown) * 0.08;
+    const kt = 1 - Math.exp(-dt * (this.talkTarget > this.talk ? 48 : 20));       // lèvres indépendantes de la cadence
+    this.talk += (this.talkTarget - this.talk) * kt;
+    this.listenShown += ((this.listen >= 0 ? 1 : 0) - this.listenShown) * (1 - Math.exp(-dt * 5));
 
     for (const k in this.p) this.p[k].step(dt);
     this.lookX.step(dt); this.lookY.step(dt);
-    // Dérive lente du visage entier : vie + protection contre le marquage de l'écran.
-    const sleepy = this.mood === 'dort' || this.mood === 'somnolent';
-    const drift = sleepy ? 1 : 0.35;
+    const sleepy = this.mood === 'dort' || this.mood === 'somnolent', drift = sleepy ? 1 : 0.35;
     this.headX.t = this.lookX.v * 26 + Math.sin(T / 37) * 38 * drift + Math.sin(T / 11.3) * 6;
     this.headY.t = this.lookY.v * 14 + Math.sin(T / 53) * 22 * drift + Math.cos(T / 13.7) * 4;
     this.headX.step(dt); this.headY.step(dt);
 
-    this._draw(T, now, blink, wink);
+    this._draw(T, now, dt, blink, wink);
   }
 
-  _draw(T, now, blink, wink) {
+  _draw(T, now, dt, blink, wink) {
     const g = this.ctx, P = {}; for (const k in this.p) P[k] = this.p[k].v;
     const o = this._actionOffsets(now);
     const lx = clamp(this.lookX.v + o.lx, -1.2, 1.2), ly = clamp(this.lookY.v, -1.2, 1.2);
-    const sleepy = this.mood === 'dort';
-    const breath = 1 + (sleepy ? 0.018 : 0.01) * Math.sin(T * TAU / (sleepy ? 5.5 : 4.2));
+    const asleep = this.mood === 'dort';
+    const breath = 1 + (asleep ? 0.018 : 0.01) * Math.sin(T * TAU / (asleep ? 5.5 : 4.2));
+    const openBase = clamp(P.open - o.close, 0, 1.05) * (1 - blink);
+    const st = {
+      T, now, dt, P, o, lx, ly, mood: this.mood, emotion: this.emotion, sleepy: asleep,
+      openL: openBase * (this.winkT >= 0 && this.wink === -1 ? 1 - wink : 1),
+      openR: openBase * (this.winkT >= 0 && this.wink === 1 ? 1 - wink : 1),
+      talk: this.talk, roundTalk: this.roundTalk, headVX: this.headX.vel,
+      S: this.S * (breath + o.scale), cx: this.W / 2, cy: this.H / 2 - 25 * this.S,
+      hx: this.headX.v + o.hx, hy: this.headY.v + o.hy + (asleep ? 18 : 0), rot: P.headRot + o.rot + lx * 0.03,
+    };
+    const head = () => { g.setTransform(st.S, 0, 0, st.S, st.cx, st.cy); g.translate(st.hx, st.hy); g.rotate(st.rot); };
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.filter = 'none';
+    g.fillStyle = this.style.bg || '#000'; g.fillRect(0, 0, this.W, this.H);
+    head(); this.style.draw(g, st);
+    if (asleep) { head(); this._zzz(g, now); }
 
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.fillStyle = '#000'; g.fillRect(0, 0, this.cv.width, this.cv.height);
-    const S = this.S * (breath + o.scale);
-    g.setTransform(S, 0, 0, S, this.cv.width / 2, this.cv.height / 2 - 25 * S);
-    g.translate(this.headX.v + o.hx, this.headY.v + o.hy + (sleepy ? 18 : 0));
-    g.rotate(P.headRot + o.rot + lx * 0.03);
-
-    // Joues
-    if (P.blush > 0.02) {
-      for (const i of [-1, 1]) {
-        const cx = i * 262 + lx * 18, cy = 110 + ly * 8;
-        const rg = g.createRadialGradient(cx, cy, 0, cx, cy, 105);
-        rg.addColorStop(0, `rgba(${C.blush},${0.85 * P.blush})`); rg.addColorStop(1, `rgba(${C.blush},0)`);
-        g.fillStyle = rg; g.fillRect(cx - 110, cy - 110, 220, 220);
-      }
-    }
-
-    const openBase = clamp(P.open - o.close, 0, 1.05);
-    for (const i of [-1, 1]) {
-      let open = openBase * (1 - blink);
-      if (this.winkT >= 0 && i === this.wink) open *= (1 - wink);
-      this._eye(g, i, P, lx, ly, open, o);
-    }
-    this._brows(g, P, lx, ly, o);
-    this._mouth(g, P, lx, ly, o);
-    if (sleepy) this._zzz(g, T, now);
-
-    // Indicateur d'écoute discret (bas de l'écran), seulement en conversation.
-    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
     if (this.listenShown > 0.02) {
-      const lvl = Math.max(0, this.listen), w = this.cv.width * (0.08 + 0.35 * Math.min(1, lvl * 2.2));
-      const cx = this.cv.width / 2, cy = this.cv.height + 6 * this.dpr;
+      const rgb = this.style.listenRGB || '255,190,110';
+      const lvl = Math.max(0, this.listen), w = this.W * (0.08 + 0.35 * Math.min(1, lvl * 2.2));
+      const cx = this.W / 2, cy = this.H + 6 * this.dpr;
       const rg = g.createRadialGradient(cx, cy, 0, cx, cy, w);
-      rg.addColorStop(0, `rgba(${C.listen},${0.33 * this.listenShown})`); rg.addColorStop(1, `rgba(${C.listen},0)`);
+      rg.addColorStop(0, `rgba(${rgb},${0.33 * this.listenShown})`); rg.addColorStop(1, `rgba(${rgb},0)`);
       g.fillStyle = rg; g.fillRect(cx - w, cy - w, 2 * w, w);
     }
-    // Luminosité globale (veille) : voile noir — sur AMOLED, le noir = pixels éteints.
-    const b = clamp(P.bright, 0.03, 1);
-    if (b < 0.995) { g.fillStyle = `rgba(0,0,0,${1 - b})`; g.fillRect(0, 0, this.cv.width, this.cv.height); }
+    const b = clamp(P.bright, 0.03, 1);           // veille : voile noir (sur AMOLED, noir = pixels éteints)
+    if (b < 0.995) { g.fillStyle = `rgba(0,0,0,${1 - b})`; g.fillRect(0, 0, this.W, this.H); }
   }
 
-  _eye(g, i, P, lx, ly, open, o) {
-    const sx = 1 - 0.09 * lx * i;                       // perspective : l'œil éloigné rétrécit
-    const sc = P.eyeScale + o.eye;
-    const rx = 118 * sc * sx, ry = 144 * sc;
-    const ex = i * 196 + lx * 16, ey = -52 + ly * 10;
-
-    // Ouverture = intersection de l'ovale de l'œil et de l'espace entre les paupières (pas de liseré).
-    const yl = ey - ry * 1.08 + (1 - open) * ry * 2.16;
-    const tilt = P.tilt * ry * 0.42;
-    const inner = ex - i * rx * 1.08, outer = ex + i * rx * 1.08;
-    const arch = ry * 0.42 * clamp(open, 0, 1);
-    const lw = clamp(P.lower, 0, 1), yb = ey + ry * 1.08 - lw * ry * 0.95;
-    const upperLid = (dy = 0) => { g.moveTo(inner, yl + tilt + dy); g.quadraticCurveTo(ex, yl - arch + dy, outer, yl - tilt + dy); };
-    const closed = clamp(1 - open * 5, 0, 1);
-
-    if (yb - (yl - arch) > 2 && open > 0.02) {
-    g.save();
-    g.beginPath(); g.ellipse(ex, ey, rx, ry, 0, 0, TAU); g.clip();
-    g.beginPath(); upperLid(); g.lineTo(outer, yb); g.quadraticCurveTo(ex, yb - lw * ry * 0.55, inner, yb); g.closePath(); g.clip();
-    // Blanc de l'œil
-    const sg = g.createRadialGradient(ex - rx * 0.25, ey - ry * 0.3, ry * 0.1, ex, ey, ry * 1.02);
-    sg.addColorStop(0, C.scleraIn); sg.addColorStop(0.72, C.scleraOut); sg.addColorStop(1, C.scleraEdge);
-    g.fillStyle = sg; g.fillRect(ex - rx, ey - ry, 2 * rx, 2 * ry);
-    // Iris + pupille
-    const ri = rx * 0.64 / sx * 0.98, ix = ex + lx * rx * 0.36, iy = ey + ly * ry * 0.3;
-    g.save(); g.translate(ix, iy); g.scale(sx * (1 - Math.abs(lx) * 0.06), 1 - Math.abs(ly) * 0.05);
-    g.drawImage(this.irisTex, -ri, -ri, 2 * ri, 2 * ri);
-    const pr = ri * 0.42 * clamp(P.pupil, 0.55, 1.5);
-    const pg = g.createRadialGradient(0, 0, pr * 0.6, 0, 0, pr * 1.08);
-    pg.addColorStop(0, '#050201'); pg.addColorStop(1, 'rgba(5,2,1,0)');
-    g.fillStyle = pg; g.beginPath(); g.arc(0, 0, pr * 1.08, 0, TAU); g.fill();
-    g.restore();
-    // Reflets (la source de lumière reste fixe : léger décalage inverse au regard)
-    g.fillStyle = 'rgba(255,255,255,0.92)';
-    g.beginPath(); g.ellipse(ix - ri * 0.36 - lx * ri * 0.08, iy - ri * 0.4, ri * 0.2, ri * 0.17, -0.5, 0, TAU); g.fill();
-    g.fillStyle = 'rgba(255,255,255,0.7)';
-    g.beginPath(); g.arc(ix + ri * 0.32 - lx * ri * 0.06, iy + ri * 0.3, ri * 0.075, 0, TAU); g.fill();
-
-    // Ombre douce de la paupière supérieure sur le globe
-    g.lineCap = 'butt';
-    g.strokeStyle = 'rgba(0,0,0,0.16)'; g.lineWidth = 46; g.beginPath(); upperLid(); g.stroke();
-    g.strokeStyle = 'rgba(0,0,0,0.22)'; g.lineWidth = 20; g.beginPath(); upperLid(); g.stroke();
-    if (lw > 0.05) { g.strokeStyle = `rgba(0,0,0,${0.2 * lw})`; g.lineWidth = 22; g.beginPath(); g.moveTo(outer, yb); g.quadraticCurveTo(ex, yb - lw * ry * 0.55, inner, yb); g.stroke(); }
-    g.restore();
-    }
-
-    // Œil fermé : un trait lumineux en arc (sommeil, clin d'œil)
-    if (closed > 0.01) {
-      g.strokeStyle = `rgba(243,235,221,${0.9 * closed})`; g.lineWidth = 10; g.lineCap = 'round';
-      const yc = ey + ry * 0.35;
-      g.beginPath(); g.moveTo(ex - rx * 0.78, yc - tilt * 0.4 * i);
-      g.quadraticCurveTo(ex, yc + ry * 0.32, ex + rx * 0.78, yc + tilt * 0.4 * i); g.stroke();
-    }
-  }
-
-  _brows(g, P, lx, ly, o) {
-    g.strokeStyle = C.ivoryDim; g.lineCap = 'round';
-    for (const i of [-1, 1]) {
-      const sc = P.eyeScale + o.eye;
-      const bx = i * 196 + lx * 12, by = -52 - 144 * sc - 46 + ly * 6;
-      const up = (P.browY + o.brow) * 42 + P.browAsym * i * 30;
-      const tl = P.browTilt * 24;
-      const xi = bx - i * 74, xo = bx + i * 74;
-      const yi = by - up + tl, yo = by - up - tl * 0.6;
-      g.lineWidth = 19;
-      g.beginPath(); g.moveTo(xi, yi); g.quadraticCurveTo(bx, Math.min(yi, yo) - 16 + Math.abs(P.browTilt) * 8, xo, yo); g.stroke();
-    }
-  }
-
-  _mouth(g, P, lx, ly, o) {
-    const mx = lx * 14, my = 214 + ly * 8;
-    const talk = this.talk;
-    const open = clamp(P.mouthO + talk * 0.95 + o.mouth, 0, 1.1);
-    const round = clamp(P.round + this.roundTalk * talk * 0.8 + o.mouth * 0.8, 0, 1);
-    let w = 92 * P.mouthW * (1 - round * 0.5 * Math.min(1, open * 2 + 0.2)) * (1 - Math.abs(lx) * 0.06);
-    const s = P.smile;
-    const corner = -s * 16;
-    g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = C.ivory;
-    if (open < 0.04) {
-      g.lineWidth = 11;
-      g.beginPath(); g.moveTo(mx - w, my + corner); g.quadraticCurveTo(mx, my + s * 40, mx + w, my + corner); g.stroke();
-      return;
-    }
-    // Bouche ouverte : lèvre haute et lèvre basse échantillonnées ; « o » quand elle s'arrondit.
-    const h = open * 118, N = 22, ups = [], los = [];
-    const ex = lerp(1.0, 0.5, round);                       // 1 = parabole (sourire large), 0.5 = ellipse (« o »)
-    for (let k = 0; k <= N; k++) {
-      const x = -1 + 2 * k / N, base = 1 - x * x, sh = Math.pow(Math.max(base, 0), ex);
-      const yU = my + corner + (s * 34 - h * 0.12) * base - round * h * 0.38 * sh;
-      ups.push([mx + x * w, yU]);
-      los.push([mx + x * w, yU + h * sh + round * h * 0.2 * sh]);
-    }
-    const shape = () => { g.beginPath(); g.moveTo(...ups[0]); for (const p of ups) g.lineTo(...p); for (let k = N; k >= 0; k--) g.lineTo(...los[k]); g.closePath(); };
-    shape(); g.save(); g.clip();
-    g.fillStyle = C.mouthIn; g.fillRect(mx - w - 5, my - 200, 2 * w + 10, 420);
-    if (open > 0.22) {
-      const bot = los[N / 2][1];
-      g.fillStyle = C.tongue; g.beginPath(); g.ellipse(mx, bot + h * 0.08, w * 0.6, h * 0.42, 0, 0, TAU); g.fill();
-    }
-    if (s > 0.45 && open > 0.18) {       // dents du haut quand il rit
-      g.fillStyle = 'rgba(250,246,238,0.96)';
-      g.beginPath(); g.moveTo(...ups[0]); for (const p of ups) g.lineTo(p[0], p[1]);
-      for (let k = N; k >= 0; k--) g.lineTo(ups[k][0], ups[k][1] + 14 + h * 0.1); g.closePath(); g.fill();
-    }
-    g.restore();
-    shape(); g.lineWidth = 9; g.stroke();
-  }
-
-  _zzz(g, T, now) {
+  _zzz(g, now) {
     if (now > this.nextZ) { this.zs.push({ t0: now, x: rand(260, 330), s: rand(0.8, 1.2) }); this.nextZ = now + rand(1600, 2600); }
-    g.fillStyle = C.ivory; g.textAlign = 'center';
+    g.fillStyle = this.style.ink || '#F3EBDD'; g.textAlign = 'center';
     this.zs = this.zs.filter((z) => {
       const t = (now - z.t0) / 4000; if (t >= 1) return false;
       g.globalAlpha = Math.sin(t * Math.PI) * 0.55;
