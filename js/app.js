@@ -10,7 +10,7 @@ import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
@@ -84,9 +84,18 @@ class App {
     if (this.ear.ready || this._earLoading) return;
     this._earLoading = true;
     try {
-      let shown = false;
-      this.ear.onProgress = (p) => { if (p < 1 && (!shown || Math.random() < 0.05)) { shown = true; this.badge(`J'apprends mon prénom… ${Math.round(p * 100)} %`, 4000); } };
+      // Message seulement si le chargement dure (la 1re fois : 46 Mo à télécharger ; ensuite, il vient de la mémoire de la tablette).
+      const t0 = performance.now(); let lastPct = -1;
+      const slow = () => performance.now() - t0 > 1500;
+      this.ear.onProgress = (p) => {
+        const pct = Math.min(99, Math.floor(p * 20) * 5);
+        if (!slow() || pct === lastPct) return;
+        lastPct = pct; this.badge(`Je télécharge mon oreille (1re fois seulement)… ${pct} %`, 60000);
+      };
+      const prep = () => { if (!this.ear.ready) this.badge('Je prépare mon oreille… encore quelques secondes', 60000); };
+      this.ear.onPhase = () => { if (slow()) prep(); else setTimeout(prep, 2500); };
       await this.ear.load(MODEL_PARTS);
+      this.log(`Oreille chargée en ${((performance.now() - t0) / 1000).toFixed(1)} s`);
       this.ear.onWake = (w) => this._onWakeWord(w);
       this.ear.onHeard = (t) => { if (this.earTest) this.ui.earHeard(t); };
       this.ear.setSensitivity(this.settings.sensitivity);
@@ -95,7 +104,7 @@ class App {
       this.face.play('wake');
     } catch (e) {
       this.log('Oreille locale indisponible : ' + e.message);
-      this.badge("Mon oreille n'a pas chargé — touche-moi pour me parler", 8000);
+      this.badge("Mon oreille n'a pas chargé — touche-moi pour me parler", 15000, true);
     } finally { this._earLoading = false; }
   }
 
