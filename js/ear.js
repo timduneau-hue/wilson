@@ -20,26 +20,37 @@ export class Ear {
   constructor(name = 'wilson') {
     this.name = name.toLowerCase(); this.model = null; this.rec = null;
     this.active = false; this.ready = false; this.sens = SENS.normale;
-    this.onWake = null; this.onHeard = null; this.onProgress = null;
+    this.onWake = null; this.onHeard = null; this.onProgress = null; this.onPhase = null;
     this._chunk = []; this._chunkLen = 0; this._seenAt = 0; this._cooldown = 0;
   }
   setSensitivity(k) { this.sens = SENS[k] || SENS.normale; }
 
   async load(parts) {
     if (!window.Vosk) throw new Error('Moteur Vosk absent');
-    // Le modèle est découpé en morceaux (hébergement) : on les télécharge (ou on les reprend du cache) puis on les recolle.
-    const blobs = []; let done = 0;
-    const sizes = await Promise.all(parts.map(async (u) => {
-      try { const h = await fetch(u, { method: 'HEAD' }); return +h.headers.get('content-length') || 0; } catch { return 0; }
-    }));
-    const total = sizes.reduce((a, b) => a + b, 0) || 1;
-    for (const u of parts) {
+    // Le modèle est découpé en morceaux (hébergement) : on les reprend de la mémoire de la tablette,
+    // sinon on les télécharge (une seule fois) en les y rangeant, puis on les recolle.
+    let cache = null; try { cache = await caches.open('wilson-lourd-v1'); } catch (_) {}
+    const hits = await Promise.all(parts.map((u) => (cache ? cache.match(u).catch(() => null) : null)));
+    const blobs = []; let done = 0, total = 1;
+    if (hits.some((h) => !h)) {
+      const sizes = await Promise.all(parts.map(async (u, i) => {
+        if (hits[i]) return 0;
+        try { const h = await fetch(u, { method: 'HEAD', cache: 'no-store' }); return +h.headers.get('content-length') || 0; } catch { return 0; }
+      }));
+      total = sizes.reduce((a, b) => a + b, 0) || 1;
+    }
+    for (let i = 0; i < parts.length; i++) {
+      const u = parts[i];
+      if (hits[i]) { blobs.push(await hits[i].blob()); continue; }
       const res = await fetch(u); if (!res.ok) throw new Error('Modèle introuvable : ' + u);
+      const saving = cache ? cache.put(u, res.clone()).catch(() => {}) : null;     // rangé en mémoire pendant le téléchargement
       const reader = res.body.getReader(), chunks = [];
       for (;;) { const { done: d, value } = await reader.read(); if (d) break; chunks.push(value); done += value.length; this.onProgress && this.onProgress(Math.min(1, done / total)); }
       blobs.push(new Blob(chunks));
+      if (saving) await saving;
     }
     const url = URL.createObjectURL(new Blob(blobs, { type: 'application/gzip' }));
+    this.onPhase && this.onPhase('init');          // décompression + mise en route du moteur (quelques secondes)
     this.model = await window.Vosk.createModel(url);
     this.model.setLogLevel(-2);
     this._newRecognizer();
