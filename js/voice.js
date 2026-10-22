@@ -1,72 +1,78 @@
 // Wilson — voix du mode économique : synthèse vocale de la tablette (gratuite, sans quota).
-// Les phrases sont lues une par une (Chrome coupe parfois les textes longs) ; la bouche est animée par un rythme de syllabes.
+// Les phrases sont lues une par une, dès qu'elles arrivent (lecture en flux) ; la bouche suit un rythme de syllabes.
 
 export class Voice {
   constructor() {
     this.ok = 'speechSynthesis' in window;
-    this.speaking = false; this.voiceName = ''; this._gen = 0; this._t0 = 0; this._pulse = 0;
-    if (this.ok) speechSynthesis.addEventListener?.('voiceschanged', () => { this._voices = null; });
+    this.speaking = false; this.voiceName = ''; this._gen = 0; this._t0 = 0; this._pulse = 0; this._session = null;
   }
 
-  // Voix françaises disponibles (les voix Google du téléphone en premier).
+  // Voix françaises disponibles : voix installées sur la tablette d'abord (plus rapides à démarrer).
   voices() {
     if (!this.ok) return [];
-    const all = speechSynthesis.getVoices().filter((v) => /^fr([-_]|$)/i.test(v.lang));
-    return all.sort((a, b) => score(b) - score(a));
+    return speechSynthesis.getVoices().filter((v) => /^fr([-_]|$)/i.test(v.lang)).sort((a, b) => score(b) - score(a));
   }
-  _pick() {
-    const vs = this.voices();
-    return vs.find((v) => v.name === this.voiceName) || vs[0] || null;
+  _pick() { const vs = this.voices(); return vs.find((v) => v.name === this.voiceName) || vs[0] || null; }
+
+  // Lecture en flux : push(phrase) autant de fois que nécessaire, puis end(). done se résout à la fin ou à l'arrêt.
+  stream({ rate = 1.06, pitch = 1.02 } = {}) {
+    this.cancel();
+    const gen = ++this._gen, self = this;
+    let queued = 0, finished = 0, ended = false, settled = false, watchdog = null, resolveDone, rejectDone;
+    const done = new Promise((res, rej) => { resolveDone = res; rejectDone = rej; });
+    const settle = (err) => {
+      if (settled) return; settled = true; clearTimeout(watchdog);
+      if (gen === self._gen) self.speaking = false;
+      if (self._session === session) self._session = null;
+      err ? rejectDone(err) : resolveDone();
+    };
+    const maybeDone = () => { if (ended && finished >= queued) settle(); };
+    const arm = () => {                                  // filet de sécurité : « onend » n'arrive pas toujours sur Android
+      clearTimeout(watchdog);
+      watchdog = setTimeout(function check() {
+        if (settled || gen !== self._gen) return;
+        if (!speechSynthesis.speaking && !speechSynthesis.pending) { finished = queued; maybeDone(); }
+        else watchdog = setTimeout(check, 400);
+      }, 2500);
+    };
+    const session = {
+      done,
+      push(text) {
+        if (settled || gen !== self._gen || !self.ok) return;
+        for (const part of splitSentences(text)) {
+          const u = new SpeechSynthesisUtterance(part);
+          const v = self._pick(); if (v) { try { u.voice = v; } catch (_) {} }
+          u.lang = (v && v.lang) || 'fr-FR'; u.rate = rate; u.pitch = pitch;
+          let counted = false;
+          const fin = () => { if (counted) return; counted = true; finished++; arm(); maybeDone(); };
+          u.onboundary = () => { self._pulse = 1; };
+          u.onend = fin;
+          u.onerror = (e) => {
+            if (e.error === 'interrupted' || e.error === 'canceled') return settle();
+            if (e.error === 'not-allowed') return settle({ code: 'not-allowed' });
+            fin();
+          };
+          queued++;
+          if (!self.speaking) { self.speaking = true; self._t0 = performance.now(); }
+          try { speechSynthesis.speak(u); } catch (e) { fin(); }
+        }
+        arm();
+      },
+      end() { ended = true; maybeDone(); },
+      cancel() { settle(); },
+    };
+    this._session = session;
+    if (!this.ok) settle({ code: 'unsupported' });
+    return session;
   }
 
-  // Lit le texte ; se résout à la fin (ou à l'arrêt). Rejette { code: 'not-allowed' } si le navigateur refuse.
-  speak(text, { rate = 1.04, pitch = 1.02 } = {}) {
-    if (!this.ok) return Promise.reject({ code: 'unsupported' });
-    this.cancel();
-    const gen = ++this._gen, parts = splitSentences(text);
-    if (!parts.length) return Promise.resolve();
-    this.speaking = true; this._t0 = performance.now();
-    return new Promise((resolve, reject) => {
-      let i = 0, watchdog;
-      let settled = false;
-      const done = (err) => {                     // se résout toujours, même après une coupure (sinon Wilson resterait « occupé »)
-        clearTimeout(watchdog); if (settled) return; settled = true;
-        if (gen === this._gen) this.speaking = false;
-        if (this._finish === finish) this._finish = null;
-        err ? reject(err) : resolve();
-      };
-      const finish = () => done();
-      this._finish = finish;
-      const next = () => {
-        if (gen !== this._gen) return done();
-        if (i >= parts.length) return done();
-        const u = new SpeechSynthesisUtterance(parts[i++]);
-        const v = this._pick(); if (v) { try { u.voice = v; } catch (_) {} }
-        u.lang = (v && v.lang) || 'fr-FR'; u.rate = rate; u.pitch = pitch;
-        u.onboundary = () => { this._pulse = 1; };
-        let moved = false;                          // « onend » et le filet de sécurité ne doivent passer qu'une fois
-        const go = () => { if (moved) return; moved = true; clearTimeout(watchdog); try { next(); } catch (e) { done({ code: 'erreur', message: e.message }); } };
-        u.onend = go;
-        u.onerror = (e) => {
-          clearTimeout(watchdog); moved = true;
-          if (e.error === 'interrupted' || e.error === 'canceled') return done();
-          done({ code: e.error || 'erreur' });
-        };
-        // Filet de sécurité : sur certains Android, « onend » n'arrive jamais.
-        const est = 1500 + u.text.length * 85 / rate;
-        const check = () => { if (gen !== this._gen || moved) return; if (!speechSynthesis.speaking && !speechSynthesis.pending) go(); else watchdog = setTimeout(check, 400); };
-        watchdog = setTimeout(check, est);
-        speechSynthesis.speak(u);
-      };
-      try { next(); } catch (e) { done({ code: 'erreur', message: e.message }); }
-    });
-  }
+  speak(text, opts) { const s = this.stream(opts); s.push(text); s.end(); return s.done; }
 
   cancel() {
     this._gen++; this.speaking = false;
-    const f = this._finish; this._finish = null;
+    const s = this._session; this._session = null;
     if (this.ok) speechSynthesis.cancel();
-    if (f) f();
+    if (s) s.cancel();
   }
 
   // Ouverture de la bouche simulée (0..1) pendant la parole.
@@ -82,13 +88,12 @@ export class Voice {
 function score(v) {
   let s = 0;
   if (/fr[-_]FR/i.test(v.lang)) s += 4;
-  if (/google/i.test(v.name)) s += 3;
-  if (v.localService) s += 1;
-  if (/network|réseau|neural|natural/i.test(v.name)) s += 1;
+  if (v.localService) s += 3;
+  if (/google/i.test(v.name)) s += 2;
   return s;
 }
 
-function splitSentences(text) {
+export function splitSentences(text) {
   const clean = (text || '').replace(/https?:\/\/\S+/g, '').replace(/[*_#`>|]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!clean) return [];
   const out = [];

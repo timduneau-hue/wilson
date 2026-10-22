@@ -12,10 +12,11 @@ import { loadSettings, SettingsUI } from './settings.js';
 import { Voice } from './voice.js';
 import { EcoBrain, ECO_FORMAT } from './eco.js';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
+const ECO_SILENCE_MS = 550;       // mode économique : silence qui marque la fin d'une phrase
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const pad = (n) => String(n).padStart(2, '0');
 const fmtDate = (d = new Date()) => `${JOURS[d.getDay()]} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)}, ${d.getHours()}h${pad(d.getMinutes())}`;
@@ -122,6 +123,7 @@ class App {
     const s = this.settings;
     this.ear.setSensitivity(s.sensitivity);
     if (s.face !== this.face.styleName) this.face.setStyle(s.face);
+    this.eco.setSpeed(s.ecoSpeed);
     if (key === 'apiKey' || key === 'model') {          // nouvelle clé : nouveau quota, on repart de zéro
       this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.eco.modelUsed = null; this.log('Clé ou modèle changé');
     }
@@ -226,7 +228,7 @@ class App {
   // ---------- mode économique ----------
   // Chaque phrase est enregistrée jusqu'au silence, puis envoyée (avec une photo) à Gemini Flash ; la réponse est lue par la tablette.
   _startEco(reason, chunks) {
-    this.mode = 'eco'; this.eco.reset(); this.voice.voiceName = this.settings.ecoVoice || '';
+    this.mode = 'eco'; this.eco.reset(); this.eco.setSpeed(this.settings.ecoSpeed); this.voice.voiceName = this.settings.ecoVoice || '';
     this.pending = null;
     const now = performance.now();
     this.ecoState = { cap: null, busy: false, queue: [] };
@@ -244,21 +246,23 @@ class App {
     if (!E) return;
     if (this.voice.speaking) return;                       // il parle : seule la détection de coupure écoute (voir _wireAudio)
     if (now - this.playEndAt < 400) return;                // fin de sa propre voix
-    const voiced = this.audio.speaking;
     if (E.cap) {
       E.cap.chunks.push(i16); E.cap.len += i16.length;
-      if (voiced) { E.cap.lastVoice = now; this.lastUserSpeech = now; }
-      if ((!voiced && now - E.cap.lastVoice > 650) || E.cap.len > 16000 * 14) { const cap = E.cap; E.cap = null; this._ecoUtterance(cap); }
-    } else if (voiced) {
+      if (now - this.audio.lastVoicedAt < 60) { E.cap.lastVoice = now; this.lastUserSpeech = now; }
+      if (now - E.cap.lastVoice > ECO_SILENCE_MS || E.cap.len > 16000 * 14) { const cap = E.cap; E.cap = null; this._ecoUtterance(cap); }
+    } else if (this.audio.speaking) {
       const pre = this.audio.recent(450);
       E.cap = { chunks: [pre], len: pre.length, lastVoice: now };
     }
   }
 
   _ecoUtterance(cap) {
-    const audio = concat(cap.chunks);
-    if (!cap.wake && audio.length < 16000 * 0.5) return;  // trop court : un bruit
-    this._ecoSend({ audio });
+    const raw = concat(cap.chunks);
+    let audio = trimSilence(raw, this.audio.floor);
+    if (!audio && cap.wake) audio = raw.subarray(Math.max(0, raw.length - 16000 * 6));   // l'oreille a entendu « Wilson » : on envoie quand même
+    if (!audio) { this.log('Rien d\'audible, phrase ignorée'); return; }
+    if (!cap.wake && audio.length < 16000 * 0.45) return;  // trop court : un bruit
+    this._ecoSend({ audio, endAt: cap.lastVoice });
   }
 
   async _ecoSend(req) {
@@ -267,28 +271,48 @@ class App {
     E.busy = true; const conv = this.convId;
     this.face.setEmotion('reflexion', 30000, 0.6);
     this.lastActivity = performance.now();
+    const tSend = performance.now();
+    let sess = null, spoken = 0, emoSet = false, notForMe = false, tFirst = 0, lastTxt = '';
+    const speakChunk = (chunk) => {
+      if (!chunk) return;
+      if (!sess) { sess = this._startSpeech(); tFirst = performance.now(); if (!emoSet) this.face.clearEmotion(); }
+      sess.push(chunk);
+    };
+    // Lecture en flux : Wilson commence à parler dès la première phrase écrite.
+    const onPartial = (pr) => {
+      if (conv !== this.convId) return;
+      if (pr.pourMoi === false) { notForMe = true; return; }
+      if (pr.emotion && !emoSet) { emoSet = true; if (pr.emotion !== 'neutre') this.face.setEmotion(pr.emotion, 6500, 0.9); else this.face.clearEmotion(); }
+      const txt = pr.reponse || ''; lastTxt = txt;
+      const cut = pr.closed ? txt.length : sentenceCut(txt, spoken);
+      if (cut > spoken) { speakChunk(txt.slice(spoken, cut).trim()); spoken = cut; }
+      if (this.settings.subtitles && txt) $('subtitle').textContent = txt.slice(0, 220);
+    };
     try {
       const image = this.vision ? this.vision.snapshot(0.7) : null;
-      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, image, text: req.text });
+      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, image, text: req.text, onPartial });
       if (conv !== this.convId) return;
-      this.face.clearEmotion();
+      if (!emoSet) { this.face.clearEmotion(); if (out.emotion && out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9); }
       for (const f of out.memoriser) { this.memory.add(f); this.log('Retenu : ' + f); }
       if (out.oublier) { const g = this.memory.forget(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}`); }
-      if (out.emotion && out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9);
       const g = { oui: 'nod', non: 'shake', sautiller: 'bounce', pencher_la_tete: 'tilt' }[out.geste];
       if (g) this.face.play(g); if (out.geste === 'clin_oeil') this.face.doWink(1);
       if (out.memoriser.length && !g) this.face.play('nod');
-      if (!out.pourMoi || !out.reponse) {
-        this.log(`Pas pour moi : « ${out.entendu.slice(0, 80)} »`);
+      const ms = (t) => ((t - (req.endAt || tSend)) / 1000).toFixed(1);
+      if (!out.pourMoi || notForMe || !out.reponse) {
+        this.log(`Pas pour moi : « ${out.entendu.slice(0, 80)} » (${ms(performance.now())} s, ${out.model})`);
+        if (sess) sess.end();
       } else {
-        this.log(`Entendu : « ${out.entendu.slice(0, 100)} » → Wilson (${out.model}) : ${out.reponse.slice(0, 120)}`);
+        if (!spoken) speakChunk(out.reponse);                       // réponse hors format : on la dit d'un bloc
+        this.log(`« ${out.entendu.slice(0, 90)} » → ${out.reponse.slice(0, 110)}`);
+        this.log(`Latence : ${ms(tFirst || performance.now())} s avant la 1re phrase, ${ms(performance.now())} s au total (${out.model}, audio ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
         this.memory.addExchange(out.entendu, out.reponse);
         if (this.settings.subtitles) $('subtitle').textContent = out.reponse.slice(0, 220);
-        await this._say(out.reponse);
-        if (conv !== this.convId) return;
       }
+      if (sess) { sess.end(); await this._endSpeech(sess, out.reponse); if (conv !== this.convId) return; }
       if (out.fin) setTimeout(() => conv === this.convId && this.endConversation('au revoir'), 600);
     } catch (e) {
+      if (sess) sess.cancel();
       if (conv !== this.convId) return;
       this.face.clearEmotion(); this.log('Mode économique : ' + e.message);
       if (e.quota) {
@@ -307,19 +331,27 @@ class App {
     }
   }
 
-  async _say(text) {
+  _startSpeech() {
     this.barge.n = 0; this.barge.echo = Math.max(-60, this.audio.db);
     this.lastActivity = performance.now();
-    try { await this.voice.speak(text); }
+    return this.voice.stream();
+  }
+  async _endSpeech(sess, text) {
+    try { await sess.done; }
     catch (e) {
       this.log('Voix : ' + (e.code || e));
       if (e.code === 'not-allowed') {
         this.badge('Touche-moi une fois pour que je puisse parler à voix haute', 10000, true);
-        const st = $('subtitle'); st.hidden = false; st.textContent = text.slice(0, 220);
+        const st = $('subtitle'); st.hidden = false; st.textContent = (text || '').slice(0, 220);
         setTimeout(() => { st.hidden = !this.settings.subtitles; }, 8000);
       }
     }
     this.playEndAt = performance.now(); this.lastActivity = this.playEndAt; this.face.setTalk(0);
+  }
+
+  async _say(text) {
+    const sess = this._startSpeech(); sess.push(text); sess.end();
+    await this._endSpeech(sess, text);
   }
 
   // Quota gratuit épuisé : pause jusqu'au délai indiqué par Google, sinon jusqu'à la remise à zéro quotidienne
@@ -573,7 +605,6 @@ Nous sommes ${fmtDate()}.${bat}`;
     else if (this.voice.speaking) f.setTalk(this.voice.mouth(now), 0.25);
     if (this.state === 'conversation') {
       const E = this.ecoState, thinking = E && (E.busy || E.cap);
-      f.setListen(this.speaking || (E && E.busy) ? -1 : this.audio.level);
       if (this.mode === 'live' && (this.audio.speaking || now - this.lastUserSpeech < 1500)) this._sendFrame(false);
       // R3 : la conversation se ferme d'elle-même après un silence.
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
@@ -605,6 +636,29 @@ function quotaInfo(msg, what) {
   if (m && +m[1] < 3600) return { until: now + Math.ceil(+m[1]) * 1000, txt: `Google me demande de patienter ${Math.ceil(+m[1])} s (limite par minute du compte gratuit).` };
   const until = nextPacificMidnight(), d = new Date(until);
   return { until, txt: `Mon quota gratuit Google pour ${what} est épuisé pour aujourd'hui. Je pourrai reparler à ${d.getHours()}h${String(d.getMinutes()).padStart(2, '0')}.` };
+}
+
+// Fin de la dernière phrase complète après « from » (ponctuation suivie d'un espace), ou d'un long morceau à une virgule.
+function sentenceCut(txt, from) {
+  let cut = from;
+  const re = /[.!?…](?=\s)/g; re.lastIndex = from; let m;
+  while ((m = re.exec(txt))) cut = m.index + 1;
+  if (cut === from && txt.length - from > 140) { const c = txt.lastIndexOf(', ', txt.length - 1); if (c > from + 40) cut = c + 1; }
+  return cut;
+}
+
+// Retire les silences du début et de la fin (envoi plus léger, réponse plus rapide). null si rien d'audible.
+function trimSilence(i16, floorDb) {
+  const W = 320, n = Math.floor(i16.length / W); if (n < 3) return i16;
+  const thr = Math.max(-58, floorDb + 8); let first = -1, last = -1;
+  for (let k = 0; k < n; k++) {
+    let e = 0; for (let j = k * W; j < (k + 1) * W; j++) { const v = i16[j] / 32768; e += v * v; }
+    const db = 10 * Math.log10(e / W + 1e-12);
+    if (db > thr) { if (first < 0) first = k; last = k; }
+  }
+  if (first < 0) return null;
+  const a = Math.max(0, (first - 15) * W), b = Math.min(i16.length, (last + 13) * W);
+  return i16.subarray(a, b);
 }
 
 function shorten(m) { m = (m || 'erreur inconnue').replace(/\s+/g, ' ').trim(); return m.length > 140 ? m.slice(0, 137) + '…' : m; }
