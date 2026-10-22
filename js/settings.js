@@ -55,7 +55,14 @@ export class SettingsUI {
       const st = $('s-keystatus'); st.hidden = false; st.className = 'status'; st.textContent = 'Vérification auprès de Google…';
       const r = await checkKey($('s-key').value);
       st.className = 'status ' + (r.ok ? 'ok' : r.ok === false ? 'err' : ''); st.innerHTML = keyMessage(r);
-      if (r.ok !== false) { this.s.apiKey = cleanKey($('s-key').value); saveSettings(this.s); app.brain.authMode = null; }
+      if (r.ok === false) return;
+      this.s.apiKey = cleanKey($('s-key').value); saveSettings(this.s); app.brain.authMode = app.brain.modelUsed = app.brain.level = null;
+      st.innerHTML += '<br>Test de la connexion à Gemini…';
+      const c = await app.testConnection();
+      st.className = 'status ' + (c.ok ? 'ok' : 'err');
+      st.innerHTML = keyMessage(r) + '<br>' + (c.ok ? `Connexion à Gemini réussie ✓ <em>(${esc(c.msg)})</em>`
+        : `Connexion à Gemini impossible : « ${esc(c.msg)} »`);
+      app.log('Test connexion : ' + (c.ok ? 'OK ' : 'échec ') + c.msg);
     };
     bind('s-voice', 'voice'); bind('s-earmode', 'earMode'); bind('s-sens', 'sensitivity');
     bind('s-timeout', 'convTimeout', Number); bind('s-barge', 'bargeIn');
