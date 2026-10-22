@@ -40,7 +40,7 @@ async function ephemeralToken(key) {
   return j.name;
 }
 
-const FALLBACK_MODEL = 'gemini-3.1-flash-live-preview';
+const FALLBACK_MODELS = ['gemini-3.1-flash-live-preview', 'gemini-2.5-flash-native-audio-preview-12-2025'];
 
 // Niveau 0 = tout ; 1 = sans recherche Google ni options avancées ; 2 = le strict minimum pour parler.
 function buildSetup({ model, voice, system, level, handle }) {
@@ -126,13 +126,13 @@ export class Brain {
     const key = cleanKey(opts.key);
     const first = (arr, v) => (v != null && arr.includes(v) ? [v, ...arr.filter((x) => x !== v)] : arr);
     const auths = first(['key', 'token'], this.authMode);
-    const models = first([...new Set([opts.model, FALLBACK_MODEL])], this.modelUsed);
+    const models = first([...new Set([opts.model, ...FALLBACK_MODELS])], this.modelUsed);
     const levels = first([0, 1, 2], this.level);
     let last, authErr, serverErr, quotaErr, tries = 0;
     auth: for (const mode of auths) {
       for (const model of models) {
         for (const level of levels) {
-          if (++tries > 6) break auth;
+          if (++tries > 7) break auth;
           try {
             const url = mode === 'key'
               ? `${WS_ROOT}BidiGenerateContent?key=${encodeURIComponent(key)}`
@@ -146,7 +146,7 @@ export class Brain {
             last = e; const kind = classify(e); if (e.code && !serverErr) serverErr = e;   // réponse réelle de Google
             this._emit('log', `Essai ${mode}/${model}/niv.${level} → ${kind} : ${e.message}`);
             if (kind === 'auth') { authErr = e; continue auth; }      // la clé ne passe pas ainsi : autre méthode
-            if (kind === 'quota') { e.quota = true; quotaErr = quotaErr || e; break; }   // quota du modèle : modèle de secours, rien d'autre
+            if (kind === 'quota') { e.quota = true; e.model = model; quotaErr = quotaErr || e; break; }   // quota du modèle : modèle de secours, rien d'autre
             if (kind === 'config') continue;                         // un réglage refusé : configuration plus simple
             if (kind === 'model') break;                             // modèle indisponible : modèle de secours
             break auth;                                              // réseau, délai… : inutile d'insister
