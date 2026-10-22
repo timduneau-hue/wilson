@@ -1,6 +1,19 @@
 // Wilson — réglages (stockés sur la tablette) et écrans de configuration.
 
 import { EXPRESSIONS } from './face.js';
+import { checkKey, cleanKey } from './brain.js';
+
+const AISTUDIO = '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>';
+// Message clair selon le résultat de la vérification de la clé.
+export function keyMessage(r) {
+  if (r.ok === true) return r.why === 'quota'
+    ? 'Clé acceptée ✓ (quota momentanément atteint : Wilson pourra répondre dans quelques minutes).'
+    : 'Clé acceptée par Google ✓';
+  if (r.ok === null) return "Je n'ai pas pu joindre Google pour vérifier la clé (réseau). Je la garde quand même.";
+  if (r.why === 'vide') return 'Colle ta clé dans le champ.';
+  if (r.why === 'incomplete') return `Cette clé est incomplète. Sur ${AISTUDIO}, la clé affichée est raccourcie : touche l'icône <b>copier</b> à côté d'elle, puis colle-la ici.`;
+  return `Google refuse cette clé${r.msg ? ` (« ${esc(r.msg)} »)` : ''}. Le plus souvent, ça se règle ainsi : sur ${AISTUDIO}, touche <b>Create API key</b> → <b>Create API key in new project</b>, attends une minute, copie la nouvelle clé avec l'icône <b>copier</b> et colle-la ici.`;
+}
 
 const KEY = 'wilson.settings';
 export const DEFAULTS = {
@@ -37,7 +50,13 @@ export class SettingsUI {
       const el = $(id);
       el.addEventListener('change', () => { this.s[key] = conv(el[prop]); saveSettings(this.s); app.applySettings(key); });
     };
-    bind('s-key', 'apiKey', (v) => v.trim()); bind('s-model', 'model', (v) => v.trim() || 'gemini-3.8-live');
+    bind('s-key', 'apiKey', cleanKey); bind('s-model', 'model', (v) => v.trim() || 'gemini-3.8-live');
+    $('t-key').onclick = async () => {
+      const st = $('s-keystatus'); st.hidden = false; st.className = 'status'; st.textContent = 'Vérification auprès de Google…';
+      const r = await checkKey($('s-key').value);
+      st.className = 'status ' + (r.ok ? 'ok' : r.ok === false ? 'err' : ''); st.innerHTML = keyMessage(r);
+      if (r.ok !== false) { this.s.apiKey = cleanKey($('s-key').value); saveSettings(this.s); app.brain.authMode = null; }
+    };
     bind('s-voice', 'voice'); bind('s-earmode', 'earMode'); bind('s-sens', 'sensitivity');
     bind('s-timeout', 'convTimeout', Number); bind('s-barge', 'bargeIn');
     bind('s-home', 'home'); bind('s-city', 'city'); bind('s-night1', 'nightStart', Number); bind('s-night2', 'nightEnd', Number);
@@ -62,11 +81,18 @@ export class SettingsUI {
     });
 
     // Premier lancement
-    $('w-go').onclick = () => {
-      const k = $('w-key').value.trim();
-      if (!/^AIza[0-9A-Za-z_\-]{20,}$/.test(k) && !confirm('Cette clé ne ressemble pas à une clé Gemini. Continuer quand même ?')) return;
+    $('w-go').onclick = async () => {
+      const btn = $('w-go'), st = $('w-status');
+      const k = cleanKey($('w-key').value);
+      btn.disabled = true; btn.textContent = 'Vérification de la clé…';
+      st.hidden = false; st.className = 'status'; st.textContent = 'Je vérifie la clé auprès de Google…';
+      const r = await checkKey(k);
+      btn.disabled = false; btn.textContent = 'Réveiller Wilson';
+      st.className = 'status ' + (r.ok ? 'ok' : r.ok === false ? 'err' : ''); st.innerHTML = keyMessage(r);
+      if (r.ok === false) return;
       this.s.apiKey = k; this.s.home = $('w-home').value.trim(); saveSettings(this.s);
-      $('welcome').hidden = true; app.start(true);
+      setTimeout(() => { $('welcome').hidden = true; }, r.ok ? 600 : 2500);
+      app.start(true);
     };
   }
 
@@ -90,7 +116,7 @@ export class SettingsUI {
   renderLog() { const el = $('log'); el.textContent = this.app.logs.join('\n'); el.scrollTop = el.scrollHeight; }
   open() { this.fill(); $('settings').hidden = false; this.app.settingsOpen = true; }
   close() { $('settings').hidden = true; this.app.settingsOpen = false; this.app.earTest = false; $('ear-test').hidden = true; $('t-ear').textContent = "Tester l'oreille"; }
-  showWelcome() { $('w-home').value = this.s.home; $('welcome').hidden = false; }
+  showWelcome() { $('w-home').value = this.s.home; $('w-key').value = this.s.apiKey || ''; $('welcome').hidden = false; }
   earHeard(t) { $('ear-heard').textContent = t || '—'; }
   earWake() { const c = $('ear-count'); c.textContent = String(+c.textContent + 1); }
 }

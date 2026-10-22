@@ -2,7 +2,43 @@
 
 import { int16ToBase64, base64ToInt16 } from './audio.js';
 
-const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+const API = 'https://generativelanguage.googleapis.com/v1beta';
+const WS_ROOT = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.';
+const AUTH_RE = /api key|auth|token|credential|permission|unauthenticated|denied|401|403/i;
+
+// Nettoie une clé collée sur mobile (espaces, retours à la ligne, guillemets, caractères invisibles).
+export function cleanKey(k) { return (k || '').replace(/[\s ​-‍﻿"'«»`]/g, ''); }
+
+// Vérifie la clé auprès de Google. Les deux formats sont acceptés : « AQ. » (depuis mai 2026) et « AIza » (ancien).
+// ok: true = acceptée ; false = refusée ; null = impossible de vérifier (réseau).
+export async function checkKey(raw) {
+  const key = cleanKey(raw);
+  if (!key) return { ok: false, why: 'vide' };
+  if (/\.\.\.|…|\*/.test(key) || key.length < 30) return { ok: false, why: 'incomplete' };
+  try {
+    const r = await fetch(`${API}/models?pageSize=1`, { headers: { 'x-goog-api-key': key }, cache: 'no-store' });
+    if (r.ok) return { ok: true };
+    let msg = '', reason = '';
+    try { const j = await r.json(); msg = (j.error && j.error.message) || ''; reason = ((j.error && j.error.details) || []).map((d) => d.reason).filter(Boolean).join(' '); } catch (_) {}
+    if (r.status === 429) return { ok: true, why: 'quota', msg };            // authentifiée, juste limitée
+    return { ok: false, why: 'refused', status: r.status, msg, reason };
+  } catch (e) { return { ok: null, why: 'network', msg: e.message }; }
+}
+
+// Jeton éphémère (méthode recommandée par Google pour les applis côté client) : la clé passe dans un en-tête.
+async function ephemeralToken(key) {
+  const now = Date.now();
+  const r = await fetch(`${API}/auth_tokens`, {
+    method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' }, cache: 'no-store',
+    body: JSON.stringify({ uses: 1, expireTime: new Date(now + 30 * 60000).toISOString(), newSessionExpireTime: new Date(now + 2 * 60000).toISOString() }),
+  });
+  if (!r.ok) {
+    let msg = ''; try { msg = (await r.json()).error.message; } catch (_) {}
+    const e = new Error(msg || `Jeton refusé (${r.status})`); e.auth = r.status === 401 || r.status === 403 || AUTH_RE.test(msg); throw e;
+  }
+  const j = await r.json(); if (!j.name) throw new Error('Jeton vide');
+  return j.name;
+}
 
 export const EMOTIONS = ['neutre', 'joie', 'rire', 'triste', 'surprise', 'colere', 'curieux', 'reflexion',
   'tendresse', 'gene', 'confus', 'peur', 'fier', 'ennui', 'somnolent'];
@@ -34,15 +70,39 @@ export class Brain {
   constructor() {
     this.ws = null; this.ready = false; this.handle = null; this.handlers = {};
     this.inText = ''; this.outText = ''; this._closing = false;
+    this.authMode = null;          // 'key' ou 'token' : la méthode qui a marché, retenue pour la suite
   }
   on(ev, fn) { this.handlers[ev] = fn; }
   _emit(ev, ...a) { const f = this.handlers[ev]; if (f) try { f(...a); } catch (e) { console.error(ev, e); } }
   get open() { return this.ws && this.ws.readyState === 1 && this.ready; }
 
-  connect({ key, model, voice, system, resume = true }) {
+  // Deux façons de se connecter : clé dans l'adresse, ou jeton éphémère obtenu avec la clé.
+  // On essaie la méthode qui a déjà marché, sinon les deux à la suite.
+  async connect(opts) {
+    const key = cleanKey(opts.key);
+    const order = this.authMode === 'token' ? ['token', 'key'] : ['key', 'token'];
+    let last, authErr;
+    for (const mode of order) {
+      try {
+        const url = mode === 'key'
+          ? `${WS_ROOT}BidiGenerateContent?key=${encodeURIComponent(key)}`
+          : `${WS_ROOT}BidiGenerateContentConstrained?access_token=${encodeURIComponent(await ephemeralToken(key))}`;
+        await this._open(url, opts);
+        if (this.authMode !== mode) this._emit('log', `Connexion Gemini par ${mode === 'key' ? 'clé' : 'jeton éphémère'}`);
+        this.authMode = mode; return;
+      } catch (e) {
+        last = e; if (e.auth) authErr = e;
+        this._emit('log', `Méthode « ${mode} » : ${e.message}`);
+        if (!e.auth) break;                     // pas un problème d'identification : inutile d'essayer l'autre méthode
+      }
+    }
+    throw authErr || last;                      // si l'une des méthodes a refusé la clé, c'est ce qu'on signale
+  }
+
+  _open(url, { model, voice, system, resume = true }) {
     return new Promise((resolve, reject) => {
       this._closing = false; this.ready = false;
-      const ws = new WebSocket(`${WS}?key=${encodeURIComponent(key)}`);
+      const ws = new WebSocket(url);
       this.ws = ws;
       const timer = setTimeout(() => { reject(new Error('Délai de connexion dépassé')); try { ws.close(); } catch (_) {} }, 10000);
       ws.onopen = () => {
@@ -77,7 +137,11 @@ export class Brain {
       let setupDone = false;
       ws.onclose = (e) => {
         clearTimeout(timer);
-        if (!setupDone) reject(new Error(e.reason || `Connexion refusée (${e.code})`));
+        if (!setupDone) {
+          const err = new Error(e.reason || `Connexion refusée (${e.code})`);
+          err.auth = AUTH_RE.test(e.reason || '') || (e.code === 1008 && !e.reason);
+          reject(err);
+        }
         if (ws !== this.ws) return;                      // ancienne connexion fermée volontairement
         this.ready = false;
         this._emit('closed', { code: e.code, reason: e.reason, expected: this._closing });
