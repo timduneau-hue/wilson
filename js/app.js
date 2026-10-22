@@ -10,7 +10,7 @@ import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 
-const VERSION = '1.0.3';
+const VERSION = '1.0.4';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
@@ -169,6 +169,10 @@ class App {
     if (this.state === 'eveil' || this.state === 'conversation') return;
     if (!navigator.onLine) { this.face.setEmotion('confus', 3000); this.badge("Pas d'Internet : je ne peux pas répondre", 5000); return; }
     if (!this.settings.apiKey) { this.ui.showWelcome(); return; }
+    if (this.quotaUntil && Date.now() < this.quotaUntil) {         // quota épuisé : on ne gaspille pas d'essais
+      this.face.setEmotion('gene', 3000); this.face.play('shake');
+      this.badge(this.quotaMsg, 8000, true); return;
+    }
     this.setState('eveil'); this.convId = (this.convId || 0) + 1;
     this.pending = reason === 'prenom' ? [this.audio.recent(PREROLL_MS)] : [];
     this.discard = false; this.endAfterSpeech = false; this.brain.handle = null;
@@ -179,7 +183,9 @@ class App {
       this.log('Gemini : ' + e.message);
       this.face.setEmotion('confus', 4000);
       this.lastError = e.message;
+      if (e.quota) this._quotaPause(e.message);
       this.badge(e.auth ? 'Google refuse ma clé — appui long sur moi, puis « Vérifier la clé »'
+        : e.quota ? this.quotaMsg
         : `Je n'arrive pas à joindre mon cerveau : ${shorten(e.message)}`, 15000, true);
       this.setState('veille'); return;
     }
@@ -195,14 +201,32 @@ class App {
     this.lastActivity = performance.now();
   }
 
+  // Quota gratuit épuisé : pause jusqu'au délai indiqué par Google, sinon jusqu'à la remise à zéro quotidienne
+  // (minuit heure du Pacifique, soit 9h00 en France l'été, 8h00 l'hiver).
+  _quotaPause(msg) {
+    const m = /retry in ([\d.]+)\s*s/i.exec(msg || '');
+    const now = Date.now();
+    let until, txt;
+    if (m && +m[1] < 3600) {
+      until = now + Math.ceil(+m[1]) * 1000;
+      txt = `Google me demande de patienter ${Math.ceil(+m[1])} s (limite par minute du compte gratuit).`;
+    } else {
+      until = nextPacificMidnight();
+      const d = new Date(until);
+      txt = `Mon quota gratuit Google est épuisé pour aujourd'hui. Je pourrai reparler à ${d.getHours()}h${String(d.getMinutes()).padStart(2, '0')}.`;
+    }
+    this.quotaUntil = until; this.quotaMsg = txt; this.log('Quota : ' + txt);
+  }
+
   // Diagnostic : ouvre puis referme une connexion Gemini, sans parler.
   async testConnection() {
     if (this.state === 'eveil' || this.state === 'conversation') return { ok: true, msg: 'Déjà en conversation' };
+    this.quotaUntil = 0;
     try {
       await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system() });
       const b = this.brain; this.brain.close();
       return { ok: true, msg: `${b.modelUsed}, ${b.authMode === 'key' ? 'clé' : 'jeton'}, configuration ${['complète', 'simplifiée', 'minimale'][b.level]}` };
-    } catch (e) { return { ok: false, auth: !!e.auth, msg: e.message }; }
+    } catch (e) { if (e.quota) this._quotaPause(e.message); return { ok: false, auth: !!e.auth, quota: !!e.quota, msg: e.quota ? this.quotaMsg + ' (' + e.message + ')' : e.message }; }
   }
 
   endConversation(why) {
@@ -409,6 +433,14 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (empty > 10 * 60000 || (this._isNight() && empty > 2 * 60000) || (dark && empty > 2 * 60000)) this.setState('dodo');
     }
   }
+}
+
+function nextPacificMidnight() {
+  // Heure actuelle à Los Angeles, puis minuit suivant là-bas, converti en heure locale.
+  const now = new Date();
+  const la = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const ms = (24 * 3600 - (la.getHours() * 3600 + la.getMinutes() * 60 + la.getSeconds())) * 1000;
+  return now.getTime() + ms + 60000;
 }
 
 function shorten(m) { m = (m || 'erreur inconnue').replace(/\s+/g, ' ').trim(); return m.length > 140 ? m.slice(0, 137) + '…' : m; }
