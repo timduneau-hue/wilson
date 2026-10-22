@@ -6,7 +6,7 @@ export class AudioIO {
   constructor() {
     this.ctx = null; this.stream = null;
     this.ring = new Int16Array(TARGET * 6); this.ringPos = 0; this.ringFilled = 0;   // 6 s de tampon
-    this.level = 0; this.db = -100; this.floor = -60; this.speaking = false;
+    this.level = 0; this.db = -100; this.floor = -60; this.speaking = false; this.lastVoicedAt = 0;
     this._onCnt = 0; this._offCnt = 0;
     this.listeners = { frame: [], speechstart: [], speechend: [], drained: [] };
     this.sources = []; this.nextTime = 0; this.outLevel = 0; this.outRound = 0;
@@ -59,6 +59,7 @@ export class AudioIO {
     if (db < this.floor) this.floor += (db - this.floor) * 0.2; else this.floor += 0.015;
     this.floor = Math.max(-75, Math.min(this.floor, -25));
     const voiced = db > this.floor + 11 && db > -52;
+    if (voiced) this.lastVoicedAt = performance.now();          // voix brute, image par image (fin de phrase plus rapide)
     if (voiced) { this._onCnt++; this._offCnt = 0; } else { this._offCnt++; this._onCnt = 0; }
     if (!this.speaking && this._onCnt >= 3) { this.speaking = true; this._emit('speechstart'); }
     if (this.speaking && this._offCnt >= 22) { this.speaking = false; this._emit('speechend'); }
