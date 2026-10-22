@@ -21,6 +21,7 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs
  "oublier": "sujet des souvenirs à effacer si on te le demande, sinon vide",
  "fin": true si on te dit au revoir, bonne nuit ou « merci, c'est tout »,
  "entendu": "transcription fidèle de ce qui a été dit (vide si rien d'intelligible)"}
+Le micro peut reprendre ta propre voix (la fin de ta réponse précédente) : si l'enregistrement ne contient que tes propres paroles ou une répétition de ce que tu viens de dire, mets pour_moi à false. Ne répète jamais une réponse que tu viens de donner.
 Quand tu mémorises quelque chose, confirme-le en quelques mots dans "reponse". Pour l'actualité, la météo, le sport, les horaires ou si tu n'es pas sûr, utilise la recherche Google avant de répondre.`;
 
 export class EcoBrain {
@@ -167,3 +168,13 @@ export function wavBase64(i16, rate = 16000) {
   for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
   return btoa(s);
 }
+
+// Fin de la dernière phrase complète après « from » (ponctuation suivie d'un espace), ou d'un long morceau à une virgule.
+export function sentenceCut(txt, from) {
+  let cut = from;
+  const re = /[.!?…](?=\s)/g; re.lastIndex = from; let m;
+  while ((m = re.exec(txt))) cut = m.index + 1;
+  if (cut === from && txt.length - from > 140) { const c = txt.lastIndexOf(', ', txt.length - 1); if (c > from + 40) cut = c + 1; }
+  return cut;
+}
+

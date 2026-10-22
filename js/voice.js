@@ -27,13 +27,13 @@ export class Voice {
       err ? rejectDone(err) : resolveDone();
     };
     const maybeDone = () => { if (ended && finished >= queued) settle(); };
-    const arm = () => {                                  // filet de sécurité : « onend » n'arrive pas toujours sur Android
+    // Filet de sécurité si « onend » n'arrive jamais : on se fie à la durée estimée de la parole,
+    // pas à speechSynthesis.speaking (peu fiable sur certains Android, ce qui faisait réécouter Wilson pendant qu'il parlait).
+    let expectedEnd = performance.now();
+    const arm = () => {
       clearTimeout(watchdog);
-      watchdog = setTimeout(function check() {
-        if (settled || gen !== self._gen) return;
-        if (!speechSynthesis.speaking && !speechSynthesis.pending) { finished = queued; maybeDone(); }
-        else watchdog = setTimeout(check, 400);
-      }, 2500);
+      const wait = Math.max(0, expectedEnd - performance.now()) * 1.5 + 2500;
+      watchdog = setTimeout(() => { if (!settled && gen === self._gen) { finished = queued; maybeDone(); } }, wait);
     };
     const session = {
       done,
@@ -53,6 +53,7 @@ export class Voice {
             fin();
           };
           queued++;
+          expectedEnd = Math.max(expectedEnd, performance.now()) + (400 + part.length * 72 / rate);
           if (!self.speaking) { self.speaking = true; self._t0 = performance.now(); }
           try { speechSynthesis.speak(u); } catch (e) { fin(); }
         }

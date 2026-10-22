@@ -10,6 +10,9 @@ toi lui eux mon ma mes ton ta tes sa ses notre votre leur ouais hein bah alors d
 tout tous rien chose faire dire voir savoir pouvoir vouloir aller avoir être petit grand vite parc vacances
 mis perdu dans sur sous avec pour par chez comme quand comment pourquoi combien`.split(/\s+/).filter(Boolean);
 
+// Mots qui font taire Wilson pendant qu'il parle (reconnus sur la tablette, insensibles à sa propre voix).
+const STOP_WORDS = ['stop', 'stoppe', 'chut', 'arrête', 'arrete', 'tais'];
+
 const SENS = {                 // sensibilité réglable
   large:   { persistMs: 0,   finalConf: 0.55 },
   normale: { persistMs: 160, finalConf: 0.7 },
@@ -20,7 +23,7 @@ export class Ear {
   constructor(name = 'wilson') {
     this.name = name.toLowerCase(); this.model = null; this.rec = null;
     this.active = false; this.ready = false; this.sens = SENS.normale;
-    this.onWake = null; this.onHeard = null; this.onProgress = null; this.onPhase = null;
+    this.onWake = null; this.onHeard = null; this.onProgress = null; this.onPhase = null; this.onStop = null; this.mode = 'wake';
     this._chunk = []; this._chunkLen = 0; this._seenAt = 0; this._cooldown = 0;
   }
   setSensitivity(k) { this.sens = SENS[k] || SENS.normale; }
@@ -58,14 +61,15 @@ export class Ear {
   }
 
   _newRecognizer() {
-    const words = [...new Set([...DECOYS, this.name])];
+    const words = [...new Set([...DECOYS, this.name, ...STOP_WORDS])];
     this.rec = new this.model.KaldiRecognizer(16000, JSON.stringify([...words, '[unk]']));
     this.rec.setWords(true);
     this.rec.on('partialresult', (m) => this._partial(m.result.partial || ''));
     this.rec.on('result', (m) => this._final(m.result));
   }
 
-  start() { this.active = true; this._seenAt = 0; }
+  // mode 'wake' : attend « Wilson » ; mode 'stop' : pendant que Wilson parle, attend « stop », « chut », « arrête »…
+  start(mode = 'wake') { if (this.active && this.mode !== mode) this.pause(); this.mode = mode; this.active = true; this._seenAt = 0; }
   pause() { this.active = false; this._chunk = []; this._chunkLen = 0; try { this.rec && this.rec.retrieveFinalResult(); } catch (_) {} }
 
   // Reçoit l'audio 16 kHz (Float32, -1..1) par blocs de 20 ms ; envoie au moteur par blocs de 100 ms.
@@ -81,6 +85,7 @@ export class Ear {
 
   _partial(text) {
     if (!this.active) return;
+    if (this.mode === 'stop') { if (text.split(' ').some((w) => STOP_WORDS.includes(w))) this._stop(); return; }
     const has = text.split(' ').includes(this.name);
     const now = performance.now();
     if (!has) { this._seenAt = 0; return; }
@@ -93,8 +98,16 @@ export class Ear {
     if (text && this.onHeard) this.onHeard(text);
     this._seenAt = 0;
     if (!this.active) return;
+    if (this.mode === 'stop') { if ((r.result || []).some((x) => STOP_WORDS.includes(x.word) && x.conf >= 0.5)) this._stop(); return; }
     const w = (r.result || []).find((x) => x.word === this.name);
     if (w && w.conf >= this.sens.finalConf) this._wake(text, w.conf);
+  }
+
+  _stop() {
+    const now = performance.now();
+    if (now < this._stopCooldown) return;
+    this._stopCooldown = now + 1500;
+    this.onStop && this.onStop();
   }
 
   _wake(text, conf) {

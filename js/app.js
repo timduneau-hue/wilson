@@ -10,13 +10,14 @@ import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 import { Voice } from './voice.js';
-import { EcoBrain, ECO_FORMAT } from './eco.js';
+import { EcoBrain, ECO_FORMAT, sentenceCut } from './eco.js';
 
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const ECO_SILENCE_MS = 550;       // mode économique : silence qui marque la fin d'une phrase
+const ECO_TAIL_MS = 1000;         // après avoir parlé : le son de la tablette finit de sortir après l'annonce « fini »
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const pad = (n) => String(n).padStart(2, '0');
 const fmtDate = (d = new Date()) => `${JOURS[d.getDay()]} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)}, ${d.getHours()}h${pad(d.getMinutes())}`;
@@ -112,6 +113,7 @@ class App {
       this.log(`Oreille chargée en ${((performance.now() - t0) / 1000).toFixed(1)} s`);
       this.ear.onWake = (w) => this._onWakeWord(w);
       this.ear.onHeard = (t) => { if (this.earTest) this.ui.earHeard(t); };
+      this.ear.onStop = () => { if (this.voice.speaking || this.audio.playing) this.interrupt('« stop »'); };
       this.ear.setSensitivity(this.settings.sensitivity);
       if (this.state === 'veille' || this.state === 'dodo') this.ear.start();
       this.log('Oreille locale prête'); this.badge("Je t'écoute : dis « Wilson » !", 4000);
@@ -275,13 +277,14 @@ class App {
     const E = this.ecoState, now = performance.now();
     if (!E) return;
     if (this.voice.speaking) return;                       // il parle : seule la détection de coupure écoute (voir _wireAudio)
-    if (now - this.playEndAt < 400) return;                // fin de sa propre voix
+    if (now - this.playEndAt < ECO_TAIL_MS) return;        // fin de sa propre voix (écho)
     if (E.cap) {
       E.cap.chunks.push(i16); E.cap.len += i16.length;
-      if (now - this.audio.lastVoicedAt < 60) { E.cap.lastVoice = now; this.lastUserSpeech = now; }
+      if (now - this.audio.lastVoicedAt < 60) { E.cap.lastVoice = now; E.cap.voiced = (E.cap.voiced || 0) + 1; this.lastUserSpeech = now; }
       if (now - E.cap.lastVoice > ECO_SILENCE_MS || E.cap.len > 16000 * 14) { const cap = E.cap; E.cap = null; this._ecoUtterance(cap); }
-    } else if (this.audio.speaking) {
-      const pre = this.audio.recent(450);
+    } else if (this.audio.speaking && now - this.audio.lastVoicedAt < 60) {   // voix présente maintenant (pas un reste d'écho)
+      // Juste après sa réponse, la personne a pu commencer à parler pendant la garde anti-écho : on reprend un peu plus loin.
+      const pre = this.audio.recent(now - this.playEndAt < ECO_TAIL_MS + 400 ? 900 : 450);
       E.cap = { chunks: [pre], len: pre.length, lastVoice: now };
     }
   }
@@ -291,7 +294,7 @@ class App {
     let audio = trimSilence(raw, this.audio.floor);
     if (!audio && cap.wake) audio = raw.subarray(Math.max(0, raw.length - 16000 * 6));   // l'oreille a entendu « Wilson » : on envoie quand même
     if (!audio) { this.log('Rien d\'audible, phrase ignorée'); return; }
-    if (!cap.wake && audio.length < 16000 * 0.45) return;  // trop court : un bruit
+    if (!cap.wake && (audio.length < 16000 * 0.45 || (cap.voiced || 0) < 10)) return;  // trop court : un bruit
     this._ecoSend({ audio, endAt: cap.lastVoice });
   }
 
@@ -302,9 +305,10 @@ class App {
     this.face.setEmotion('reflexion', 30000, 0.6);
     this.lastActivity = performance.now();
     const tSend = performance.now();
-    let sess = null, spoken = 0, emoSet = false, notForMe = false, tFirst = 0, lastTxt = '';
+    let sess = null, spoken = 0, emoSet = false, notForMe = false, tFirst = 0, lastTxt = '', repeated = false;
     const speakChunk = (chunk) => {
-      if (!chunk) return;
+      if (!chunk || repeated) return;
+      if (!sess && this._isRepeat(chunk)) { repeated = true; this.log('Répétition de ma réponse précédente évitée'); return; }
       if (!sess) { sess = this._startSpeech(); tFirst = performance.now(); if (!emoSet) this.face.clearEmotion(); }
       sess.push(chunk);
     };
@@ -329,7 +333,7 @@ class App {
       if (g) this.face.play(g); if (out.geste === 'clin_oeil') this.face.doWink(1);
       if (out.memoriser.length && !g) this.face.play('nod');
       const ms = (t) => ((t - (req.endAt || tSend)) / 1000).toFixed(1);
-      if (!out.pourMoi || notForMe || !out.reponse) {
+      if (!out.pourMoi || notForMe || !out.reponse || repeated) {
         this.log(`Pas pour moi : « ${out.entendu.slice(0, 80)} » (${ms(performance.now())} s, ${out.model})`);
         if (sess) sess.end();
       } else {
@@ -337,6 +341,7 @@ class App {
         this.log(`« ${out.entendu.slice(0, 90)} » → ${out.reponse.slice(0, 110)}`);
         this.log(`Latence : ${ms(tFirst || performance.now())} s avant la 1re phrase, ${ms(performance.now())} s au total (${out.model}, audio ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
         this.memory.addExchange(out.entendu, out.reponse);
+        this._lastReply = out.reponse;
         if (this.settings.subtitles) $('subtitle').textContent = out.reponse.slice(0, 220);
       }
       if (sess) { sess.end(); await this._endSpeech(sess, out.reponse); if (conv !== this.convId) return; }
@@ -363,8 +368,14 @@ class App {
 
   _startSpeech() {
     this.barge.n = 0; this.barge.echo = Math.max(-60, this.audio.db);
-    this.lastActivity = performance.now();
+    this.lastActivity = performance.now(); this._cutAt = 0;
+    if (this.ear.ready && this.mode === 'eco') this.ear.start('stop');   // « stop / chut / arrête » le fait taire
     return this.voice.stream();
+  }
+  _isRepeat(chunk) {
+    const n = (t) => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const c = n(chunk), last = n(this._lastReply);
+    return c.length >= 15 && last.includes(c);
   }
   async _endSpeech(sess, text) {
     try { await sess.done; }
@@ -376,7 +387,10 @@ class App {
         setTimeout(() => { st.hidden = !this.settings.subtitles; }, 8000);
       }
     }
-    this.playEndAt = performance.now(); this.lastActivity = this.playEndAt; this.face.setTalk(0);
+    if (this.mode === 'eco' && this.state === 'conversation') this.ear.pause();
+    // Coupé par la famille : garde courte (la personne continue de parler) ; sinon garde complète contre l'écho.
+    this.playEndAt = this._cutAt ? this._cutAt - (ECO_TAIL_MS - 300) : performance.now();
+    this.lastActivity = performance.now(); this.face.setTalk(0);
   }
 
   async _say(text) {
@@ -481,7 +495,10 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (this.state === 'veille' || this.state === 'dodo') { this.ear.feed(f32); return; }
       if (this.state === 'eveil') { if (this.pending) this.pending.push(i16); return; }
       if (this.state === 'conversation' && this.mode === 'eco') {
-        if (this.voice.speaking) this._bargeCheck(db); else this._ecoFrame(i16);
+        // Pendant qu'il parle, le micro entend sa propre voix : on n'enregistre rien, on guette seulement
+        // « stop », « chut », « arrête » avec l'oreille locale (et la voix forte si « coupure directe » est choisie).
+        if (this.voice.speaking) { this.ear.feed(f32); if (this.settings.bargeIn === 'directe') this._bargeCheck(db); }
+        else this._ecoFrame(i16);
         return;
       }
       if (this.state !== 'conversation' || !this.brain.open) return;
@@ -525,8 +542,9 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (this.brain.open) this.brain.sendAudio(this.audio.recent(700));     // le début de la phrase part tout de suite
     }
     if (tts) {
+      this._cutAt = performance.now();                                   // pas d'enregistrement de l'audio passé : il contient sa voix
       this.voice.cancel();
-      if (this.ecoState && !this.ecoState.cap) { const r = this.audio.recent(700); this.ecoState.cap = { chunks: [r], len: r.length, lastVoice: performance.now() }; }
+      this.playEndAt = this._cutAt - (ECO_TAIL_MS - 300);
     }
     this.lastActivity = this.lastUserSpeech = performance.now();
   }
@@ -666,15 +684,6 @@ function quotaInfo(msg, what) {
   if (m && +m[1] < 3600) return { until: now + Math.ceil(+m[1]) * 1000, txt: `Google me demande de patienter ${Math.ceil(+m[1])} s (limite par minute du compte gratuit).` };
   const until = nextPacificMidnight(), d = new Date(until);
   return { until, txt: `Mon quota gratuit Google pour ${what} est épuisé pour aujourd'hui. Je pourrai reparler à ${d.getHours()}h${String(d.getMinutes()).padStart(2, '0')}.` };
-}
-
-// Fin de la dernière phrase complète après « from » (ponctuation suivie d'un espace), ou d'un long morceau à une virgule.
-function sentenceCut(txt, from) {
-  let cut = from;
-  const re = /[.!?…](?=\s)/g; re.lastIndex = from; let m;
-  while ((m = re.exec(txt))) cut = m.index + 1;
-  if (cut === from && txt.length - from > 140) { const c = txt.lastIndexOf(', ', txt.length - 1); if (c > from + 40) cut = c + 1; }
-  return cut;
 }
 
 // Retire les silences du début et de la fin (envoi plus léger, réponse plus rapide). null si rien d'audible.
