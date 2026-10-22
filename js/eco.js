@@ -21,8 +21,22 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs
  "oublier": "sujet des souvenirs à effacer si on te le demande, sinon vide",
  "fin": true si on te dit au revoir, bonne nuit ou « merci, c'est tout »,
  "entendu": "transcription fidèle de ce qui a été dit (vide si rien d'intelligible)"}
+Si tu ne dois rien dire : pour_moi false et reponse "" (vide). N'écris JAMAIS « silence », « … », ni de texte entre parenthèses, crochets ou astérisques : tout ce qui est dans "reponse" est lu à voix haute.
+Après ta réponse, ne réponds que si la phrase t'est clairement adressée (une question ou une demande pour toi, ou la suite directe de ce que tu viens de dire). Télé, radio, bruit, gens qui parlent entre eux, phrase incomplète ou incompréhensible : pour_moi false. Dans le doute : pour_moi false.
 Le micro peut reprendre ta propre voix (la fin de ta réponse précédente) : si l'enregistrement ne contient que tes propres paroles ou une répétition de ce que tu viens de dire, mets pour_moi à false. Ne répète jamais une réponse que tu viens de donner.
-Quand tu mémorises quelque chose, confirme-le en quelques mots dans "reponse". Pour l'actualité, la météo, le sport, les horaires ou si tu n'es pas sûr, utilise la recherche Google avant de répondre.`;
+Quand tu mémorises quelque chose, confirme-le en quelques mots dans "reponse". Recherche Google : seulement si la réponse dépend vraiment d'une information récente (météo, actualité, sport, horaires) ; sinon réponds directement, c'est plus rapide.`;
+
+// Ouvre la connexion vers Google à l'avance (réveil) : la vraie requête gagne la poignée de main réseau.
+export function warmUp(key) {
+  try { fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': cleanKey(key) }, cache: 'no-store' }).catch(() => {}); } catch (_) {}
+}
+
+// Retire ce qui ne doit pas être lu (didascalies, « silence »…). Chaîne vide si rien à dire.
+export function sayable(t) {
+  t = (t || '').replace(/\([^)]*\)|\[[^\]]*\]|\*[^*]*\*/g, ' ').replace(/^\s*wilson\s*:\s*/i, '').replace(/\s+/g, ' ').trim();
+  if (/^[\s.…!?,;:-]*(silence|chut|rien|pas de réponse|aucune réponse)?[\s.…!?,;:-]*$/i.test(t)) return '';
+  return t;
+}
 
 export class EcoBrain {
   constructor() { this.history = []; this.modelUsed = null; this.thinking = 'minimal'; this.noSearch = false; this.speed = 'rapide'; this.stream = true; }
@@ -40,7 +54,7 @@ export class EcoBrain {
     const models = this.modelUsed ? [this.modelUsed, ...order.filter((m) => m !== this.modelUsed)] : order;
     let quotaErr = null, last = null;
     for (const model of models) {
-      for (const think of [this.thinking, 'low', null].filter((v, i, a) => a.indexOf(v) === i)) {
+      for (const think of [this.thinking, 'minimal', null, 'low'].filter((v, i, a) => a.indexOf(v) === i)) {
         const body = {
           systemInstruction: { parts: [{ text: system }] },
           contents,
@@ -174,7 +188,10 @@ export function sentenceCut(txt, from) {
   let cut = from;
   const re = /[.!?…](?=\s)/g; re.lastIndex = from; let m;
   while ((m = re.exec(txt))) cut = m.index + 1;
-  if (cut === from && txt.length - from > 140) { const c = txt.lastIndexOf(', ', txt.length - 1); if (c > from + 40) cut = c + 1; }
+  if (cut === from) {
+    // Pas encore de phrase complète : au tout début, on démarre dès une virgule (parole plus rapide) ; sinon sur un long morceau.
+    const minLen = from === 0 ? 28 : 140;
+    if (txt.length - from > minLen) { const c = txt.lastIndexOf(', '); if (c > from + (from === 0 ? 20 : 40)) cut = c + 1; }
+  }
   return cut;
 }
-
