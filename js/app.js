@@ -12,7 +12,7 @@ import { loadSettings, SettingsUI } from './settings.js';
 import { Voice } from './voice.js';
 import { EcoBrain, ECO_FORMAT } from './eco.js';
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
@@ -38,7 +38,14 @@ class App {
     this.discard = false; this.endAfterSpeech = false; this.barge = { n: 0, echo: -60 };
     this.presenceAt = performance.now(); this.battery = null; this.earTest = false; this.settingsOpen = false;
     this._wireSensors(); this._wireBrain(); this._wireAudio();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch((e) => this.log('SW : ' + e.message));
+    if ('serviceWorker' in navigator) {
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => { this.swReg = r; }).catch((e) => this.log('SW : ' + e.message));
+      // Nouvelle version installée : on recharge (seulement si une ancienne version tournait, et jamais en pleine conversation).
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) this._reloadWhenIdle('nouvelle version installée'); });
+    }
+    setTimeout(() => this._checkUpdate(), 15000);
+    setInterval(() => this._checkUpdate(), 20 * 60000);
     setInterval(() => this._tick(), 50);
   }
 
@@ -113,6 +120,29 @@ class App {
       this.log('Oreille locale indisponible : ' + e.message);
       this.badge("Mon oreille n'a pas chargé — touche-moi pour me parler", 15000, true);
     } finally { this._earLoading = false; }
+  }
+
+  // Mise à jour automatique : la tablette reste allumée en permanence, Wilson se met donc à jour tout seul.
+  async _checkUpdate() {
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) return;
+      const { version } = await r.json();
+      if (!version || version === VERSION) return;
+      const [v0, t0] = (sessionStorage.getItem('wilson.reloadedFor') || '|0').split('|');
+      if (v0 === version && Date.now() - +t0 < 30 * 60000) return;              // déjà tenté il y a peu : on attendra
+      this.log(`Nouvelle version disponible : ${version}`);
+      if (this.swReg) { try { await this.swReg.update(); } catch (_) {} }
+      this._reloadWhenIdle(version);
+    } catch (_) {}
+  }
+  _reloadWhenIdle(why) {
+    const go = () => {
+      if (this.state === 'eveil' || this.state === 'conversation' || this.settingsOpen) return setTimeout(go, 15000);
+      try { sessionStorage.setItem('wilson.reloadedFor', `${why}|${Date.now()}`); } catch (_) {}
+      this.log('Mise à jour : rechargement'); location.reload();
+    };
+    go();
   }
 
   _showWake() { $('wake').hidden = false; }

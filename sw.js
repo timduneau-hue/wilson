@@ -1,7 +1,7 @@
 // Wilson — service worker : l'appli démarre même sans réseau et le modèle vocal (46 Mo) n'est téléchargé qu'une fois.
-const VERSION = 'wilson-1.3.0';
+const VERSION = 'wilson-1.3.1';
 const SHELL = [
-  './', 'index.html', 'manifest.webmanifest', 'css/wilson.css',
+  './', 'index.html', 'manifest.webmanifest', 'version.json', 'css/wilson.css',
   'js/app.js', 'js/voice.js', 'js/eco.js', 'js/face.js', 'js/audio.js', 'js/ear.js', 'js/brain.js', 'js/vision.js', 'js/memory.js', 'js/sensors.js', 'js/settings.js',
   'js/faces/util.js', 'js/faces/lumiere.js', 'js/faces/bouille.js', 'js/faces/led.js', 'js/faces/miel.js', 'visages.html',
   'js/worklets/capture.js', 'vendor/vosk.js', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -9,7 +9,8 @@ const SHELL = [
 const HEAVY = 'wilson-lourd-v1';   // modèle vocal + moteurs : gardés d'une version à l'autre
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // « reload » : on ignore le cache HTTP du navigateur pour stocker vraiment la nouvelle version.
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== HEAVY).map((k) => caches.delete(k))))
@@ -29,8 +30,8 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   if (url.origin !== location.origin) return;
-  // Appli : réseau d'abord (mises à jour), cache si hors ligne.
-  e.respondWith(fetch(req).then((res) => {
+  // Appli : réseau d'abord en revalidant auprès du serveur (« no-cache » : jamais de version périmée), cache si hors ligne.
+  e.respondWith(fetch(new Request(req, { cache: 'no-cache' })).then((res) => {
     if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
     return res;
   }).catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match('index.html'))));
