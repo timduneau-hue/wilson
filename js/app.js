@@ -10,7 +10,7 @@ import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 
-const VERSION = '1.0.4';
+const VERSION = '1.1.0';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
@@ -23,7 +23,7 @@ class App {
   constructor() {
     this.version = VERSION; this.logs = [];
     this.settings = loadSettings();
-    this.face = new Face($('face'));
+    this.face = new Face($('face'), { style: this.settings.face });
     this.face.setMood('somnolent'); this.face.setBrightness(0.35);
     this.audio = new AudioIO(); this.ear = new Ear('wilson'); this.brain = new Brain();
     this.memory = new Memory(); this.vision = null; this.sensors = new Sensors($('face'));
@@ -115,6 +115,7 @@ class App {
   applySettings(key) {
     const s = this.settings;
     this.ear.setSensitivity(s.sensitivity);
+    if (s.face !== this.face.styleName) this.face.setStyle(s.face);
     if (this.vision) this.vision.mirror = !s.mirror;
     if (key === 'camera') { if (s.camera && !this.vision && this.started) this._startVision(); if (!s.camera && this.vision) { this.vision.stream.getTracks().forEach((t) => t.stop()); this.vision = null; } }
     $('subtitle').hidden = !s.subtitles;

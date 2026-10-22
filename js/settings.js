@@ -1,6 +1,6 @@
 // Wilson — réglages (stockés sur la tablette) et écrans de configuration.
 
-import { EXPRESSIONS } from './face.js';
+import { EXPRESSIONS, STYLES } from './face.js';
 import { checkKey, cleanKey, sessionsToday } from './brain.js';
 
 const AISTUDIO = '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>';
@@ -20,7 +20,7 @@ export const DEFAULTS = {
   apiKey: '', model: 'gemini-3.8-live', voice: 'Puck',
   earMode: 'local', sensitivity: 'normale', convTimeout: 20, bargeIn: 'prudente',
   home: '', city: '', nightStart: 23, nightEnd: 7,
-  camera: true, mirror: false, subtitles: false,
+  camera: true, mirror: false, subtitles: false, face: 'lumiere',
 };
 export const VOICES = [
   ['Puck', 'enjoué'], ['Achird', 'amical'], ['Charon', 'posé'], ['Fenrir', 'énergique'], ['Umbriel', 'décontracté'],
@@ -41,6 +41,7 @@ export class SettingsUI {
     this.app = app; this.s = app.settings;
     const hours = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${h}h00</option>`).join('');
     $('s-night1').innerHTML = hours; $('s-night2').innerHTML = hours;
+    $('s-face').innerHTML = Object.entries(STYLES).map(([k, v]) => `<option value="${k}">${v.label} — ${v.desc}</option>`).join('');
     $('s-voice').innerHTML = VOICES.map(([v, d]) => `<option value="${v}">${v} — ${d}</option>`).join('');
     $('emo-buttons').innerHTML = Object.keys(EXPRESSIONS).filter((e) => !['neutre', 'dort'].includes(e))
       .map((e) => `<button class="btn" data-emo="${e}">${e}</button>`).join('');
@@ -64,7 +65,7 @@ export class SettingsUI {
         : `Connexion à Gemini impossible : « ${esc(c.msg)} »`);
       app.log('Test connexion : ' + (c.ok ? 'OK ' : 'échec ') + c.msg);
     };
-    bind('s-voice', 'voice'); bind('s-earmode', 'earMode'); bind('s-sens', 'sensitivity');
+    bind('s-voice', 'voice'); bind('s-face', 'face'); bind('s-earmode', 'earMode'); bind('s-sens', 'sensitivity');
     bind('s-timeout', 'convTimeout', Number); bind('s-barge', 'bargeIn');
     bind('s-home', 'home'); bind('s-city', 'city'); bind('s-night1', 'nightStart', Number); bind('s-night2', 'nightEnd', Number);
     bind('s-cam', 'camera', Boolean, 'checked'); bind('s-mirror', 'mirror', Boolean, 'checked'); bind('s-subs', 'subtitles', Boolean, 'checked');
@@ -105,7 +106,7 @@ export class SettingsUI {
 
   fill() {
     const s = this.s;
-    $('s-key').value = s.apiKey; $('s-model').value = s.model; $('s-voice').value = s.voice;
+    $('s-key').value = s.apiKey; $('s-model').value = s.model; $('s-voice').value = s.voice; $('s-face').value = s.face;
     $('s-earmode').value = s.earMode; $('s-sens').value = s.sensitivity; $('s-timeout').value = String(s.convTimeout);
     $('s-barge').value = s.bargeIn; $('s-home').value = s.home; $('s-city').value = s.city;
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);

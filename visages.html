@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Visages de Wilson</title>
+<style>
+  :root { --bg: #000; --ink: #f3ebdd; --ink-2: #b8ad9c; --ink-3: #7d7466; --line: rgba(243,235,221,0.12); --amber: #e39a3b; --amber-2: #ffd889; color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { padding: 14px 16px 24px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; }
+  header a { color: var(--amber-2); font-size: 14px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .bar button { appearance: none; border: 1px solid var(--line); background: rgba(255,255,255,0.06); color: var(--ink); border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+  .bar button.on { background: var(--amber); color: #2a1404; border-color: transparent; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .tile { position: relative; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #000; }
+  .tile.chosen { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber) inset; }
+  .tile canvas { display: block; width: 100%; aspect-ratio: 16 / 10; touch-action: none; }
+  .cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); background: #0b0907; }
+  .cap b { font-size: 16px; } .cap span { color: var(--ink-2); font-size: 13px; display: block; }
+  .cap button { appearance: none; border: none; border-radius: 10px; padding: 9px 14px; font: inherit; font-weight: 650; cursor: pointer; background: linear-gradient(180deg, var(--amber-2), var(--amber)); color: #2a1404; flex: none; }
+  .tile.chosen .cap button { background: transparent; color: var(--amber-2); border: 1px solid var(--amber); }
+  .note { color: var(--ink-3); font-size: 13px; margin-top: 12px; }
+  #toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: #1d1610; border: 1px solid var(--amber); color: var(--ink); padding: 10px 16px; border-radius: 12px; font-size: 14px; opacity: 0; transition: opacity .3s; pointer-events: none; max-width: calc(100vw - 32px); text-align: center; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Choisis le visage de Wilson</h1>
+  <a href="index.html">← Retour à Wilson</a>
+</header>
+<div class="bar" id="bar"></div>
+<div class="grid" id="grid"></div>
+<p class="note">Touche ou glisse le doigt sur un visage : il te suit des yeux. Le choix est gardé sur cet appareil ; rouvre Wilson pour le voir en grand.</p>
+<div id="toast"></div>
+<script type="module">
+import { Face, STYLES } from './js/face.js';
+
+const KEY = 'wilson.settings';
+const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
+let chosen = read().face || 'lumiere';
+const faces = [];
+const grid = document.getElementById('grid');
+for (const [name, s] of Object.entries(STYLES)) {
+  const tile = document.createElement('div'); tile.className = 'tile'; tile.dataset.name = name;
+  tile.innerHTML = `<canvas></canvas><div class="cap"><div><b>${s.label}</b><span>${s.desc}</span></div><button>Choisir</button></div>`;
+  grid.appendChild(tile);
+  const face = new Face(tile.querySelector('canvas'), { style: name, maxDpr: 1.5 });
+  face.setMood('neutre'); faces.push(face);
+  window.wilsonFaces = faces;
+  const cv = tile.querySelector('canvas');
+  const look = (e) => { const r = cv.getBoundingClientRect(); faces.forEach((f) => f.setLook(((e.clientX - r.left) / r.width - 0.5) * 2, ((e.clientY - r.top) / r.height - 0.5) * 2)); };
+  cv.addEventListener('pointermove', look); cv.addEventListener('pointerdown', look);
+  cv.addEventListener('pointerleave', () => faces.forEach((f) => f.setLook(null)));
+  tile.querySelector('button').onclick = () => {
+    const s0 = read(); s0.face = name; try { localStorage.setItem(KEY, JSON.stringify(s0)); } catch (_) {}
+    chosen = name; mark(); toast(`« ${s.label} » choisi ✓ — rouvre Wilson pour le voir en grand`);
+    face.setEmotion('joie', 2500);
+  };
+}
+function mark() { document.querySelectorAll('.tile').forEach((t) => { t.classList.toggle('chosen', t.dataset.name === chosen); t.querySelector('button').textContent = t.dataset.name === chosen ? 'Choisi ✓' : 'Choisir'; }); }
+mark();
+let tt; function toast(m) { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 3500); }
+
+// Barre d'essai : émotions, parole simulée, sommeil
+const bar = document.getElementById('bar');
+const EMOS = [['joie', 'Joie'], ['rire', 'Rire'], ['tendresse', 'Tendresse'], ['surprise', 'Surprise'], ['triste', 'Triste'], ['colere', 'Colère'], ['curieux', 'Curieux'], ['reflexion', 'Réflexion'], ['peur', 'Peur']];
+const btn = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = () => fn(b); bar.appendChild(b); return b; };
+for (const [k, l] of EMOS) btn(l, () => faces.forEach((f) => f.setEmotion(k, 3500)));
+let talking = null;
+btn('Parler', (b) => {
+  if (talking) { clearInterval(talking); talking = null; b.classList.remove('on'); faces.forEach((f) => f.setTalk(0)); return; }
+  b.classList.add('on'); const t0 = performance.now();
+  talking = setInterval(() => {
+    const t = (performance.now() - t0) / 1000;
+    const syll = Math.max(0, Math.sin(t * 11)) * (0.55 + 0.45 * Math.sin(t * 2.3)) * (Math.sin(t * 0.9) > -0.7 ? 1 : 0);
+    faces.forEach((f) => f.setTalk(syll, Math.max(0, Math.sin(t * 3.7))));
+  }, 40);
+});
+btn('Dormir', (b) => { const on = b.classList.toggle('on'); faces.forEach((f) => { f.clearEmotion(); f.setMood(on ? 'dort' : 'neutre'); }); });
+btn('Clin d’œil', () => faces.forEach((f) => f.doWink(1)));
+</script>
+</body>
+</html>
