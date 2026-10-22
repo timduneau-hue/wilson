@@ -62,7 +62,7 @@ export class SettingsUI {
       const c = await app.testConnection();
       st.className = 'status ' + (c.ok ? 'ok' : 'err');
       st.innerHTML = keyMessage(r) + '<br>' + (c.ok ? `Connexion à Gemini réussie ✓ <em>(${esc(c.msg)})</em>`
-        : `Connexion à Gemini impossible : « ${esc(c.msg)} »`);
+        : `Connexion à Gemini impossible : « ${esc(c.msg)} »`) + `<br><em>Wilson ${app.version} · connexions aujourd'hui : ${sessionsToday()}</em>`;
       app.log('Test connexion : ' + (c.ok ? 'OK ' : 'échec ') + c.msg);
     };
     bind('s-voice', 'voice'); bind('s-face', 'face'); bind('s-earmode', 'earMode'); bind('s-sens', 'sensitivity');

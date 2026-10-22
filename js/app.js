@@ -10,7 +10,7 @@ import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 
-const VERSION = '1.1.2';
+const VERSION = '1.1.3';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
@@ -175,7 +175,7 @@ class App {
     if (!this.settings.apiKey) { this.ui.showWelcome(); return; }
     if (this.quotaUntil && Date.now() < this.quotaUntil) {         // quota épuisé : on ne gaspille pas d'essais
       this.face.setEmotion('gene', 3000); this.face.play('shake');
-      this.badge(this.quotaMsg, 8000, true); return;
+      this.badge(this.quotaMsg + ' (appui long sur moi → « Vérifier » pour réessayer)', 9000, true); return;
     }
     this.setState('eveil'); this.convId = (this.convId || 0) + 1;
     this.pending = reason === 'prenom' ? [this.audio.recent(PREROLL_MS)] : [];
@@ -211,7 +211,10 @@ class App {
     const m = /retry in ([\d.]+)\s*s/i.exec(msg || '');
     const now = Date.now();
     let until, txt;
-    if (m && +m[1] < 3600) {
+    if (/limit:\s*0\b/i.test(msg || '')) {                       // aucun quota gratuit pour ce projet : attendre ne sert à rien
+      until = now + 30 * 60000;
+      txt = "Google n'accorde aucun quota gratuit à ce projet pour mes modèles vocaux (limite 0).";
+    } else if (m && +m[1] < 3600) {
       until = now + Math.ceil(+m[1]) * 1000;
       txt = `Google me demande de patienter ${Math.ceil(+m[1])} s (limite par minute du compte gratuit).`;
     } else {
@@ -219,7 +222,7 @@ class App {
       const d = new Date(until);
       txt = `Mon quota gratuit Google est épuisé pour aujourd'hui. Je pourrai reparler à ${d.getHours()}h${String(d.getMinutes()).padStart(2, '0')}.`;
     }
-    this.quotaUntil = until; this.quotaMsg = txt; this.log('Quota : ' + txt);
+    this.quotaUntil = until; this.quotaMsg = txt; this.quotaRaw = msg; this.log('Quota : ' + txt + ' — Google : ' + msg);
   }
 
   // Diagnostic : ouvre puis referme une connexion Gemini, sans parler.
