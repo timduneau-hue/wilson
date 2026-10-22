@@ -85,9 +85,12 @@ export class Vision {
   }
 
   // Image JPEG (base64) de ce que voit Wilson, pour Gemini.
-  snapshot(q = 0.72) {
+  snapshot(q = 0.72, max = 640) {
     if (this.video.readyState < 2) return null;
-    this.snapG.drawImage(this.video, 0, 0, this.snap.width, this.snap.height);
+    const vw = this.video.videoWidth || 640, vh = this.video.videoHeight || 480, k = Math.min(1, max / Math.max(vw, vh));
+    const w = Math.round(vw * k), h = Math.round(vh * k);
+    if (this.snap.width !== w || this.snap.height !== h) { this.snap.width = w; this.snap.height = h; }
+    this.snapG.drawImage(this.video, 0, 0, w, h);
     return this.snap.toDataURL('image/jpeg', q).split(',')[1];
   }
 }

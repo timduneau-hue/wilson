@@ -18,7 +18,7 @@ export function keyMessage(r) {
 const KEY = 'wilson.settings';
 export const DEFAULTS = {
   apiKey: '', model: 'gemini-3.8-live', voice: 'Puck',
-  earMode: 'local', sensitivity: 'normale', convTimeout: 20, bargeIn: 'prudente',
+  earMode: 'local', sensitivity: 'normale', convTimeout: 12, bargeIn: 'prudente',
   home: '', city: '', nightStart: 23, nightEnd: 7,
   camera: true, mirror: false, subtitles: false, face: 'lumiere', brainMode: 'auto', ecoVoice: '', ecoSpeed: 'rapide',
 };
@@ -30,7 +30,11 @@ export const VOICES = [
 ];
 
 export function loadSettings() {
-  try { return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch { return { ...DEFAULTS }; }
+  let s;
+  try { s = { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch { s = { ...DEFAULTS }; }
+  // Migration 1.4 : mode le plus rapide par défaut, conversation plus courte.
+  if ((s.v || 1) < 2) { s.ecoSpeed = 'rapide'; if (s.convTimeout === 20) s.convTimeout = 12; s.v = 2; try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (_) {} }
+  return s;
 }
 export function saveSettings(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
 

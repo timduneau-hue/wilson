@@ -10,13 +10,13 @@ import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 import { Voice } from './voice.js';
-import { EcoBrain, ECO_FORMAT, sentenceCut } from './eco.js';
+import { EcoBrain, ECO_FORMAT, sentenceCut, sayable, warmUp } from './eco.js';
 
-const VERSION = '1.3.2';
+const VERSION = '1.4.0';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
-const ECO_SILENCE_MS = 550;       // mode économique : silence qui marque la fin d'une phrase
+const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
 const ECO_TAIL_MS = 1000;         // après avoir parlé : le son de la tablette finit de sortir après l'annonce « fini »
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const pad = (n) => String(n).padStart(2, '0');
@@ -222,6 +222,7 @@ class App {
       this.badge((mode === 'eco' ? this.ecoQuotaMsg : this.quotaMsg) + ' (appui long sur moi → « Vérifier » pour réessayer)', 9000, true); return;
     }
     this.setState('eveil'); this.convId = (this.convId || 0) + 1;
+    if (mode === 'eco') warmUp(this.settings.apiKey);
     const preroll = reason === 'prenom' ? [this.audio.recent(PREROLL_MS)] : [];
     if (mode === 'eco') return this._startEco(reason, preroll);
     this.mode = 'live';
@@ -263,7 +264,8 @@ class App {
     this.mode = 'eco'; this.eco.reset(); this.eco.setSpeed(this.settings.ecoSpeed); this.voice.voiceName = this.settings.ecoVoice || '';
     this.pending = null;
     const now = performance.now();
-    this.ecoState = { cap: null, busy: false, queue: [] };
+    this.ecoState = { cap: null, busy: false, queue: [], ignored: 0 };
+    warmUp(this.settings.apiKey);
     this.setState('conversation'); this.lastActivity = now;
     this.log(`Conversation ouverte en mode économique (${reason})`);
     if (reason === 'prenom' && chunks.length) {
@@ -280,7 +282,7 @@ class App {
     if (now - this.playEndAt < ECO_TAIL_MS) return;        // fin de sa propre voix (écho)
     if (E.cap) {
       E.cap.chunks.push(i16); E.cap.len += i16.length;
-      if (now - this.audio.lastVoicedAt < 60) { E.cap.lastVoice = now; E.cap.voiced = (E.cap.voiced || 0) + 1; this.lastUserSpeech = now; }
+      if (now - this.audio.lastVoicedAt < 60) { E.cap.lastVoice = now; E.cap.voiced = (E.cap.voiced || 0) + 1; }
       if (now - E.cap.lastVoice > ECO_SILENCE_MS || E.cap.len > 16000 * 14) { const cap = E.cap; E.cap = null; this._ecoUtterance(cap); }
     } else if (this.audio.speaking && now - this.audio.lastVoicedAt < 60) {   // voix présente maintenant (pas un reste d'écho)
       // Juste après sa réponse, la personne a pu commencer à parler pendant la garde anti-écho : on reprend un peu plus loin.
@@ -294,7 +296,7 @@ class App {
     let audio = trimSilence(raw, this.audio.floor);
     if (!audio && cap.wake) audio = raw.subarray(Math.max(0, raw.length - 16000 * 6));   // l'oreille a entendu « Wilson » : on envoie quand même
     if (!audio) { this.log('Rien d\'audible, phrase ignorée'); return; }
-    if (!cap.wake && (audio.length < 16000 * 0.45 || (cap.voiced || 0) < 10)) return;  // trop court : un bruit
+    if (!cap.wake && (audio.length < 16000 * 0.5 || (cap.voiced || 0) < 15)) return;  // trop court : un bruit
     this._ecoSend({ audio, endAt: cap.lastVoice });
   }
 
@@ -303,10 +305,10 @@ class App {
     if (E.busy) { E.queue.push(req); return; }
     E.busy = true; const conv = this.convId;
     this.face.setEmotion('reflexion', 30000, 0.6);
-    this.lastActivity = performance.now();
-    const tSend = performance.now();
+    const tSend = performance.now(); let answered = false;
     let sess = null, spoken = 0, emoSet = false, notForMe = false, tFirst = 0, lastTxt = '', repeated = false;
     const speakChunk = (chunk) => {
+      chunk = sayable(chunk);
       if (!chunk || repeated) return;
       if (!sess && this._isRepeat(chunk)) { repeated = true; this.log('Répétition de ma réponse précédente évitée'); return; }
       if (!sess) { sess = this._startSpeech(); tFirst = performance.now(); if (!emoSet) this.face.clearEmotion(); }
@@ -323,7 +325,7 @@ class App {
       if (this.settings.subtitles && txt) $('subtitle').textContent = txt.slice(0, 220);
     };
     try {
-      const image = this.vision ? this.vision.snapshot(0.7) : null;
+      const image = this.vision ? this.vision.snapshot(0.7, 384) : null;
       const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, image, text: req.text, onPartial });
       if (conv !== this.convId) return;
       if (!emoSet) { this.face.clearEmotion(); if (out.emotion && out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9); }
@@ -333,10 +335,15 @@ class App {
       if (g) this.face.play(g); if (out.geste === 'clin_oeil') this.face.doWink(1);
       if (out.memoriser.length && !g) this.face.play('nod');
       const ms = (t) => ((t - (req.endAt || tSend)) / 1000).toFixed(1);
+      out.reponse = sayable(out.reponse);
       if (!out.pourMoi || notForMe || !out.reponse || repeated) {
-        this.log(`Pas pour moi : « ${out.entendu.slice(0, 80)} » (${ms(performance.now())} s, ${out.model})`);
+        E.ignored++;
+        this.log(`Pas pour moi (${E.ignored}) : « ${out.entendu.slice(0, 80)} » (${ms(performance.now())} s, ${out.model})`);
         if (sess) sess.end();
+        // Bruits, télé, conversations entre vous : au 2e d'affilée, Wilson se rendort (il faudra redire « Wilson »).
+        if (E.ignored >= 2 && !sess) { setTimeout(() => conv === this.convId && this.endConversation('pas pour moi'), 200); }
       } else {
+        E.ignored = 0; answered = true;
         if (!spoken) speakChunk(out.reponse);                       // réponse hors format : on la dit d'un bloc
         this.log(`« ${out.entendu.slice(0, 90)} » → ${out.reponse.slice(0, 110)}`);
         this.log(`Latence : ${ms(tFirst || performance.now())} s avant la 1re phrase, ${ms(performance.now())} s au total (${out.model}, audio ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
@@ -360,7 +367,7 @@ class App {
         this.badge(`Je n'arrive pas à réfléchir : ${shorten(e.message)}`, 10000, true);
       }
     } finally {
-      E.busy = false; this.lastActivity = performance.now();
+      E.busy = false; if (answered) this.lastActivity = performance.now();
       const next = E.queue.shift();
       if (next && conv === this.convId) this._ecoSend(next);
     }
@@ -475,7 +482,7 @@ Quand parler :
 
 Ta vue : si on te montre quelque chose ou si on te demande ce que tu vois, décris et commente l'image la plus récente. Sinon, ne commente pas l'image.
 ${tools}
-Recherche Google : utilise-la dès qu'une réponse dépend de l'actualité ou d'informations qui changent (météo, actualités, sport, horaires, prix, programmes télé, adresses, personnes connues), quand on te demande de chercher, ou quand tu n'es pas sûr d'un fait${s.city ? ` ; la maison est à ${s.city}` : ''}. Résume le résultat à l'oral en une à trois phrases, sans lire de liens ni d'adresses web.
+Recherche Google : utilise-la dès qu'une réponse dépend de l'actualité ou d'informations qui changent (météo, actualités, sport, horaires, prix, programmes télé, adresses, personnes connues), quand on te demande de chercher, ${s.city ? ` ; la maison est à ${s.city}` : ''}. Résume le résultat à l'oral en une à trois phrases, sans lire de liens ni d'adresses web.
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
 La maison : ${s.home || 'pas encore précisé — tu peux demander les prénoms et les retenir.'}
@@ -512,11 +519,11 @@ Nous sommes ${fmtDate()}.${bat}`;
     });
     this.audio.on('speechstart', () => {
       const now = performance.now();
-      if (this.state === 'conversation') { this.lastUserSpeech = this.lastActivity = now; return; }
+      if (this.state === 'conversation') { if (this.mode === 'live') this.lastUserSpeech = this.lastActivity = now; return; }
       this.presenceAt = now;                                   // quelqu'un parle dans la pièce
       if (this.state === 'dodo' && !this._isNight()) { this.setState('veille'); this.face.play('tilt'); }
     });
-    this.audio.on('speechend', () => { if (this.state === 'conversation') this.lastUserSpeech = this.lastActivity = performance.now(); });
+    this.audio.on('speechend', () => { if (this.state === 'conversation' && this.mode === 'live') this.lastUserSpeech = this.lastActivity = performance.now(); });
     this.audio.on('drained', () => {
       this.playEndAt = performance.now(); this.lastActivity = this.playEndAt; this.face.setTalk(0);
       if (this.endAfterSpeech) { this.endAfterSpeech = false; const id = this.convId; setTimeout(() => id === this.convId && this.endConversation('au revoir'), 700); }
@@ -656,7 +663,9 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (this.mode === 'live' && (this.audio.speaking || now - this.lastUserSpeech < 1500)) this._sendFrame(false);
       // R3 : la conversation se ferme d'elle-même après un silence.
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
-      if (!this.continuous && !this.speaking && !this.audio.speaking && !thinking && idle > this.settings.convTimeout * 1000) this.endConversation('silence');
+      // Mode éco : seule une vraie réponse prolonge la conversation (un bruit de fond continu ne la garde plus ouverte).
+      const busyEar = this.mode === 'eco' ? false : this.audio.speaking;
+      if (!this.continuous && !this.speaking && !busyEar && !thinking && idle > this.settings.convTimeout * 1000) this.endConversation('silence');
       if (this.continuous && idle > 30000 && f.p.bright.t > 0.5) { f.setBrightness(0.3); f.setMood('somnolent'); }
       if (this.continuous && idle < 1000 && f.p.bright.t < 0.5) { f.setBrightness(1); f.setMood('ecoute'); }
     }
