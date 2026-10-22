@@ -1,7 +1,7 @@
 // Wilson — réglages (stockés sur la tablette) et écrans de configuration.
 
 import { EXPRESSIONS } from './face.js';
-import { checkKey, cleanKey } from './brain.js';
+import { checkKey, cleanKey, sessionsToday } from './brain.js';
 
 const AISTUDIO = '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>';
 // Message clair selon le résultat de la vérification de la clé.
@@ -110,7 +110,7 @@ export class SettingsUI {
     $('s-barge').value = s.bargeIn; $('s-home').value = s.home; $('s-city').value = s.city;
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
-    $('version').textContent = `Wilson ${this.app.version} · oreille : ${this.app.ear.ready ? 'prête' : 'en chargement'} · vision : ${this.app.vision ? this.app.vision.mode : 'coupée'}`;
+    $('version').textContent = `Wilson ${this.app.version} · oreille : ${this.app.ear.ready ? 'prête' : 'en chargement'} · vision : ${this.app.vision ? this.app.vision.mode : 'coupée'} · connexions Gemini aujourd'hui : ${sessionsToday()}`;
     this.renderMemory(); this.renderLog();
   }
   renderMemory() {

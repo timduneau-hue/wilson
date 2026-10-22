@@ -64,11 +64,20 @@ function buildSetup({ model, voice, system, level, handle }) {
   return setup;
 }
 
+// Nombre de connexions ouvertes aujourd'hui (affiché dans les réglages).
+export function sessionsToday() {
+  try { const o = JSON.parse(localStorage.getItem('wilson.sessions')); return o && o.d === new Date().toDateString() ? o.n : 0; } catch { return 0; }
+}
+function countSession() {
+  try { localStorage.setItem('wilson.sessions', JSON.stringify({ d: new Date().toDateString(), n: sessionsToday() + 1 })); } catch (_) {}
+}
+
 // Nature d'un refus de connexion, pour savoir quoi réessayer.
 function classify(e) {
   const m = (e && e.message) || '';
   if (e.auth || AUTH_RE.test(m)) return 'auth';
-  if (/not found|not supported for|is not available|quota|exceed|exhausted|overloaded|unavailable|high demand|429|503/i.test(m)) return 'model';
+  if (/quota|exceeded|exhausted|rate.?limit|too many requests|429/i.test(m)) return 'quota';
+  if (/not found|not supported for|is not available|overloaded|unavailable|high demand|503/i.test(m)) return 'model';
   if (e.code === 1007 || /invalid|unknown name|cannot find field|unsupported|not supported|non-empty|malformed|bad request|unexpected/i.test(m)) return 'config';
   return 'other';
 }
@@ -119,11 +128,11 @@ export class Brain {
     const auths = first(['key', 'token'], this.authMode);
     const models = first([...new Set([opts.model, FALLBACK_MODEL])], this.modelUsed);
     const levels = first([0, 1, 2], this.level);
-    let last, authErr, serverErr, tries = 0;
+    let last, authErr, serverErr, quotaErr, tries = 0;
     auth: for (const mode of auths) {
       for (const model of models) {
         for (const level of levels) {
-          if (++tries > 10) break auth;
+          if (++tries > 6) break auth;
           try {
             const url = mode === 'key'
               ? `${WS_ROOT}BidiGenerateContent?key=${encodeURIComponent(key)}`
@@ -137,19 +146,22 @@ export class Brain {
             last = e; const kind = classify(e); if (e.code && !serverErr) serverErr = e;   // réponse réelle de Google
             this._emit('log', `Essai ${mode}/${model}/niv.${level} → ${kind} : ${e.message}`);
             if (kind === 'auth') { authErr = e; continue auth; }      // la clé ne passe pas ainsi : autre méthode
+            if (kind === 'quota') { e.quota = true; quotaErr = quotaErr || e; break; }   // quota du modèle : modèle de secours, rien d'autre
             if (kind === 'config') continue;                         // un réglage refusé : configuration plus simple
             if (kind === 'model') break;                             // modèle indisponible : modèle de secours
             break auth;                                              // réseau, délai… : inutile d'insister
           }
         }
       }
+      if (quotaErr) break;                       // le quota est par projet : changer de méthode ne sert à rien
     }
-    throw authErr || serverErr || last;          // on signale la raison donnée par Google plutôt qu'un échec secondaire
+    throw authErr || quotaErr || serverErr || last;          // on signale la raison donnée par Google plutôt qu'un échec secondaire
   }
   // Les réponses « silencieuses » aux outils n'existent qu'avec la configuration complète du modèle 3.8.
   get canSchedule() { return this.level === 0 && /3\.8/.test(this.modelUsed || ''); }
 
   _open(url, { model, voice, system, resume = true, level = 0 }) {
+    countSession();
     return new Promise((resolve, reject) => {
       this._closing = false; this.ready = false;
       const ws = new WebSocket(url);
