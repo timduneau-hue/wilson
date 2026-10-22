@@ -40,6 +40,39 @@ async function ephemeralToken(key) {
   return j.name;
 }
 
+const FALLBACK_MODEL = 'gemini-3.1-flash-live-preview';
+
+// Niveau 0 = tout ; 1 = sans recherche Google ni options avancées ; 2 = le strict minimum pour parler.
+function buildSetup({ model, voice, system, level, handle }) {
+  const setup = {
+    model: `models/${model}`,
+    generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
+    systemInstruction: { parts: [{ text: system }] },
+    inputAudioTranscription: {}, outputAudioTranscription: {},
+    sessionResumption: handle ? { handle } : {},
+  };
+  if (level <= 1) {
+    setup.tools = [{ functionDeclarations: TOOLS[0].functionDeclarations.map(({ behavior, ...f }) => (level === 0 ? { behavior, ...f } : f)) }];
+    setup.realtimeInputConfig = { automaticActivityDetection: { prefixPaddingMs: 200, silenceDurationMs: 700 } };
+  }
+  if (level === 0) {
+    setup.tools.push({ googleSearch: {} });
+    setup.generationConfig.mediaResolution = 'MEDIA_RESOLUTION_LOW';
+    setup.realtimeInputConfig.activityHandling = 'START_OF_ACTIVITY_INTERRUPTS';
+    setup.contextWindowCompression = { slidingWindow: {} };
+  }
+  return setup;
+}
+
+// Nature d'un refus de connexion, pour savoir quoi réessayer.
+function classify(e) {
+  const m = (e && e.message) || '';
+  if (e.auth || AUTH_RE.test(m)) return 'auth';
+  if (/not found|not supported for|is not available|quota|exceed|exhausted|overloaded|unavailable|high demand|429|503/i.test(m)) return 'model';
+  if (e.code === 1007 || /invalid|unknown name|cannot find field|unsupported|not supported|non-empty|malformed|bad request|unexpected/i.test(m)) return 'config';
+  return 'other';
+}
+
 export const EMOTIONS = ['neutre', 'joie', 'rire', 'triste', 'surprise', 'colere', 'curieux', 'reflexion',
   'tendresse', 'gene', 'confus', 'peur', 'fier', 'ennui', 'somnolent'];
 
@@ -59,10 +92,9 @@ export const TOOLS = [{
       description: 'Efface les souvenirs qui correspondent à ce sujet, quand on te demande d\'oublier quelque chose.',
       parameters: { type: 'OBJECT', properties: { sujet: { type: 'STRING' } }, required: ['sujet'] } },
     { name: 'date_et_heure', behavior: 'BLOCKING',
-      description: 'Donne la date et l\'heure exactes maintenant.', parameters: { type: 'OBJECT', properties: {} } },
+      description: 'Donne la date et l\'heure exactes maintenant.' },
     { name: 'terminer_conversation', behavior: 'NON_BLOCKING',
-      description: 'À appeler quand on te dit au revoir, bonne nuit, ou « merci, c\'est tout » : tu retournes en veille après ta réponse.',
-      parameters: { type: 'OBJECT', properties: {} } },
+      description: 'À appeler quand on te dit au revoir, bonne nuit, ou « merci, c\'est tout » : tu retournes en veille après ta réponse.' },
   ],
 }, { googleSearch: {} }];
 
@@ -76,53 +108,55 @@ export class Brain {
   _emit(ev, ...a) { const f = this.handlers[ev]; if (f) try { f(...a); } catch (e) { console.error(ev, e); } }
   get open() { return this.ws && this.ws.readyState === 1 && this.ready; }
 
-  // Deux façons de se connecter : clé dans l'adresse, ou jeton éphémère obtenu avec la clé.
-  // On essaie la méthode qui a déjà marché, sinon les deux à la suite.
+  // Connexion tolérante. On essaie, dans l'ordre :
+  //  - la méthode d'identification (clé dans l'adresse, ou jeton éphémère) ;
+  //  - le modèle choisi, puis un modèle de secours ;
+  //  - la configuration complète, puis simplifiée, puis minimale si Google refuse un réglage.
+  // La combinaison qui marche est retenue pour les conversations suivantes.
   async connect(opts) {
     const key = cleanKey(opts.key);
-    const order = this.authMode === 'token' ? ['token', 'key'] : ['key', 'token'];
-    let last, authErr;
-    for (const mode of order) {
-      try {
-        const url = mode === 'key'
-          ? `${WS_ROOT}BidiGenerateContent?key=${encodeURIComponent(key)}`
-          : `${WS_ROOT}BidiGenerateContentConstrained?access_token=${encodeURIComponent(await ephemeralToken(key))}`;
-        await this._open(url, opts);
-        if (this.authMode !== mode) this._emit('log', `Connexion Gemini par ${mode === 'key' ? 'clé' : 'jeton éphémère'}`);
-        this.authMode = mode; return;
-      } catch (e) {
-        last = e; if (e.auth) authErr = e;
-        this._emit('log', `Méthode « ${mode} » : ${e.message}`);
-        if (!e.auth) break;                     // pas un problème d'identification : inutile d'essayer l'autre méthode
+    const first = (arr, v) => (v != null && arr.includes(v) ? [v, ...arr.filter((x) => x !== v)] : arr);
+    const auths = first(['key', 'token'], this.authMode);
+    const models = first([...new Set([opts.model, FALLBACK_MODEL])], this.modelUsed);
+    const levels = first([0, 1, 2], this.level);
+    let last, authErr, serverErr, tries = 0;
+    auth: for (const mode of auths) {
+      for (const model of models) {
+        for (const level of levels) {
+          if (++tries > 10) break auth;
+          try {
+            const url = mode === 'key'
+              ? `${WS_ROOT}BidiGenerateContent?key=${encodeURIComponent(key)}`
+              : `${WS_ROOT}BidiGenerateContentConstrained?access_token=${encodeURIComponent(await ephemeralToken(key))}`;
+            await this._open(url, { ...opts, model, level });
+            const changed = mode !== this.authMode || model !== this.modelUsed || level !== this.level;
+            this.authMode = mode; this.modelUsed = model; this.level = level;
+            if (changed) this._emit('log', `Gemini connecté : ${mode === 'key' ? 'clé' : 'jeton'}, ${model}, configuration ${['complète', 'simplifiée', 'minimale'][level]}`);
+            return;
+          } catch (e) {
+            last = e; const kind = classify(e); if (e.code && !serverErr) serverErr = e;   // réponse réelle de Google
+            this._emit('log', `Essai ${mode}/${model}/niv.${level} → ${kind} : ${e.message}`);
+            if (kind === 'auth') { authErr = e; continue auth; }      // la clé ne passe pas ainsi : autre méthode
+            if (kind === 'config') continue;                         // un réglage refusé : configuration plus simple
+            if (kind === 'model') break;                             // modèle indisponible : modèle de secours
+            break auth;                                              // réseau, délai… : inutile d'insister
+          }
+        }
       }
     }
-    throw authErr || last;                      // si l'une des méthodes a refusé la clé, c'est ce qu'on signale
+    throw authErr || serverErr || last;          // on signale la raison donnée par Google plutôt qu'un échec secondaire
   }
+  // Les réponses « silencieuses » aux outils n'existent qu'avec la configuration complète du modèle 3.8.
+  get canSchedule() { return this.level === 0 && /3\.8/.test(this.modelUsed || ''); }
 
-  _open(url, { model, voice, system, resume = true }) {
+  _open(url, { model, voice, system, resume = true, level = 0 }) {
     return new Promise((resolve, reject) => {
       this._closing = false; this.ready = false;
       const ws = new WebSocket(url);
       this.ws = ws;
-      const timer = setTimeout(() => { reject(new Error('Délai de connexion dépassé')); try { ws.close(); } catch (_) {} }, 10000);
+      const timer = setTimeout(() => { reject(new Error('Délai de connexion dépassé (Google ne répond pas)')); try { ws.close(); } catch (_) {} }, 15000);
       ws.onopen = () => {
-        const setup = {
-          model: `models/${model}`,
-          generationConfig: {
-            responseModalities: ['AUDIO'],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
-            mediaResolution: 'MEDIA_RESOLUTION_LOW',
-          },
-          systemInstruction: { parts: [{ text: system }] },
-          tools: TOOLS,
-          realtimeInputConfig: {
-            automaticActivityDetection: { prefixPaddingMs: 200, silenceDurationMs: 700 },
-            activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
-          },
-          inputAudioTranscription: {}, outputAudioTranscription: {},
-          contextWindowCompression: { slidingWindow: {} },
-          sessionResumption: resume && this.handle ? { handle: this.handle } : {},
-        };
+        const setup = buildSetup({ model, voice, system, level, handle: resume ? this.handle : null });
         ws.send(JSON.stringify({ setup }));
       };
       ws.onmessage = async (e) => {
@@ -138,7 +172,7 @@ export class Brain {
       ws.onclose = (e) => {
         clearTimeout(timer);
         if (!setupDone) {
-          const err = new Error(e.reason || `Connexion refusée (${e.code})`);
+          const err = new Error(e.reason || `Connexion fermée par Google (code ${e.code})`); err.code = e.code;
           err.auth = AUTH_RE.test(e.reason || '') || (e.code === 1008 && !e.reason);
           reject(err);
         }

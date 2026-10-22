@@ -10,7 +10,7 @@ import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
@@ -39,7 +39,12 @@ class App {
   }
 
   log(m) { const d = new Date(); this.logs.push(`${pad(d.getHours())}h${pad(d.getMinutes())}:${pad(d.getSeconds())}  ${m}`); if (this.logs.length > 200) this.logs.shift(); console.log('[Wilson]', m); if (this.settingsOpen) this.ui.renderLog(); }
-  badge(text, ms = 5000) { const b = $('badge'); b.textContent = text; b.hidden = false; clearTimeout(this._bt); this._bt = setTimeout(() => (b.hidden = true), ms); }
+  badge(text, ms = 5000, important = false) {
+    const b = $('badge'), now = performance.now();
+    if (!important && this._badgeImportantUntil > now) return;          // un message d'erreur reste lisible
+    this._badgeImportantUntil = important ? now + ms : 0;
+    b.textContent = text; b.hidden = false; clearTimeout(this._bt); this._bt = setTimeout(() => (b.hidden = true), ms);
+  }
 
   // ---------- démarrage ----------
   boot() {
@@ -164,7 +169,9 @@ class App {
     } catch (e) {
       this.log('Gemini : ' + e.message);
       this.face.setEmotion('confus', 4000);
-      this.badge(e.auth ? 'Google refuse ma clé — appui long sur moi, puis « Vérifier la clé »' : "Je n'arrive pas à joindre mon cerveau", 8000);
+      this.lastError = e.message;
+      this.badge(e.auth ? 'Google refuse ma clé — appui long sur moi, puis « Vérifier la clé »'
+        : `Je n'arrive pas à joindre mon cerveau : ${shorten(e.message)}`, 15000, true);
       this.setState('veille'); return;
     }
     this.log(`Conversation ouverte (${reason})`);
@@ -177,6 +184,16 @@ class App {
     if (reason === 'test') this.brain.sendText('Présente-toi en une phrase, avec chaleur.');
     if (reason === 'toucher') this.brain.sendText("[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
     this.lastActivity = performance.now();
+  }
+
+  // Diagnostic : ouvre puis referme une connexion Gemini, sans parler.
+  async testConnection() {
+    if (this.state === 'eveil' || this.state === 'conversation') return { ok: true, msg: 'Déjà en conversation' };
+    try {
+      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system() });
+      const b = this.brain; this.brain.close();
+      return { ok: true, msg: `${b.modelUsed}, ${b.authMode === 'key' ? 'clé' : 'jeton'}, configuration ${['complète', 'simplifiée', 'minimale'][b.level]}` };
+    } catch (e) { return { ok: false, auth: !!e.auth, msg: e.message }; }
   }
 
   endConversation(why) {
@@ -321,7 +338,7 @@ Nous sommes ${fmtDate()}.${bat}`;
         case 'terminer_conversation': { this.endAfterSpeech = true; const id = this.convId; setTimeout(() => { if (id === this.convId && this.endAfterSpeech && !this.audio.playing) this.endConversation('au revoir'); }, 4000); break; }
         default: out = { error: 'outil inconnu' }; silent = false;
       }
-      const r = { id: c.id, name: c.name, response: out }; if (silent) r.scheduling = 'SILENT';
+      const r = { id: c.id, name: c.name, response: out }; if (silent && this.brain.canSchedule) r.scheduling = 'SILENT';
       res.push(r);
     }
     this.brain.respond(res);
@@ -384,6 +401,8 @@ Nous sommes ${fmtDate()}.${bat}`;
     }
   }
 }
+
+function shorten(m) { m = (m || 'erreur inconnue').replace(/\s+/g, ' ').trim(); return m.length > 140 ? m.slice(0, 137) + '…' : m; }
 
 function concat(list) {
   let n = 0; for (const a of list) n += a.length;
