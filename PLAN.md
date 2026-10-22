@@ -51,7 +51,10 @@ Un visage original (grands yeux expressifs sur fond noir) qui vit, écoute, rega
 | `js/face.js` | Visage : dessin, émotions, regard, lèvres | — |
 | `js/audio.js` | Micro (16 kHz), tampon, niveau de voix, lecture 24 kHz | Web Audio |
 | `js/ear.js` | Oreille locale « Wilson » | Vosk (`vendor/vosk.js`, modèle FR) |
-| `js/brain.js` | Client Gemini Live (WebSocket) | clé API Gemini |
+| `js/brain.js` | Client Gemini Live (WebSocket) — cerveau « direct » | clé API Gemini |
+| `js/eco.js` | Cerveau « économique » : phrase enregistrée + photo → Gemini Flash → réponse JSON | clé API Gemini |
+| `js/voice.js` | Voix de la tablette (synthèse vocale) pour le mode économique | navigateur |
+| `js/faces/*.js` | Styles de visage : Lumière, Bouille, Rétro, Miel | `face.js` |
 | `js/vision.js` | Caméra, suivi des visages, images pour Gemini | MediaPipe (repli : détection de mouvement) |
 | `js/memory.js` | Souvenirs et petit journal des échanges | localStorage |
 | `js/sensors.js` | Toucher, mouvement de la tablette, batterie, réseau | API du navigateur |
@@ -66,7 +69,15 @@ Un visage original (grands yeux expressifs sur fond noir) qui vit, écoute, rega
 - **Vosk hors ligne** pour le nom : aucune donnée envoyée en veille, aucun quota consommé.
 - **La clé API** n'est jamais dans le code publié : elle est saisie sur la tablette et reste dessus.
 
-## 6. Lots suivants (prévus, pas dans ce lot)
+## 6. Deux cerveaux (réglage « Cerveau »)
+
+- **Direct** (Gemini Live) : voix naturelle, coupure instantanée, flux continu. Peut être sans quota gratuit selon le compte.
+- **Économique** (Gemini Flash + voix de la tablette) : une requête par phrase, recherche Google comprise, réponse en JSON
+  (`entendu`, `pour_moi`, `reponse`, `emotion`, `geste`, `memoriser`, `oublier`, `fin`). Mêmes règles R1 à R10.
+- **Automatique** (défaut) : direct si possible ; si Google refuse pour quota, bascule en économique sans perdre la phrase,
+  et retient le refus jusqu'à la remise à zéro (minuit heure du Pacifique).
+
+## 7. Lots suivants (prévus, pas dans ce lot)
 
 1. Domotique via Home Assistant (lumières, télé, prises).
 2. Alertes e-mail (intrusion, fumée) quand la maison est vide.

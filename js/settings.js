@@ -20,7 +20,7 @@ export const DEFAULTS = {
   apiKey: '', model: 'gemini-3.8-live', voice: 'Puck',
   earMode: 'local', sensitivity: 'normale', convTimeout: 20, bargeIn: 'prudente',
   home: '', city: '', nightStart: 23, nightEnd: 7,
-  camera: true, mirror: false, subtitles: false, face: 'lumiere',
+  camera: true, mirror: false, subtitles: false, face: 'lumiere', brainMode: 'auto', ecoVoice: '',
 };
 export const VOICES = [
   ['Puck', 'enjoué'], ['Achird', 'amical'], ['Charon', 'posé'], ['Fenrir', 'énergique'], ['Umbriel', 'décontracté'],
@@ -58,14 +58,14 @@ export class SettingsUI {
       st.className = 'status ' + (r.ok ? 'ok' : r.ok === false ? 'err' : ''); st.innerHTML = keyMessage(r);
       if (r.ok === false) return;
       this.s.apiKey = cleanKey($('s-key').value); saveSettings(this.s); app.brain.authMode = app.brain.modelUsed = app.brain.level = null;
-      st.innerHTML += '<br>Test de la connexion à Gemini…';
+      st.innerHTML += '<br>Test de la connexion à Gemini (quelques secondes)…';
       const c = await app.testConnection();
       st.className = 'status ' + (c.ok ? 'ok' : 'err');
-      st.innerHTML = keyMessage(r) + '<br>' + (c.ok ? `Connexion à Gemini réussie ✓ <em>(${esc(c.msg)})</em>`
-        : `Connexion à Gemini impossible : « ${esc(c.msg)} »`) + `<br><em>Wilson ${app.version} · connexions aujourd'hui : ${sessionsToday()}</em>`;
+      st.innerHTML = keyMessage(r) + '<br>' + (c.ok ? `Wilson peut parler ✓ <em>(${esc(c.msg)})</em>`
+        : `Wilson ne peut pas encore parler : ${esc(c.msg)}`) + `<br><em>Wilson ${app.version} · connexions aujourd'hui : ${sessionsToday()}</em>`;
       app.log('Test connexion : ' + (c.ok ? 'OK ' : 'échec ') + c.msg);
     };
-    bind('s-voice', 'voice'); bind('s-face', 'face'); bind('s-earmode', 'earMode'); bind('s-sens', 'sensitivity');
+    bind('s-voice', 'voice'); bind('s-face', 'face'); bind('s-brain', 'brainMode'); bind('s-ecovoice', 'ecoVoice'); bind('s-earmode', 'earMode'); bind('s-sens', 'sensitivity');
     bind('s-timeout', 'convTimeout', Number); bind('s-barge', 'bargeIn');
     bind('s-home', 'home'); bind('s-city', 'city'); bind('s-night1', 'nightStart', Number); bind('s-night2', 'nightEnd', Number);
     bind('s-cam', 'camera', Boolean, 'checked'); bind('s-mirror', 'mirror', Boolean, 'checked'); bind('s-subs', 'subtitles', Boolean, 'checked');
@@ -73,6 +73,8 @@ export class SettingsUI {
     $('s-close').onclick = () => this.close();
     $('s-reload').onclick = () => location.reload();
     $('t-voice').onclick = () => { this.close(); app.startConversation('test'); };
+    $('t-ecovoice').onclick = () => { app.voice.voiceName = this.s.ecoVoice; app.voice.speak("Bonjour ! Je suis Wilson. Voilà ma voix quand je suis en mode économique.").catch(() => {}); };
+    if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', () => { if (app.settingsOpen) this.fillVoices(); });
     $('t-ear').onclick = () => { const on = $('ear-test').hidden; $('ear-test').hidden = !on; app.earTest = on; $('t-ear').textContent = on ? 'Arrêter le test' : "Tester l'oreille"; };
     $('m-export').onclick = () => {
       const a = document.createElement('a');
@@ -107,12 +109,19 @@ export class SettingsUI {
   fill() {
     const s = this.s;
     $('s-key').value = s.apiKey; $('s-model').value = s.model; $('s-voice').value = s.voice; $('s-face').value = s.face;
+    $('s-brain').value = s.brainMode; this.fillVoices();
     $('s-earmode').value = s.earMode; $('s-sens').value = s.sensitivity; $('s-timeout').value = String(s.convTimeout);
     $('s-barge').value = s.bargeIn; $('s-home').value = s.home; $('s-city').value = s.city;
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
     $('version').textContent = `Wilson ${this.app.version} · oreille : ${this.app.ear.ready ? 'prête' : 'en chargement'} · vision : ${this.app.vision ? this.app.vision.mode : 'coupée'} · connexions Gemini aujourd'hui : ${sessionsToday()}`;
     this.renderMemory(); this.renderLog();
+  }
+  fillVoices() {
+    const vs = this.app.voice.voices(), sel = $('s-ecovoice');
+    sel.innerHTML = '<option value="">Automatique (meilleure voix française)</option>' +
+      vs.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}${v.localService ? '' : ' (en ligne)'}</option>`).join('');
+    sel.value = vs.some((v) => v.name === this.s.ecoVoice) ? this.s.ecoVoice : '';
   }
   renderMemory() {
     const f = this.app.memory.facts;

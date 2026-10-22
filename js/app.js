@@ -9,8 +9,10 @@ import { Vision } from './vision.js';
 import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
+import { Voice } from './voice.js';
+import { EcoBrain, ECO_FORMAT } from './eco.js';
 
-const VERSION = '1.1.3';
+const VERSION = '1.2.0';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
@@ -27,6 +29,7 @@ class App {
     this.face.setMood('somnolent'); this.face.setBrightness(0.35);
     this.audio = new AudioIO(); this.ear = new Ear('wilson'); this.brain = new Brain();
     this.memory = new Memory(); this.vision = null; this.sensors = new Sensors($('face'));
+    this.voice = new Voice(); this.eco = new EcoBrain(); this.mode = null; this.ecoState = null;
     this.ui = new SettingsUI(this);
     this.state = 'demarrage'; this.started = false; this.continuous = false;
     this.pending = []; this.outBuf = []; this.outLen = 0;
@@ -37,6 +40,8 @@ class App {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch((e) => this.log('SW : ' + e.message));
     setInterval(() => this._tick(), 50);
   }
+
+  get speaking() { return this.audio.playing || this.voice.speaking; }
 
   log(m) { const d = new Date(); this.logs.push(`${pad(d.getHours())}h${pad(d.getMinutes())}:${pad(d.getSeconds())}  ${m}`); if (this.logs.length > 200) this.logs.shift(); console.log('[Wilson]', m); if (this.settingsOpen) this.ui.renderLog(); }
   badge(text, ms = 5000, important = false) {
@@ -67,6 +72,7 @@ class App {
     this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._wakeLock(); this.audio.resume(); } });
     if (fromGesture && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
     if (!this.audio.running) this._showWake(); else this._hideWake();
+    this._loadQuota();
     this.setState('veille');
     this._loadEar();
     this.applySettings();
@@ -117,7 +123,7 @@ class App {
     this.ear.setSensitivity(s.sensitivity);
     if (s.face !== this.face.styleName) this.face.setStyle(s.face);
     if (key === 'apiKey' || key === 'model') {          // nouvelle clé : nouveau quota, on repart de zéro
-      this.quotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.log('Clé ou modèle changé');
+      this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.eco.modelUsed = null; this.log('Clé ou modèle changé');
     }
     if (this.vision) this.vision.mirror = !s.mirror;
     if (key === 'camera') { if (s.camera && !this.vision && this.started) this._startVision(); if (!s.camera && this.vision) { this.vision.stream.getTracks().forEach((t) => t.stop()); this.vision = null; } }
@@ -173,25 +179,37 @@ class App {
     if (this.state === 'eveil' || this.state === 'conversation') return;
     if (!navigator.onLine) { this.face.setEmotion('confus', 3000); this.badge("Pas d'Internet : je ne peux pas répondre", 5000); return; }
     if (!this.settings.apiKey) { this.ui.showWelcome(); return; }
-    if (this.quotaUntil && Date.now() < this.quotaUntil) {         // quota épuisé : on ne gaspille pas d'essais
+    // Quel cerveau ? Direct (Gemini Live) si possible, sinon mode économique (Gemini Flash + voix de la tablette).
+    const now = Date.now(), want = this.settings.brainMode || 'auto';
+    const liveBlocked = this.quotaUntil && now < this.quotaUntil, ecoBlocked = this.ecoQuotaUntil && now < this.ecoQuotaUntil;
+    const mode = want === 'eco' ? 'eco' : want === 'live' ? 'live' : (liveBlocked ? 'eco' : 'live');
+    if ((mode === 'live' && liveBlocked) || (mode === 'eco' && ecoBlocked)) {         // quota épuisé : on ne gaspille pas d'essais
       this.face.setEmotion('gene', 3000); this.face.play('shake');
-      this.badge(this.quotaMsg + ' (appui long sur moi → « Vérifier » pour réessayer)', 9000, true); return;
+      this.badge((mode === 'eco' ? this.ecoQuotaMsg : this.quotaMsg) + ' (appui long sur moi → « Vérifier » pour réessayer)', 9000, true); return;
     }
     this.setState('eveil'); this.convId = (this.convId || 0) + 1;
-    this.pending = reason === 'prenom' ? [this.audio.recent(PREROLL_MS)] : [];
+    const preroll = reason === 'prenom' ? [this.audio.recent(PREROLL_MS)] : [];
+    if (mode === 'eco') return this._startEco(reason, preroll);
+    this.mode = 'live';
+    this.pending = preroll;
     this.discard = false; this.endAfterSpeech = false; this.brain.handle = null;
     this.lastActivity = performance.now();
     try {
       await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system() });
     } catch (e) {
       this.log('Gemini : ' + e.message);
-      this.face.setEmotion('confus', 4000);
       this.lastError = e.message;
       if (e.quota) this._quotaPause(e.message);
+      if (e.quota && want === 'auto' && !(this.ecoQuotaUntil && Date.now() < this.ecoQuotaUntil)) {
+        this.log('Direct refusé (quota) → mode économique');
+        this.badge('Mode économique : je réfléchis avec Gemini Flash', 5000);
+        return this._startEco(reason, this.pending || []);           // la phrase déjà enregistrée n'est pas perdue
+      }
+      this.face.setEmotion('confus', 4000);
       this.badge(e.auth ? 'Google refuse ma clé — appui long sur moi, puis « Vérifier la clé »'
         : e.quota ? this.quotaMsg
         : `Je n'arrive pas à joindre mon cerveau : ${shorten(e.message)}`, 15000, true);
-      this.setState('veille'); return;
+      this.mode = null; this.setState('veille'); return;
     }
     this.log(`Conversation ouverte (${reason})`);
     this.setState('conversation');
@@ -205,51 +223,171 @@ class App {
     this.lastActivity = performance.now();
   }
 
+  // ---------- mode économique ----------
+  // Chaque phrase est enregistrée jusqu'au silence, puis envoyée (avec une photo) à Gemini Flash ; la réponse est lue par la tablette.
+  _startEco(reason, chunks) {
+    this.mode = 'eco'; this.eco.reset(); this.voice.voiceName = this.settings.ecoVoice || '';
+    this.pending = null;
+    const now = performance.now();
+    this.ecoState = { cap: null, busy: false, queue: [] };
+    this.setState('conversation'); this.lastActivity = now;
+    this.log(`Conversation ouverte en mode économique (${reason})`);
+    if (reason === 'prenom' && chunks.length) {
+      const len = chunks.reduce((a, c) => a + c.length, 0);
+      this.ecoState.cap = { chunks: chunks.slice(), len, lastVoice: now, wake: true };
+    } else if (reason === 'test') this._ecoSend({ text: '[Présente-toi en une phrase, avec chaleur.]' });
+    else if (reason === 'toucher') this._say(['Oui ?', "Je t'écoute.", 'Oui, dis-moi ?'][Math.floor(Math.random() * 3)]);
+  }
+
+  _ecoFrame(i16) {
+    const E = this.ecoState, now = performance.now();
+    if (!E) return;
+    if (this.voice.speaking) return;                       // il parle : seule la détection de coupure écoute (voir _wireAudio)
+    if (now - this.playEndAt < 400) return;                // fin de sa propre voix
+    const voiced = this.audio.speaking;
+    if (E.cap) {
+      E.cap.chunks.push(i16); E.cap.len += i16.length;
+      if (voiced) { E.cap.lastVoice = now; this.lastUserSpeech = now; }
+      if ((!voiced && now - E.cap.lastVoice > 650) || E.cap.len > 16000 * 14) { const cap = E.cap; E.cap = null; this._ecoUtterance(cap); }
+    } else if (voiced) {
+      const pre = this.audio.recent(450);
+      E.cap = { chunks: [pre], len: pre.length, lastVoice: now };
+    }
+  }
+
+  _ecoUtterance(cap) {
+    const audio = concat(cap.chunks);
+    if (!cap.wake && audio.length < 16000 * 0.5) return;  // trop court : un bruit
+    this._ecoSend({ audio });
+  }
+
+  async _ecoSend(req) {
+    const E = this.ecoState; if (!E) return;
+    if (E.busy) { E.queue.push(req); return; }
+    E.busy = true; const conv = this.convId;
+    this.face.setEmotion('reflexion', 30000, 0.6);
+    this.lastActivity = performance.now();
+    try {
+      const image = this.vision ? this.vision.snapshot(0.7) : null;
+      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, image, text: req.text });
+      if (conv !== this.convId) return;
+      this.face.clearEmotion();
+      for (const f of out.memoriser) { this.memory.add(f); this.log('Retenu : ' + f); }
+      if (out.oublier) { const g = this.memory.forget(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}`); }
+      if (out.emotion && out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9);
+      const g = { oui: 'nod', non: 'shake', sautiller: 'bounce', pencher_la_tete: 'tilt' }[out.geste];
+      if (g) this.face.play(g); if (out.geste === 'clin_oeil') this.face.doWink(1);
+      if (out.memoriser.length && !g) this.face.play('nod');
+      if (!out.pourMoi || !out.reponse) {
+        this.log(`Pas pour moi : « ${out.entendu.slice(0, 80)} »`);
+      } else {
+        this.log(`Entendu : « ${out.entendu.slice(0, 100)} » → Wilson (${out.model}) : ${out.reponse.slice(0, 120)}`);
+        this.memory.addExchange(out.entendu, out.reponse);
+        if (this.settings.subtitles) $('subtitle').textContent = out.reponse.slice(0, 220);
+        await this._say(out.reponse);
+        if (conv !== this.convId) return;
+      }
+      if (out.fin) setTimeout(() => conv === this.convId && this.endConversation('au revoir'), 600);
+    } catch (e) {
+      if (conv !== this.convId) return;
+      this.face.clearEmotion(); this.log('Mode économique : ' + e.message);
+      if (e.quota) {
+        this._ecoQuotaPause(e.message);
+        this.badge(this.ecoQuotaMsg, 15000, true); this.face.setEmotion('gene', 4000); this.endConversation('quota');
+      } else if (e.auth) {
+        this.badge('Google refuse ma clé — appui long sur moi, puis « Vérifier la clé »', 15000, true); this.endConversation('clé');
+      } else {
+        this.face.setEmotion('confus', 3000);
+        this.badge(`Je n'arrive pas à réfléchir : ${shorten(e.message)}`, 10000, true);
+      }
+    } finally {
+      E.busy = false; this.lastActivity = performance.now();
+      const next = E.queue.shift();
+      if (next && conv === this.convId) this._ecoSend(next);
+    }
+  }
+
+  async _say(text) {
+    this.barge.n = 0; this.barge.echo = Math.max(-60, this.audio.db);
+    this.lastActivity = performance.now();
+    try { await this.voice.speak(text); }
+    catch (e) {
+      this.log('Voix : ' + (e.code || e));
+      if (e.code === 'not-allowed') {
+        this.badge('Touche-moi une fois pour que je puisse parler à voix haute', 10000, true);
+        const st = $('subtitle'); st.hidden = false; st.textContent = text.slice(0, 220);
+        setTimeout(() => { st.hidden = !this.settings.subtitles; }, 8000);
+      }
+    }
+    this.playEndAt = performance.now(); this.lastActivity = this.playEndAt; this.face.setTalk(0);
+  }
+
   // Quota gratuit épuisé : pause jusqu'au délai indiqué par Google, sinon jusqu'à la remise à zéro quotidienne
   // (minuit heure du Pacifique, soit 9h00 en France l'été, 8h00 l'hiver).
   _quotaPause(msg) {
-    const m = /retry in ([\d.]+)\s*s/i.exec(msg || '');
-    const now = Date.now();
-    let until, txt;
-    if (/limit:\s*0\b/i.test(msg || '')) {                       // aucun quota gratuit pour ce projet : attendre ne sert à rien
-      until = now + 30 * 60000;
-      txt = "Google n'accorde aucun quota gratuit à ce projet pour mes modèles vocaux (limite 0).";
-    } else if (m && +m[1] < 3600) {
-      until = now + Math.ceil(+m[1]) * 1000;
-      txt = `Google me demande de patienter ${Math.ceil(+m[1])} s (limite par minute du compte gratuit).`;
-    } else {
-      until = nextPacificMidnight();
-      const d = new Date(until);
-      txt = `Mon quota gratuit Google est épuisé pour aujourd'hui. Je pourrai reparler à ${d.getHours()}h${String(d.getMinutes()).padStart(2, '0')}.`;
-    }
-    this.quotaUntil = until; this.quotaMsg = txt; this.quotaRaw = msg; this.log('Quota : ' + txt + ' — Google : ' + msg);
+    const q = quotaInfo(msg, 'mes modèles vocaux en direct');
+    this.quotaUntil = q.until; this.quotaMsg = q.txt; this.quotaRaw = msg; this.log('Quota direct : ' + q.txt + ' — Google : ' + msg);
+    // Retenu même après un redémarrage (pour cette clé) : inutile de retenter le direct avant la remise à zéro.
+    try { localStorage.setItem('wilson.quota', JSON.stringify({ k: this.settings.apiKey.slice(-8), until: q.until, txt: q.txt })); } catch (_) {}
+  }
+  _loadQuota() {
+    try {
+      const o = JSON.parse(localStorage.getItem('wilson.quota'));
+      if (o && o.k === this.settings.apiKey.slice(-8) && o.until > Date.now()) { this.quotaUntil = o.until; this.quotaMsg = o.txt; this.log('Direct en pause (quota) jusqu\'à la remise à zéro'); }
+    } catch (_) {}
+  }
+  _ecoQuotaPause(msg) {
+    const q = quotaInfo(msg, 'le mode économique');
+    this.ecoQuotaUntil = q.until; this.ecoQuotaMsg = q.txt; this.log('Quota économique : ' + q.txt + ' — Google : ' + msg);
   }
 
-  // Diagnostic : ouvre puis referme une connexion Gemini, sans parler.
+  // Diagnostic : vérifie le cerveau (direct puis, si besoin, mode économique), sans parler.
   async testConnection() {
     if (this.state === 'eveil' || this.state === 'conversation') return { ok: true, msg: 'Déjà en conversation' };
-    this.quotaUntil = 0;
-    try {
-      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system() });
-      const b = this.brain; this.brain.close();
-      return { ok: true, msg: `${b.modelUsed}, ${b.authMode === 'key' ? 'clé' : 'jeton'}, configuration ${['complète', 'simplifiée', 'minimale'][b.level]}` };
-    } catch (e) { if (e.quota) this._quotaPause(e.message); return { ok: false, auth: !!e.auth, quota: !!e.quota, msg: e.quota ? this.quotaMsg + ' (' + e.message + ')' : e.message }; }
+    this.quotaUntil = 0; this.ecoQuotaUntil = 0;
+    const want = this.settings.brainMode || 'auto', lines = []; let ok = false, auth = false;
+    if (want !== 'eco') {
+      try {
+        await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system() });
+        const b = this.brain; this.brain.close(); ok = true;
+        lines.push(`Direct ✓ (${b.modelUsed}, configuration ${['complète', 'simplifiée', 'minimale'][b.level]})`);
+      } catch (e) {
+        if (e.quota) this._quotaPause(e.message); auth = !!e.auth;
+        lines.push(`Direct impossible${e.quota ? ' (quota)' : ''} : « ${e.message} »`);
+      }
+    }
+    if (!auth && (want === 'eco' || (want === 'auto' && !ok))) {
+      try {
+        const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), text: '[Test de connexion : réponds en JSON avec pour_moi true et reponse "OK".]' });
+        this.eco.reset(); ok = true;
+        lines.push(`Mode économique ✓ (${out.model}) — Wilson répondra avec la voix de la tablette`);
+      } catch (e) {
+        if (e.quota) this._ecoQuotaPause(e.message); auth = auth || !!e.auth;
+        lines.push(`Mode économique impossible${e.quota ? ' (quota)' : ''} : « ${e.message} »`);
+      }
+    }
+    return { ok, auth, msg: lines.join(' · ') };
   }
 
   endConversation(why) {
     if (this.state !== 'conversation' && this.state !== 'eveil') return;
     this.log(`Fin de conversation (${why})`); this.convId++; this.endAfterSpeech = false;
-    this.brain.close(); this.audio.flush(); this.outBuf = []; this.outLen = 0;
+    this.brain.close(); this.audio.flush(); this.voice.cancel(); this.outBuf = []; this.outLen = 0;
+    if (this.ecoState) this.ecoState.queue = []; this.ecoState = null; this.mode = null;
     this.face.setTalk(0); this.face.setListen(-1); this.face.clearEmotion();
     $('subtitle').textContent = '';
     if (this.continuous && why !== 'mode') { setTimeout(() => this.startConversation('continu'), 1500); }
     this.setState('veille');
   }
 
-  _system() {
+  _system(mode = 'live') {
     const s = this.settings, m = this.memory.forPrompt();
     const bat = this.battery && !this.battery.charging ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le gentiment.` : '';
-    return `Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d'une famille. Ton visage animé (deux grands yeux couleur miel, des sourcils, une bouche) montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.
+    const tools = mode === 'eco' ? ECO_FORMAT : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
+Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
+La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
+L'heure et la date : appelle date_et_heure.`;
+    return `Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d'une famille. Ton visage animé montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.
 
 Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies la famille. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles.
 
@@ -260,10 +398,7 @@ Quand parler :
 - Si on te coupe la parole, arrête-toi et écoute.
 
 Ta vue : si on te montre quelque chose ou si on te demande ce que tu vois, décris et commente l'image la plus récente. Sinon, ne commente pas l'image.
-Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
-Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
-La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
-L'heure et la date : appelle date_et_heure.
+${tools}
 Recherche Google : utilise-la dès qu'une réponse dépend de l'actualité ou d'informations qui changent (météo, actualités, sport, horaires, prix, programmes télé, adresses, personnes connues), quand on te demande de chercher, ou quand tu n'es pas sûr d'un fait${s.city ? ` ; la maison est à ${s.city}` : ''}. Résume le résultat à l'oral en une à trois phrases, sans lire de liens ni d'adresses web.
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
@@ -283,6 +418,10 @@ Nous sommes ${fmtDate()}.${bat}`;
     this.audio.on('frame', (f32, i16, db) => {
       if (this.state === 'veille' || this.state === 'dodo') { this.ear.feed(f32); return; }
       if (this.state === 'eveil') { if (this.pending) this.pending.push(i16); return; }
+      if (this.state === 'conversation' && this.mode === 'eco') {
+        if (this.voice.speaking) this._bargeCheck(db); else this._ecoFrame(i16);
+        return;
+      }
       if (this.state !== 'conversation' || !this.brain.open) return;
       const now = performance.now();
       if (this.settings.bargeIn === 'prudente') {
@@ -314,12 +453,19 @@ Nous sommes ${fmtDate()}.${bat}`;
   }
 
   interrupt(why) {
-    if (!this.audio.playing) return;
+    const live = this.audio.playing, tts = this.voice.speaking;
+    if (!live && !tts) return;
     this.log(`Coupé (${why})`);
-    this.audio.flush(); this.playEndAt = -1e9; this.discard = true; this.face.setTalk(0);
+    this.playEndAt = -1e9; this.face.setTalk(0);
     this.face.setEmotion('ecoute', 2500); this.face.play('startle');
-    // Le début de la phrase de la personne part tout de suite à Gemini.
-    if (this.brain.open) this.brain.sendAudio(this.audio.recent(700));
+    if (live) {
+      this.audio.flush(); this.discard = true;
+      if (this.brain.open) this.brain.sendAudio(this.audio.recent(700));     // le début de la phrase part tout de suite
+    }
+    if (tts) {
+      this.voice.cancel();
+      if (this.ecoState && !this.ecoState.cap) { const r = this.audio.recent(700); this.ecoState.cap = { chunks: [r], len: r.length, lastVoice: performance.now() }; }
+    }
     this.lastActivity = this.lastUserSpeech = performance.now();
   }
 
@@ -399,7 +545,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     s.on('tap', () => {
       if (!this.started) { this.boot(); return; }
       if (!this.audio.running) { this.audio.resume(); this._hideWake(); return; }
-      if (this.audio.playing) { this.interrupt('toucher'); return; }
+      if (this.speaking) { this.interrupt('toucher'); return; }
       if (this.state === 'veille' || this.state === 'dodo') { this.face.setEmotion('surprise', 900); this.startConversation('toucher'); return; }
       this.face.setEmotion('rire', 1600);
     });
@@ -407,7 +553,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     s.on('longpress', () => this.ui.open());
     s.on('shake', () => {
       this.face.setEmotion('peur', 2500);
-      if (this.state === 'conversation' && this.brain.open) this.brain.sendText('[La tablette vient d\'être secouée ou déplacée.]');
+      if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText('[La tablette vient d\'être secouée ou déplacée.]');
     });
     s.on('battery', (b) => {
       const was = this.battery; this.battery = b;
@@ -424,12 +570,14 @@ Nous sommes ${fmtDate()}.${bat}`;
     f.setLook(v && v.target && this.state !== 'dodo' ? v.target[0] : null, v && v.target ? v.target[1] : 0);
     // Lèvres
     if (this.audio.playing) { const [l, r] = this.audio.outputLevels(); f.setTalk(l, r); }
+    else if (this.voice.speaking) f.setTalk(this.voice.mouth(now), 0.25);
     if (this.state === 'conversation') {
-      f.setListen(this.audio.playing ? -1 : this.audio.level);
-      if (this.audio.speaking || now - this.lastUserSpeech < 1500) this._sendFrame(false);
+      const E = this.ecoState, thinking = E && (E.busy || E.cap);
+      f.setListen(this.speaking || (E && E.busy) ? -1 : this.audio.level);
+      if (this.mode === 'live' && (this.audio.speaking || now - this.lastUserSpeech < 1500)) this._sendFrame(false);
       // R3 : la conversation se ferme d'elle-même après un silence.
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
-      if (!this.continuous && !this.audio.playing && !this.audio.speaking && idle > this.settings.convTimeout * 1000) this.endConversation('silence');
+      if (!this.continuous && !this.speaking && !this.audio.speaking && !thinking && idle > this.settings.convTimeout * 1000) this.endConversation('silence');
       if (this.continuous && idle > 30000 && f.p.bright.t > 0.5) { f.setBrightness(0.3); f.setMood('somnolent'); }
       if (this.continuous && idle < 1000 && f.p.bright.t < 0.5) { f.setBrightness(1); f.setMood('ecoute'); }
     }
@@ -449,6 +597,14 @@ function nextPacificMidnight() {
   const la = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
   const ms = (24 * 3600 - (la.getHours() * 3600 + la.getMinutes() * 60 + la.getSeconds())) * 1000;
   return now.getTime() + ms + 60000;
+}
+
+function quotaInfo(msg, what) {
+  const m = /retry in ([\d.]+)\s*s/i.exec(msg || ''), now = Date.now();
+  if (/limit:\s*0\b/i.test(msg || '')) return { until: nextPacificMidnight(), txt: `Google n'accorde aucun quota gratuit à ce projet pour ${what} (limite 0).` };
+  if (m && +m[1] < 3600) return { until: now + Math.ceil(+m[1]) * 1000, txt: `Google me demande de patienter ${Math.ceil(+m[1])} s (limite par minute du compte gratuit).` };
+  const until = nextPacificMidnight(), d = new Date(until);
+  return { until, txt: `Mon quota gratuit Google pour ${what} est épuisé pour aujourd'hui. Je pourrai reparler à ${d.getHours()}h${String(d.getMinutes()).padStart(2, '0')}.` };
 }
 
 function shorten(m) { m = (m || 'erreur inconnue').replace(/\s+/g, ' ').trim(); return m.length > 140 ? m.slice(0, 137) + '…' : m; }

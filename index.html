@@ -55,8 +55,15 @@
         <div class="buttons"><button id="t-key" class="btn">Vérifier la clé et la connexion</button></div>
         <p id="s-keystatus" class="status" hidden></p>
         <label class="row"><span>Modèle</span><input id="s-model" class="field" type="text"></label>
-        <label class="row"><span>Voix</span><select id="s-voice" class="field"></select></label>
-        <div class="buttons"><button id="t-voice" class="btn">Faire parler Wilson</button></div>
+        <label class="row"><span>Cerveau</span>
+          <select id="s-brain" class="field">
+            <option value="auto">Automatique : direct si possible, sinon économique</option>
+            <option value="live">Direct uniquement (Gemini Live)</option>
+            <option value="eco">Économique uniquement (Gemini Flash + voix de la tablette)</option>
+          </select></label>
+        <label class="row"><span>Voix en direct</span><select id="s-voice" class="field"></select></label>
+        <label class="row"><span>Voix en mode économique</span><select id="s-ecovoice" class="field"></select></label>
+        <div class="buttons wrap"><button id="t-ecovoice" class="btn">Écouter cette voix</button><button id="t-voice" class="btn">Faire parler Wilson</button></div>
       </section>
 
       <section class="group">

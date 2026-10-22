@@ -1,8 +1,8 @@
 // Wilson — service worker : l'appli démarre même sans réseau et le modèle vocal (46 Mo) n'est téléchargé qu'une fois.
-const VERSION = 'wilson-1.1.3';
+const VERSION = 'wilson-1.2.0';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/wilson.css',
-  'js/app.js', 'js/face.js', 'js/audio.js', 'js/ear.js', 'js/brain.js', 'js/vision.js', 'js/memory.js', 'js/sensors.js', 'js/settings.js',
+  'js/app.js', 'js/voice.js', 'js/eco.js', 'js/face.js', 'js/audio.js', 'js/ear.js', 'js/brain.js', 'js/vision.js', 'js/memory.js', 'js/sensors.js', 'js/settings.js',
   'js/faces/util.js', 'js/faces/lumiere.js', 'js/faces/bouille.js', 'js/faces/led.js', 'js/faces/miel.js', 'visages.html',
   'js/worklets/capture.js', 'vendor/vosk.js', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
