@@ -72,3 +72,10 @@ textarea.field { resize: vertical; }
 .eartest { margin-top: 10px; font-size: 14px; color: var(--ink-2); }
 .eartest b { color: var(--ink); font-weight: 600; }
 @media (max-width: 640px) { .sheet-card { padding: 20px; } h1 { font-size: 24px; } }
+.status { margin: 10px 0 16px; font-size: 14px; color: var(--ink-2); line-height: 1.45; }
+.status[hidden] { display: none; }
+.status.ok { color: #9fd8a0; }
+.status.err { color: #f0a0a8; }
+.status b { color: var(--ink); }
+.btn:disabled { opacity: .6; }
+.group .buttons + .status { margin-bottom: 12px; }

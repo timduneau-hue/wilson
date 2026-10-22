@@ -10,7 +10,7 @@ import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
 const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
@@ -164,7 +164,7 @@ class App {
     } catch (e) {
       this.log('Gemini : ' + e.message);
       this.face.setEmotion('confus', 4000);
-      this.badge(/key|API|permission|401|403/i.test(e.message) ? 'Ma clé Gemini est refusée — vérifie-la dans les réglages' : "Je n'arrive pas à joindre mon cerveau", 7000);
+      this.badge(e.auth ? 'Google refuse ma clé — appui long sur moi, puis « Vérifier la clé »' : "Je n'arrive pas à joindre mon cerveau", 8000);
       this.setState('veille'); return;
     }
     this.log(`Conversation ouverte (${reason})`);

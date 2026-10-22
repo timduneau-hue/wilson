@@ -29,9 +29,10 @@
     <p class="lead">Pour que je puisse te parler, il me faut une clé Gemini (gratuite).</p>
     <ol class="steps">
       <li>Ouvre <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> avec ton compte Google et crée une clé.</li>
-      <li>Copie-la et colle-la ici :</li>
+      <li>Copie-la avec l'icône <b>copier</b> (la clé affichée est raccourcie) et colle-la ici :</li>
     </ol>
-    <input id="w-key" class="field" type="password" autocomplete="off" placeholder="Clé API Gemini (commence par AIza…)">
+    <input id="w-key" class="field" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Clé API Gemini (commence par AQ. ou AIza)">
+    <p id="w-status" class="status" hidden></p>
     <label class="row"><span>Qui vit à la maison ? <em>(facultatif)</em></span></label>
     <textarea id="w-home" class="field" rows="2" placeholder="Ex. : Timothée, sa femme, leurs enfants… et le chat."></textarea>
     <button id="w-go" class="btn primary">Réveiller Wilson</button>
@@ -50,7 +51,9 @@
     <div class="grid">
       <section class="group">
         <h3>Cerveau et voix</h3>
-        <label class="row"><span>Clé API Gemini</span><input id="s-key" class="field" type="password" autocomplete="off"></label>
+        <label class="row"><span>Clé API Gemini</span><input id="s-key" class="field" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <div class="buttons"><button id="t-key" class="btn">Vérifier la clé</button></div>
+        <p id="s-keystatus" class="status" hidden></p>
         <label class="row"><span>Modèle</span><input id="s-model" class="field" type="text"></label>
         <label class="row"><span>Voix</span><select id="s-voice" class="field"></select></label>
         <div class="buttons"><button id="t-voice" class="btn">Faire parler Wilson</button></div>
