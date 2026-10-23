@@ -168,7 +168,7 @@ async def main():
         await page.wait_for_function('wilson.state === "veille"', timeout=15000); await page.wait_for_timeout(200)
         badge = await page.evaluate("document.getElementById('badge').textContent")
         check('Quota économique épuisé → message clair, retour en veille', 'mode économique' in badge and 'épuisé' in badge, badge)
-        check('3 modèles essayés au plus', len(st['reqs']) - n <= 3, f"{len(st['reqs']) - n} requêtes : {[x['model'] for x in st['reqs'][n:]]}")
+        check('Chaque modèle essayé une fois au plus (3.x puis secours 2.5)', len(st['reqs']) - n <= 5, f"{len(st['reqs']) - n} requêtes : {[x['model'] for x in st['reqs'][n:]]}")
         n = len(st['reqs'])
         await page.evaluate("wilson._onWakeWord({text:'wilson', conf:0.9})"); await page.wait_for_timeout(800)
         check('Ensuite : aucune requête gaspillée', len(st['reqs']) == n)

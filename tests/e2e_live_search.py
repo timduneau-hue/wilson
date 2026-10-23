@@ -17,7 +17,7 @@ def audio_chunks(seconds):
 
 
 async def main():
-    conns, eco = [], {'reqs': [], 'delay': 0, 'reply': 'Demain à Argenteuil, soleil et 18 degrés.'}
+    conns, eco = [], {'reqs': [], 'delay': 0, 'reply': 'Demain à Argenteuil, soleil et 18 degrés.', 'quota_web': False}
     async with async_playwright() as p:
         b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
             f'--use-file-for-fake-audio-capture={S}/fixtures/quiet.wav', '--autoplay-policy=no-user-gesture-required'])
@@ -42,6 +42,10 @@ async def main():
             if req.method == 'OPTIONS':
                 await route.fulfill(status=204, headers={**H, 'access-control-allow-headers': '*'}); return
             body = json.loads(req.post_data); eco['reqs'].append(body)
+            if eco['quota_web'] and 'tools' in body:      # quota de recherche Google épuisé (cas réel du 23/10/26)
+                await route.fulfill(status=429, content_type='application/json', headers=H, body=json.dumps({'error': {'code': 429, 'status': 'RESOURCE_EXHAUSTED',
+                    'message': 'You exceeded your current quota, please check your plan and billing details.',
+                    'details': [{'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/search_grounding_requests', 'quotaId': 'SearchGroundingRequestsPerDay-FreeTier', 'quotaValue': '0'}]}]}})); return
             if eco['delay']: await asyncio.sleep(eco['delay'])
             text = json.dumps({'pour_moi': True, 'emotion': 'joie', 'reponse': eco['reply'], 'entendu': ''}, ensure_ascii=False)
             try:
@@ -80,19 +84,40 @@ async def main():
         check('Délais : temps de recherche indiqué', 'dont recherche' in d, d)
         await page.wait_for_function('!wilson.audio.playing', timeout=5000); await page.wait_for_timeout(600)
 
-        # 2. Recherche trop longue : au bout de ~9 s, Gemini reçoit « pas abouti » (Wilson n'attend jamais indéfiniment).
-        eco['delay'] = 15; n = len(conn['tool_responses']); t0 = time.time()
+        # 2. Recherche lente (12 s) : Wilson a dit qu'il cherchait, il attend l'info et la donne (il n'abandonne pas).
+        eco['delay'] = 12; eco['reply'] = 'Le match s\'est terminé sur le score de 2 à 1.'; n = len(conn['tool_responses']); t0 = time.time()
         conn['ws'].send(json.dumps({'toolCall': {'functionCalls': [{'id': 's2', 'name': 'chercher', 'args': {'question': 'Résultat du match de ce soir ?'}}]}}))
-        for _ in range(140):
+        for _ in range(200):
             if len(conn['tool_responses']) > n: break
             await asyncio.sleep(0.1)
         dt = time.time() - t0
         r = conn['tool_responses'][n] if len(conn['tool_responses']) > n else {}
-        check('Recherche trop longue : réponse « pas abouti » après ~9 s', r.get('id') == 's2' and 'pas abouti' in r.get('response', {}).get('result', '') and 8 <= dt <= 11.5, f"{dt:.1f} s")
+        check('Recherche lente : la vraie réponse arrive quand elle est prête (pas d\'abandon)', r.get('id') == 's2' and '2 à 1' in r.get('response', {}).get('result', '') and 11 <= dt <= 15, f"{dt:.1f} s")
+        eco['delay'] = 0
 
         # 3. Gemini reste muet après le résultat : relance au bout de 10 s.
         await page.wait_for_timeout(10500)
         check('Gemini muet 10 s après le résultat → relance', any('Donne maintenant ta réponse' in x for x in conn['texts']) and any('relance' in l for l in logs), str(conn['texts'][-1:]))
+
+        # 3b. Google refuse la recherche (quota) : même question sans Internet, réponse prudente plutôt que rien.
+        eco['quota_web'] = True; eco['reply'] = 'Je ne peux pas vérifier en ligne pour l\'instant, mais en octobre il fait souvent doux.'
+        n = len(conn['tool_responses']); k = len(eco['reqs'])
+        conn['ws'].send(json.dumps({'toolCall': {'functionCalls': [{'id': 's4', 'name': 'chercher', 'args': {'question': 'Quel temps fera-t-il demain à Angers ?'}}]}}))
+        for _ in range(80):
+            if len(conn['tool_responses']) > n: break
+            await asyncio.sleep(0.1)
+        r = conn['tool_responses'][n] if len(conn['tool_responses']) > n else {}
+        reqs = eco['reqs'][k:]
+        check('Recherche refusée (quota) : réponse sans Internet, Wilson répond quand même', r.get('id') == 's4' and 'vérifier en ligne' in r.get('response', {}).get('result', '')
+              and reqs and 'tools' not in reqs[-1] and any('tools' in x for x in reqs), f"{len(reqs)} requêtes, dernière sans recherche : {'tools' not in reqs[-1] if reqs else '?'}")
+        check('Détail du quota écrit dans le journal', any('SearchGroundingRequestsPerDay-FreeTier, limit: 0' in l for l in logs))
+        await page.wait_for_timeout(300)
+        k = len(eco['reqs'])
+        conn['ws'].send(json.dumps({'toolCall': {'functionCalls': [{'id': 's5', 'name': 'chercher', 'args': {'question': 'Et après-demain ?'}}]}}))
+        await page.wait_for_timeout(1500)
+        check('Recherche refusée retenue : la suivante part directement sans Internet (1 seule requête)', len(eco['reqs']) - k == 1 and 'tools' not in eco['reqs'][k], f"{len(eco['reqs']) - k} requête(s)")
+        await page.evaluate("localStorage.removeItem('wilson.rechercheRefusee')")
+        eco['quota_web'] = False
 
         # 4. On coupe Wilson pendant une recherche : elle est abandonnée, rien n'est renvoyé.
         eco['delay'] = 3; n = len(conn['tool_responses'])
