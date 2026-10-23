@@ -18,7 +18,7 @@ export function keyMessage(r) {
 const KEY = 'wilson.settings';
 export const DEFAULTS = {
   apiKey: '', model: 'gemini-3.8-live', voice: 'Puck',
-  earMode: 'local', sensitivity: 'normale', convTimeout: 12, bargeIn: 'prudente',
+  listenMode: 'regard', gazeCalib: { yaw: 0, pitch: 0 }, convTimeout: 12, bargeIn: 'prudente',
   home: '', city: '', nightStart: 23, nightEnd: 7,
   camera: true, mirror: false, subtitles: false, face: 'lumiere', brainMode: 'auto', ecoVoice: '', ecoSpeed: 'rapide',
 };
@@ -33,7 +33,9 @@ export function loadSettings() {
   let s;
   try { s = { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch { s = { ...DEFAULTS }; }
   // Migration 1.4 : mode le plus rapide par défaut, conversation plus courte.
-  if ((s.v || 1) < 2) { s.ecoSpeed = 'rapide'; if (s.convTimeout === 20) s.convTimeout = 12; s.v = 2; try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (_) {} }
+  if ((s.v || 1) < 2) { s.ecoSpeed = 'rapide'; if (s.convTimeout === 20) s.convTimeout = 12; s.v = 2; }
+  if (s.v < 3) { s.listenMode = 'regard'; s.ecoSpeed = 'rapide'; s.v = 3; }   // 1.5 : écoute au regard, plus de mot-clé
+  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (_) {}
   return s;
 }
 export function saveSettings(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
@@ -69,7 +71,7 @@ export class SettingsUI {
         : `Wilson ne peut pas encore parler : ${esc(c.msg)}`) + `<br><em>Wilson ${app.version} · connexions aujourd'hui : ${sessionsToday()}</em>`;
       app.log('Test connexion : ' + (c.ok ? 'OK ' : 'échec ') + c.msg);
     };
-    bind('s-voice', 'voice'); bind('s-face', 'face'); bind('s-brain', 'brainMode'); bind('s-ecospeed', 'ecoSpeed'); bind('s-ecovoice', 'ecoVoice'); bind('s-earmode', 'earMode'); bind('s-sens', 'sensitivity');
+    bind('s-voice', 'voice'); bind('s-face', 'face'); bind('s-brain', 'brainMode'); bind('s-ecospeed', 'ecoSpeed'); bind('s-ecovoice', 'ecoVoice'); bind('s-listen', 'listenMode');
     bind('s-timeout', 'convTimeout', Number); bind('s-barge', 'bargeIn');
     bind('s-home', 'home'); bind('s-city', 'city'); bind('s-night1', 'nightStart', Number); bind('s-night2', 'nightEnd', Number);
     bind('s-cam', 'camera', Boolean, 'checked'); bind('s-mirror', 'mirror', Boolean, 'checked'); bind('s-subs', 'subtitles', Boolean, 'checked');
@@ -79,7 +81,25 @@ export class SettingsUI {
     $('t-voice').onclick = () => { this.close(); app.startConversation('test'); };
     $('t-ecovoice').onclick = () => { app.voice.voiceName = this.s.ecoVoice; app.voice.speak("Bonjour ! Je suis Wilson. Voilà ma voix quand je suis en mode économique.").catch(() => {}); };
     if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', () => { if (app.settingsOpen) this.fillVoices(); });
-    $('t-ear').onclick = () => { const on = $('ear-test').hidden; $('ear-test').hidden = !on; app.earTest = on; $('t-ear').textContent = on ? 'Arrêter le test' : "Tester l'oreille"; };
+    $('t-gaze').onclick = () => {
+      const box = $('gaze-test'), on = box.hidden; box.hidden = !on; $('t-calib').hidden = !on;
+      $('t-gaze').textContent = on ? 'Arrêter le test' : 'Tester le regard';
+      clearInterval(this._gz);
+      if (on) this._gz = setInterval(() => {
+        const v = app.vision;
+        if (!v) { box.textContent = 'Caméra coupée'; return; }
+        if (!v.gazeReady) { box.textContent = v.modelsDone ? 'Détection du regard indisponible sur cette tablette' : 'Chargement de la détection du regard…'; return; }
+        const g = v.gaze;
+        box.innerHTML = `<div>${v.looking ? '<b>Tu me regardes ✓</b>' : 'Tu ne me regardes pas'}</div>` +
+          (g ? `<div>Visages : ${v.faces} · tête ${Math.round(g.yaw)}° · regard ${Math.round(g.gazeYaw)}° · haut/bas ${Math.round(g.pitch)}° · distance ~${(0.12 / Math.max(g.size, 0.01)).toFixed(1)} m</div>` : '<div>Aucun visage</div>') +
+          `<div><em>Analyse : ${Math.round(v.stats.ms)} ms (${v.delegate || '—'})</em></div>`;
+      }, 300);
+    };
+    $('t-calib').onclick = () => {
+      const v = app.vision, g = v && v.gaze; if (!g) return;
+      v.calib = { yaw: v.calib.yaw + g.gazeYaw, pitch: v.calib.pitch + g.pitch };
+      this.s.gazeCalib = v.calib; saveSettings(this.s); app.log(`Regard calibré : ${Math.round(v.calib.yaw)}°, ${Math.round(v.calib.pitch)}°`);
+    };
     $('m-export').onclick = () => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([app.memory.export()], { type: 'application/json' }));
@@ -114,11 +134,13 @@ export class SettingsUI {
     const s = this.s;
     $('s-key').value = s.apiKey; $('s-model').value = s.model; $('s-voice').value = s.voice; $('s-face').value = s.face;
     $('s-brain').value = s.brainMode; $('s-ecospeed').value = s.ecoSpeed; this.fillVoices();
-    $('s-earmode').value = s.earMode; $('s-sens').value = s.sensitivity; $('s-timeout').value = String(s.convTimeout);
+    $('s-listen').value = s.listenMode; $('s-timeout').value = String(s.convTimeout);
     $('s-barge').value = s.bargeIn; $('s-home').value = s.home; $('s-city').value = s.city;
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
-    $('version').textContent = `Wilson ${this.app.version} · oreille : ${this.app.ear.ready ? 'prête' : 'en chargement'} · vision : ${this.app.vision ? this.app.vision.mode : 'coupée'} · connexions Gemini aujourd'hui : ${sessionsToday()}`;
+    const v = this.app.vision;
+    const gaze = !v ? 'caméra coupée' : v.gazeReady ? `regard prêt (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}, ${Math.round(v.stats.ms || 0)} ms)` : v.modelsDone ? 'regard indisponible' : 'regard en chargement';
+    $('version').textContent = `Wilson ${this.app.version} · vision : ${v ? v.mode : 'coupée'}, ${gaze} · connexions Gemini aujourd'hui : ${sessionsToday()}`;
     this.renderMemory(); this.renderLog();
   }
   fillVoices() {
@@ -136,10 +158,8 @@ export class SettingsUI {
   }
   renderLog() { const el = $('log'); el.textContent = this.app.logs.join('\n'); el.scrollTop = el.scrollHeight; }
   open() { this.fill(); $('settings').hidden = false; this.app.settingsOpen = true; }
-  close() { $('settings').hidden = true; this.app.settingsOpen = false; this.app.earTest = false; $('ear-test').hidden = true; $('t-ear').textContent = "Tester l'oreille"; }
+  close() { $('settings').hidden = true; this.app.settingsOpen = false; clearInterval(this._gz); $('gaze-test').hidden = true; $('t-calib').hidden = true; $('t-gaze').textContent = 'Tester le regard'; }
   showWelcome() { $('w-home').value = this.s.home; $('w-key').value = this.s.apiKey || ''; $('welcome').hidden = false; }
-  earHeard(t) { $('ear-heard').textContent = t || '—'; }
-  earWake() { const c = $('ear-count'); c.textContent = String(+c.textContent + 1); }
 }
 
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

@@ -13,7 +13,7 @@ export const ECO_MODELS = {
 // avant la fin de l'écriture (l'émotion juste avant, la transcription à la fin).
 export const ECO_FORMAT = `MODE ÉCONOMIQUE — tu reçois l'enregistrement audio de ce qui vient d'être dit dans le salon (et parfois une photo de ce que tu vois, ou une consigne écrite entre crochets).
 Réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs DANS CET ORDRE EXACT :
-{"pour_moi": true si la phrase s'adresse à toi (ton prénom, ou la suite évidente de votre conversation), false si les gens parlent entre eux, au téléphone, si c'est la télé ou un bruit,
+{"pour_moi": true si la phrase s'adresse à toi (on te regardait en la disant : c'est en général le cas, ou la suite évidente de votre conversation), false si c'est la télé, un bruit, une phrase coupée ou visiblement adressée à quelqu'un d'autre,
  "emotion": "une émotion parmi neutre, joie, rire, triste, surprise, colere, curieux, reflexion, tendresse, gene, confus, peur, fier, ennui, somnolent",
  "reponse": "ce que tu dis à voix haute, en français oral, une à trois phrases courtes, sans liens ni symboles ; vide si pour_moi est false",
  "geste": "aucun, oui, non, clin_oeil, sautiller ou pencher_la_tete",

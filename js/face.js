@@ -160,7 +160,7 @@ export class Face {
 
   _frame(now) {
     requestAnimationFrame((t) => this._frame(t));
-    const div = Math.max(this.fpsDiv, this.style.maxFps === 30 ? 2 : 1);
+    const div = Math.max(this.fpsDiv, this.style.maxFps === 30 || this.maxFpsLight ? 2 : 1);
     if (++this._n % div) return;
     const dt = Math.min((now - this.last) / 1000, 0.1); this.last = now;
     const T = (now - this.t0) / 1000;
