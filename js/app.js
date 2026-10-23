@@ -13,11 +13,11 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.8.2';
+const VERSION = '1.8.3';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 450;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce dure un peu plus
-const SEARCH_MAX_MS = 9000;       // outil « chercher » du mode direct : au-delà, Wilson dit qu'il n'a pas trouvé (jamais bloqué)
+const SEARCH_MAX_MS = 30000;      // outil « chercher » : Wilson a dit qu'il cherchait, il répond quand il a l'info (filet : 30 s)
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
 const ECO_SPEC_MS = 250;          // envoi anticipé : la phrase part dès ce silence, Wilson ne parle qu'à la fin confirmée (PLAN 6 bis)
 const ECO_TAIL_MS = 1000;         // après avoir parlé : le son de la tablette finit de sortir après l'annonce « fini »
@@ -473,7 +473,8 @@ class App {
           } catch (e) {
             if (e.name === 'AbortError') throw e;
             this.log('Recherche impossible : ' + e.message);
-            speakChunk("Je n'arrive pas à chercher ça pour le moment.");
+            try { speakChunk(await this._lookup(`${out.entendu || ''} (${out.chercher})`, req.ctl.signal)); }
+            catch (e2) { if (e2.name === 'AbortError') throw e2; speakChunk("Je n'arrive pas à trouver l'information pour le moment."); }
           }
         }
         this.log(`« ${out.entendu.slice(0, 90)} » → ${said.slice(0, 110)}`, true);
@@ -626,7 +627,7 @@ La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds
 L'heure et la date : appelle date_et_heure.`;
     return `Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d'une famille. Ton visage animé montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.
 
-Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies la famille. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles.
+Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies toujours la famille (jamais « vous »). Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles.
 
 Quand parler :
 - On ne t'envoie que ce qui a été dit pendant qu'on te regardait : la personne s'adresse à toi, réponds-lui (pas besoin de ton prénom).
@@ -795,7 +796,31 @@ Nous sommes ${fmtDate()}.${bat}`;
     if (res.length) this.brain.respond(res);
   }
 
-  // Outil « chercher » du mode direct : Gemini Flash-Lite + Google Search (requête texte, rapide), avec un délai maximal.
+  // Trouve l'info : recherche Google ; si Google la refuse (quota de recherche…), même question sans Internet, réponse prudente.
+  async _lookup(question, signal, t0 = performance.now()) {
+    const key = this.settings.apiKey, sys = this._system('eco-search');
+    const noWeb = () => this.eco.ask({ key, system: sys, search: true, web: false, fresh: true, signal,
+      text: `[Question : « ${question} ». La recherche Internet est impossible pour l'instant : réponds avec ce que tu sais en le précisant, ou dis que tu ne peux pas savoir. Réponds au format JSON demandé.]` });
+    let out, until = 0;
+    try { until = +localStorage.getItem('wilson.rechercheRefusee') || 0; } catch (_) {}
+    if (until > Date.now()) out = await noWeb();                                   // Google refuse la recherche en ce moment : pas d'essai inutile
+    else {
+      try {
+        out = await this.eco.ask({ key, system: sys, search: true, fresh: true, signal, text: `[Question : « ${question} ». Fais une recherche Google, puis réponds au format JSON demandé.]` });
+      } catch (e) {
+        if (e.name === 'AbortError' || e.auth) throw e;
+        this.log('Recherche Google refusée : ' + e.message + ' → réponse sans Internet');
+        out = await noWeb();
+        // Sans Internet ça marche : c'est bien la recherche qui est refusée (quota) → on ne la retente pas avant 6 h.
+        if (e.quota) { try { localStorage.setItem('wilson.rechercheRefusee', String(Date.now() + 6 * 3600000)); } catch (_) {} }
+      }
+    }
+    this.log(`Recherche faite en ${((performance.now() - t0) / 1000).toFixed(1)} s (${out.model}${out.searched ? ', avec Google' : ', sans résultat Google'})`);
+    return sayable(out.reponse) || "Je n'ai rien trouvé de sûr.";
+  }
+
+  // Outil « chercher » du mode direct : Wilson dit qu'il cherche, l'appli interroge Gemini Flash-Lite + Google Search,
+  // et le résultat lui est rendu dès qu'il arrive (filet de sécurité : 30 s).
   // Remplace la recherche intégrée de Gemini Live, restée bloquée sur « je cherche ça tout de suite » le 23/10/26.
   async _search(call, question) {
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
@@ -804,14 +829,11 @@ Nous sommes ${fmtDate()}.${bat}`;
     this.log(`Recherche (direct) : « ${question.slice(0, 120)} »`, true);
     const timer = setTimeout(() => ctl.abort(), SEARCH_MAX_MS);
     let result;
-    try {
-      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco-search'), search: true, fresh: true, signal: ctl.signal,
-        text: `[Question : « ${question} ». Fais une recherche Google, puis réponds au format JSON demandé.]` });
-      result = sayable(out.reponse) || "Je n'ai rien trouvé de sûr.";
-      this.log(`Recherche faite en ${((performance.now() - t0) / 1000).toFixed(1)} s (${out.model}${out.searched ? '' : ', sans résultat Google'})`);
-    } catch (e) {
+    try { result = await this._lookup(question, ctl.signal, t0); }
+    catch (e) {
       if (!this._searches.has(call.id)) return;                                  // annulée : rien à répondre
-      result = "La recherche n'a pas abouti à temps. Dis-le simplement et propose de réessayer.";
+      result = e.name === 'AbortError' ? "La recherche a pris trop de temps. Dis-le simplement et propose de réessayer."
+        : "Je n'ai pas pu obtenir l'information (Google refuse pour l'instant). Dis-le simplement.";
       this.log(`Recherche impossible (${((performance.now() - t0) / 1000).toFixed(1)} s) : ${e.name === 'AbortError' ? 'trop longue' : e.message}`);
     } finally { clearTimeout(timer); }
     if (conv !== this.convId || !this._searches.has(call.id)) return;

@@ -11,9 +11,10 @@
 import { cleanKey } from './brain.js';
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models/';
+// Les quotas gratuits sont par modèle : les Gemini 2.5 servent de secours si les 3.x sont épuisés (refus vu le 23/10/26).
 export const ECO_MODELS = {
-  rapide: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'],
-  reflechi: ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'],
+  rapide: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'],
+  reflechi: ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
 };
 export const HEDGE_MS = 2200;          // sans premier mot après ce délai : la requête est relancée en parallèle
 export const HEDGE_SEARCH_MS = 7000;   // idem pour la requête avec recherche Google (plus longue par nature)
@@ -90,6 +91,8 @@ export class EcoBrain {
   constructor() {
     this.history = []; this.modelUsed = null; this.thinking = 'minimal'; this.noSearch = false; this.noSchema = false;
     this.speed = 'rapide'; this.stream = true; this.sent = []; this.hedgeMs = HEDGE_MS; this.hedgeSearchMs = HEDGE_SEARCH_MS;
+    // Modèles refusés pour quota : essayés en dernier pendant 6 h (pas de requêtes gaspillées à chaque phrase).
+    try { this.refused = JSON.parse(localStorage.getItem('wilson.eco.refus') || '{}') || {}; } catch (_) { this.refused = {}; }
     this._restore();
   }
   reset() { this.history = []; }
@@ -122,30 +125,33 @@ export class EcoBrain {
 
   _thinkOrder() { return [this.thinking, 'minimal', 'low', null].filter((v, i, a) => a.indexOf(v) === i); }
 
-  _body({ system, contents, think, search }) {
+  // web : outil Google Search joint (2e requête « recherche ») ; false = même format, sans Internet (quota de recherche épuisé, météo fournie…).
+  _body({ system, contents, think, search, web = search, model = '' }) {
     const schema = !search && !this.noSchema;
     return {
       systemInstruction: { parts: [{ text: system }] },
       contents,
-      ...(search && !this.noSearch ? { tools: [{ googleSearch: {} }] } : {}),
+      ...(web && !this.noSearch ? { tools: [{ googleSearch: {} }] } : {}),
       generationConfig: {
         temperature: 0.85, maxOutputTokens: 1024,
         ...(schema ? { responseMimeType: 'application/json', responseSchema: ECO_SCHEMA } : {}),
-        ...(think ? { thinkingConfig: { thinkingLevel: think } } : {}),
+        // Gemini 2.5 : « thinkingBudget » (0 = pas de réflexion) ; Gemini 3 : « thinkingLevel ».
+        ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: think } } : {}),
       },
     };
   }
 
   // req : { audio: Int16Array 16 kHz, image: base64 jpeg, text, hint } ; onPartial({pourMoi, emotion, reponse, closed}) pendant l'écriture.
   // search : 2e requête, avec Google Search (texte seul). La réponse n'entre dans l'historique que par commit().
-  async ask({ key, system, audio, image, text, hint, signal, onPartial, search = false, fresh = false }) {
+  async ask({ key, system, audio, image, text, hint, signal, onPartial, search = false, web = search, fresh = false }) {
     const parts = [];
     if (audio && audio.length) parts.push({ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio) } });
     if (image) parts.push({ inlineData: { mimeType: 'image/jpeg', data: image } });
     parts.push({ text: text || `[Enregistrement ci-dessus.${hint ? ' ' + hint : ''} Réponds au format JSON demandé.]` });
     const contents = [...(fresh ? [] : this.history.slice(-12)), { role: 'user', parts }];   // fresh : question isolée (outil « chercher »)
-    const order = ECO_MODELS[this.speed] || ECO_MODELS.rapide;
-    const models = this.modelUsed ? [this.modelUsed, ...order.filter((m) => m !== this.modelUsed)] : order;
+    const order = ECO_MODELS[this.speed] || ECO_MODELS.rapide, now = Date.now();
+    const pref = this.modelUsed ? [this.modelUsed, ...order.filter((m) => m !== this.modelUsed)] : order;
+    const models = [...pref.filter((m) => !(this.refused[m] > now)), ...pref.filter((m) => this.refused[m] > now)];
     const stream = this.stream && !!onPartial;
     const onText = stream ? (acc) => onPartial(partialReply(acc)) : null;
     const hedge = stream ? (search ? this.hedgeSearchMs : this.hedgeMs) : 0;
@@ -154,8 +160,9 @@ export class EcoBrain {
       const thinks = this._thinkOrder(); let ti = 0;
       while (ti < thinks.length) {
         const think = thinks[ti];
-        const res = await this._race(model, this._body({ system, contents, think, search }), key, signal, onText, hedge);
+        const res = await this._race(model, this._body({ system, contents, think, search, web, model }), key, signal, onText, hedge);
         if (res.ok) {
+          if (this.refused[model]) { delete this.refused[model]; try { localStorage.setItem('wilson.eco.refus', JSON.stringify(this.refused)); } catch (_) {} }
           const out = res.txt != null ? parseText(res.txt) : parseReply(res.json);
           if (!stream && onPartial) onPartial({ pourMoi: out.pourMoi, emotion: out.emotion, reponse: out.reponse, closed: true });
           if (this.modelUsed !== model || this.thinking !== think) { this.modelUsed = model; this.thinking = think; this._save(); }
@@ -166,10 +173,14 @@ export class EcoBrain {
         const err = new Error(msg || `Erreur ${res.status}`); err.status = res.status;
         if (res.network) { err.network = true; throw err; }
         if (res.status === 401 || res.status === 403) { err.auth = true; throw err; }
-        if (res.status === 429 || /quota|exhausted|rate.?limit/i.test(msg)) { err.quota = true; quotaErr = quotaErr || err; break; }   // modèle suivant
+        if (res.status === 429 || /quota|exhausted|rate.?limit/i.test(msg)) {                                                 // modèle suivant
+          err.quota = true; quotaErr = quotaErr || err; this.refused[model] = Date.now() + 6 * 3600000;
+          try { localStorage.setItem('wilson.eco.refus', JSON.stringify(this.refused)); } catch (_) {}
+          break;
+        }
         if (res.status === 400 && /think/i.test(msg)) { last = err; ti++; continue; }                                                // réglage de réflexion refusé
         if (res.status === 400 && !search && !this.noSchema && /schema|mime|json|enum|propert/i.test(msg)) { this.noSchema = true; this._save(); last = err; continue; }   // JSON imposé refusé
-        if (res.status === 400 && search && !this.noSearch && /tool|search|grounding/i.test(msg)) { this.noSearch = true; this._save(); last = err; continue; }         // recherche refusée
+        if (res.status === 400 && web && !this.noSearch && /tool|search|grounding/i.test(msg)) { this.noSearch = true; this._save(); last = err; continue; }         // recherche refusée
         if (res.status === 404 || /not found|not supported/i.test(msg)) { last = err; break; }
         if (res.status >= 500 || !res.status) { last = err; break; }
         throw err;
@@ -232,7 +243,17 @@ export class EcoBrain {
       return { ok: true, json: j, grounded: !!((((j.candidates || [])[0] || {}).groundingMetadata || {}).webSearchQueries || []).length };
     }
     let msg = '';
-    try { const t = await r.text(); try { msg = JSON.parse(t).error.message || ''; } catch (_) { msg = t.slice(0, 300); } } catch (_) {}
+    try {
+      const t = await r.text();
+      try {
+        const er = JSON.parse(t).error || {}; msg = String(er.message || '').trim();
+        // Quel quota exactement (requêtes du modèle, recherche Google…) et quand réessayer : écrit dans le journal.
+        const det = er.details || [];
+        const qf = det.find((d) => /QuotaFailure/.test(d['@type'] || '')), ri = det.find((d) => /RetryInfo/.test(d['@type'] || ''));
+        if (qf && qf.violations) msg += ' [quota : ' + qf.violations.map((v) => `${v.quotaId || v.quotaMetric || '?'}${v.quotaValue != null ? `, limit: ${v.quotaValue}` : ''}`).join(' ; ') + ']';
+        if (ri && ri.retryDelay) { const s = parseFloat(ri.retryDelay); if (s) msg += ` (retry in ${s}s)`; }
+      } catch (_) { msg = t.slice(0, 300); }
+    } catch (_) {}
     return { ok: false, status: r.status, msg: msg || `Erreur ${r.status}` };
   }
 }
