@@ -1,9 +1,9 @@
 // Wilson — chef d'orchestre. Une seule machine à états (voir PLAN.md) pilote tous les modules.
-//   dodo ⇄ veille → eveil → conversation → veille
+//   dodo ⇄ veille → (on le regarde en lui parlant) → conversation → veille
+// Écoute au REGARD : une phrase n'est pour Wilson que si on le regarde en la disant (plus de mot-clé).
 
 import { Face } from './face.js';
 import { AudioIO } from './audio.js';
-import { Ear } from './ear.js';
 import { Brain } from './brain.js';
 import { Vision } from './vision.js';
 import { Memory } from './memory.js';
@@ -12,9 +12,8 @@ import { loadSettings, SettingsUI } from './settings.js';
 import { Voice } from './voice.js';
 import { EcoBrain, ECO_FORMAT, sentenceCut, sayable, warmUp } from './eco.js';
 
-const VERSION = '1.4.0';
-const MODEL_PARTS = ['model/fr.part1', 'model/fr.part2'];
-const PREROLL_MS = 4000;          // R2 : la phrase qui contient « Wilson » est transmise en entier
+const VERSION = '1.5.0';
+const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
 const ECO_TAIL_MS = 1000;         // après avoir parlé : le son de la tablette finit de sortir après l'annonce « fini »
@@ -29,7 +28,7 @@ class App {
     this.settings = loadSettings();
     this.face = new Face($('face'), { style: this.settings.face });
     this.face.setMood('somnolent'); this.face.setBrightness(0.35);
-    this.audio = new AudioIO(); this.ear = new Ear('wilson'); this.brain = new Brain();
+    this.audio = new AudioIO(); this.brain = new Brain();
     this.memory = new Memory(); this.vision = null; this.sensors = new Sensors($('face'));
     this.voice = new Voice(); this.eco = new EcoBrain(); this.mode = null; this.ecoState = null;
     this.ui = new SettingsUI(this);
@@ -37,7 +36,7 @@ class App {
     this.pending = []; this.outBuf = []; this.outLen = 0;
     this.lastActivity = 0; this.lastUserSpeech = 0; this.lastFrame = 0; this.playEndAt = 0;
     this.discard = false; this.endAfterSpeech = false; this.barge = { n: 0, echo: -60 };
-    this.presenceAt = performance.now(); this.battery = null; this.earTest = false; this.settingsOpen = false;
+    this.presenceAt = performance.now(); this.battery = null; this.settingsOpen = false;
     this._wireSensors(); this._wireBrain(); this._wireAudio();
     if ('serviceWorker' in navigator) {
       const hadController = !!navigator.serviceWorker.controller;
@@ -48,6 +47,14 @@ class App {
     setTimeout(() => this._checkUpdate(), 15000);
     setInterval(() => this._checkUpdate(), 20 * 60000);
     setInterval(() => this._tick(), 50);
+    // Surveillance de la charge : si la tablette prend du retard, on allège l'animation (jamais de file d'attente qui s'allonge).
+    let lastBeat = performance.now(); this.lag = 0; this._t0 = lastBeat;   // on ignore le démarrage (chargement des modèles)
+    setInterval(() => {
+      const t = performance.now(), late = t - lastBeat - 1000; lastBeat = t;
+      this.lag = this.lag * 0.8 + Math.max(0, late) * 0.2;
+      if (late > 400) this.log(`Tablette en retard de ${Math.round(late)} ms`);
+      if (t - this._t0 > 30000 && this.lag > 150 && !this._light) { this._light = true; this.face.maxFpsLight = true; this.log('Mode allégé : animation à 30 images/s'); }
+    }, 1000);
   }
 
   get speaking() { return this.audio.playing || this.voice.speaking; }
@@ -83,45 +90,15 @@ class App {
     if (!this.audio.running) this._showWake(); else this._hideWake();
     this._loadQuota();
     this.setState('veille');
-    this._loadEar();
     this.applySettings();
   }
 
   async _startVision() {
     try {
-      this.vision = new Vision(); this.vision.mirror = !this.settings.mirror;
+      this.vision = new Vision(); this.vision.mirror = !this.settings.mirror; this.vision.calib = { yaw: 0, pitch: 0, ...(this.settings.gazeCalib || {}) };
       this.vision.onPresence = (p) => this._presence(p);
       await this.vision.start(); this.log('Caméra prête');
     } catch (e) { this.vision = null; this.log('Caméra indisponible : ' + e.message); }
-  }
-
-  async _loadEar() {
-    if (this.ear.ready || this._earLoading) return;
-    this._earLoading = true;
-    try {
-      // Message seulement si le chargement dure (la 1re fois : 46 Mo à télécharger ; ensuite, il vient de la mémoire de la tablette).
-      const t0 = performance.now(); let lastPct = -1;
-      const slow = () => performance.now() - t0 > 1500;
-      this.ear.onProgress = (p) => {
-        const pct = Math.min(99, Math.floor(p * 20) * 5);
-        if (!slow() || pct === lastPct) return;
-        lastPct = pct; this.badge(`Je télécharge mon oreille (1re fois seulement)… ${pct} %`, 60000);
-      };
-      const prep = () => { if (!this.ear.ready) this.badge('Je prépare mon oreille… encore quelques secondes', 60000); };
-      this.ear.onPhase = () => { if (slow()) prep(); else setTimeout(prep, 2500); };
-      await this.ear.load(MODEL_PARTS);
-      this.log(`Oreille chargée en ${((performance.now() - t0) / 1000).toFixed(1)} s`);
-      this.ear.onWake = (w) => this._onWakeWord(w);
-      this.ear.onHeard = (t) => { if (this.earTest) this.ui.earHeard(t); };
-      this.ear.onStop = () => { if (this.voice.speaking || this.audio.playing) this.interrupt('« stop »'); };
-      this.ear.setSensitivity(this.settings.sensitivity);
-      if (this.state === 'veille' || this.state === 'dodo') this.ear.start();
-      this.log('Oreille locale prête'); this.badge("Je t'écoute : dis « Wilson » !", 4000);
-      this.face.play('wake');
-    } catch (e) {
-      this.log('Oreille locale indisponible : ' + e.message);
-      this.badge("Mon oreille n'a pas chargé — touche-moi pour me parler", 15000, true);
-    } finally { this._earLoading = false; }
   }
 
   // Mise à jour automatique : la tablette reste allumée en permanence, Wilson se met donc à jour tout seul.
@@ -153,7 +130,6 @@ class App {
 
   applySettings(key) {
     const s = this.settings;
-    this.ear.setSensitivity(s.sensitivity);
     if (s.face !== this.face.styleName) this.face.setStyle(s.face);
     this.eco.setSpeed(s.ecoSpeed);
     if (key === 'apiKey' || key === 'model') {          // nouvelle clé : nouveau quota, on repart de zéro
@@ -162,12 +138,7 @@ class App {
     if (this.vision) this.vision.mirror = !s.mirror;
     if (key === 'camera') { if (s.camera && !this.vision && this.started) this._startVision(); if (!s.camera && this.vision) { this.vision.stream.getTracks().forEach((t) => t.stop()); this.vision = null; } }
     $('subtitle').hidden = !s.subtitles;
-    const cont = s.earMode === 'gemini';
-    if (cont !== this.continuous) {
-      this.continuous = cont;
-      if (cont && this.started && this.state !== 'conversation' && this.state !== 'eveil') this.startConversation('continu');
-      if (!cont && this.state === 'conversation') this.endConversation('mode');
-    }
+    this.continuous = false;
   }
 
   // ---------- états ----------
@@ -178,17 +149,17 @@ class App {
     switch (st) {
       case 'dodo':
         f.clearEmotion(); f.play('yawn'); setTimeout(() => this.state === 'dodo' && f.setMood('dort'), 1800);
-        f.setBrightness(0.1); f.setFps(24); f.setListen(-1); this.vision && this.vision.setRate(2);
-        this.ear.start(); break;
+        f.setBrightness(0.1); f.setFps(24); f.setListen(-1); this.vision && this.vision.setRate(3);
+        this._lookShown = null; break;
       case 'veille':
         f.setMood(this.vision && this.vision.hasPerson ? 'neutre' : 'somnolent');
         f.setBrightness(this.vision && this.vision.hasPerson ? 0.45 : 0.3); f.setFps(40); f.setListen(-1);
-        this.vision && this.vision.setRate(4); this.ear.start(); break;
+        this.vision && this.vision.setRate(this.vision.hasPerson ? 8 : 4); this._lookShown = null; break;
       case 'eveil':
-        this.ear.pause(); f.setMood('attentif'); f.play('wake'); f.setBrightness(1); f.setFps(60);
-        this.vision && this.vision.setRate(8); break;
+        f.setMood('attentif'); f.setBrightness(1); f.setFps(60);
+        this.vision && this.vision.setRate(10); break;
       case 'conversation':
-        f.setMood('ecoute'); f.setBrightness(1); break;
+        f.setMood('ecoute'); f.setBrightness(1); f.setFps(60); this.vision && this.vision.setRate(10); break;
     }
   }
 
@@ -196,15 +167,33 @@ class App {
     if (p) {
       this.presenceAt = performance.now();
       if (this.state === 'dodo' && !this._isNight()) { this.setState('veille'); this.face.play('wake'); }
-      if (this.state === 'veille') { this.face.setMood('neutre'); this.face.setBrightness(0.45); }
-    } else if (this.state === 'veille') { this.face.setMood('somnolent'); this.face.setBrightness(0.3); }
+      if (this.state === 'veille') { this.face.setMood('neutre'); this.face.setBrightness(0.45); this.vision && this.vision.setRate(8); }
+    } else if (this.state === 'veille') { this.face.setMood('somnolent'); this.face.setBrightness(0.3); this.vision && this.vision.setRate(4); }
   }
   _isNight() { const h = new Date().getHours(), a = this.settings.nightStart, b = this.settings.nightEnd; return a > b ? (h >= a || h < b) : (h >= a && h < b); }
 
-  // ---------- réveil ----------
+  // ---------- écoute au regard ----------
+  // La phrase est-elle pour Wilson ? On le regarde (ou on vient de le regarder), ou bien la discussion est en cours.
+  _addressed(now = performance.now()) {
+    const pol = this.settings.listenMode || 'regard', v = this.vision;
+    if (pol === 'toucher') return false;
+    if (pol === 'toujours') return true;
+    if (!v || !v.gazeReady) return false;                               // sans détection du regard : toucher pour parler
+    if (v.looking || now - v.lookAt < 1500) return true;
+    // Pendant une discussion, on peut détourner les yeux un instant (visage toujours là, réponse récente).
+    return this.state === 'conversation' && now - (this.lastAnswerAt || 0) < 8000 && now - v.faceAt < 1500;
+  }
+
+  // En veille : quelqu'un parle en regardant Wilson → la conversation démarre avec le début de sa phrase.
+  _watchFrame() {
+    const now = performance.now();
+    if (this.settingsOpen || now - this.playEndAt < ECO_TAIL_MS) return;
+    if (this.audio.speaking && now - this.audio.lastVoicedAt < 60 && this._addressed(now)) this.startConversation('regard');
+  }
+
+  // Ancien déclencheur (mot « Wilson ») : gardé pour les tests et le bouton « Faire parler Wilson ».
   _onWakeWord(w) {
     this.log(`Entendu « Wilson » ${w.conf ? '(confiance ' + w.conf.toFixed(2) + ')' : '(à la volée)'}`);
-    if (this.earTest) { this.ui.earWake(); this.face.setEmotion('surprise', 900); return; }
     if (this.settingsOpen) return;
     this.startConversation('prenom');
   }
@@ -223,7 +212,7 @@ class App {
     }
     this.setState('eveil'); this.convId = (this.convId || 0) + 1;
     if (mode === 'eco') warmUp(this.settings.apiKey);
-    const preroll = reason === 'prenom' ? [this.audio.recent(PREROLL_MS)] : [];
+    const preroll = reason === 'prenom' ? [this.audio.recent(4000)] : reason === 'regard' ? [this.audio.recent(PREROLL_MS)] : [];
     if (mode === 'eco') return this._startEco(reason, preroll);
     this.mode = 'live';
     this.pending = preroll;
@@ -261,16 +250,17 @@ class App {
   // ---------- mode économique ----------
   // Chaque phrase est enregistrée jusqu'au silence, puis envoyée (avec une photo) à Gemini Flash ; la réponse est lue par la tablette.
   _startEco(reason, chunks) {
-    this.mode = 'eco'; this.eco.reset(); this.eco.setSpeed(this.settings.ecoSpeed); this.voice.voiceName = this.settings.ecoVoice || '';
+    this.mode = 'eco'; this.eco.setSpeed(this.settings.ecoSpeed); this.voice.voiceName = this.settings.ecoVoice || '';
+    if (performance.now() - (this.lastAnswerAt || -1e9) > 5 * 60000) this.eco.reset();     // on garde le fil de la discussion 5 min
     this.pending = null;
     const now = performance.now();
     this.ecoState = { cap: null, busy: false, queue: [], ignored: 0 };
     warmUp(this.settings.apiKey);
     this.setState('conversation'); this.lastActivity = now;
     this.log(`Conversation ouverte en mode économique (${reason})`);
-    if (reason === 'prenom' && chunks.length) {
+    if ((reason === 'prenom' || reason === 'regard') && chunks.length) {
       const len = chunks.reduce((a, c) => a + c.length, 0);
-      this.ecoState.cap = { chunks: chunks.slice(), len, lastVoice: now, wake: true };
+      this.ecoState.cap = { chunks: chunks.slice(), len, lastVoice: now, wake: reason === 'prenom', voiced: 3, looked: 1 };
     } else if (reason === 'test') this._ecoSend({ text: '[Présente-toi en une phrase, avec chaleur.]' });
     else if (reason === 'toucher') this._say(['Oui ?', "Je t'écoute.", 'Oui, dis-moi ?'][Math.floor(Math.random() * 3)]);
   }
@@ -282,12 +272,12 @@ class App {
     if (now - this.playEndAt < ECO_TAIL_MS) return;        // fin de sa propre voix (écho)
     if (E.cap) {
       E.cap.chunks.push(i16); E.cap.len += i16.length;
-      if (now - this.audio.lastVoicedAt < 60) { E.cap.lastVoice = now; E.cap.voiced = (E.cap.voiced || 0) + 1; }
+      if (now - this.audio.lastVoicedAt < 60) { E.cap.lastVoice = now; E.cap.voiced = (E.cap.voiced || 0) + 1; if (this._addressed(now)) E.cap.looked = (E.cap.looked || 0) + 1; }
       if (now - E.cap.lastVoice > ECO_SILENCE_MS || E.cap.len > 16000 * 14) { const cap = E.cap; E.cap = null; this._ecoUtterance(cap); }
-    } else if (this.audio.speaking && now - this.audio.lastVoicedAt < 60) {   // voix présente maintenant (pas un reste d'écho)
+    } else if (this.audio.speaking && now - this.audio.lastVoicedAt < 60 && this._addressed(now)) {   // voix présente maintenant, et pour lui
       // Juste après sa réponse, la personne a pu commencer à parler pendant la garde anti-écho : on reprend un peu plus loin.
       const pre = this.audio.recent(now - this.playEndAt < ECO_TAIL_MS + 400 ? 900 : 450);
-      E.cap = { chunks: [pre], len: pre.length, lastVoice: now };
+      E.cap = { chunks: [pre], len: pre.length, lastVoice: now, looked: 1 };
     }
   }
 
@@ -297,6 +287,7 @@ class App {
     if (!audio && cap.wake) audio = raw.subarray(Math.max(0, raw.length - 16000 * 6));   // l'oreille a entendu « Wilson » : on envoie quand même
     if (!audio) { this.log('Rien d\'audible, phrase ignorée'); return; }
     if (!cap.wake && (audio.length < 16000 * 0.5 || (cap.voiced || 0) < 15)) return;  // trop court : un bruit
+    if (!cap.wake && !cap.looked) return;                                                // personne ne le regardait
     this._ecoSend({ audio, endAt: cap.lastVoice });
   }
 
@@ -343,7 +334,7 @@ class App {
         // Bruits, télé, conversations entre vous : au 2e d'affilée, Wilson se rendort (il faudra redire « Wilson »).
         if (E.ignored >= 2 && !sess) { setTimeout(() => conv === this.convId && this.endConversation('pas pour moi'), 200); }
       } else {
-        E.ignored = 0; answered = true;
+        E.ignored = 0; answered = true; this.lastAnswerAt = performance.now();
         if (!spoken) speakChunk(out.reponse);                       // réponse hors format : on la dit d'un bloc
         this.log(`« ${out.entendu.slice(0, 90)} » → ${out.reponse.slice(0, 110)}`);
         this.log(`Latence : ${ms(tFirst || performance.now())} s avant la 1re phrase, ${ms(performance.now())} s au total (${out.model}, audio ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
@@ -376,7 +367,6 @@ class App {
   _startSpeech() {
     this.barge.n = 0; this.barge.echo = Math.max(-60, this.audio.db);
     this.lastActivity = performance.now(); this._cutAt = 0;
-    if (this.ear.ready && this.mode === 'eco') this.ear.start('stop');   // « stop / chut / arrête » le fait taire
     return this.voice.stream();
   }
   _isRepeat(chunk) {
@@ -394,7 +384,6 @@ class App {
         setTimeout(() => { st.hidden = !this.settings.subtitles; }, 8000);
       }
     }
-    if (this.mode === 'eco' && this.state === 'conversation') this.ear.pause();
     // Coupé par la famille : garde courte (la personne continue de parler) ; sinon garde complète contre l'écho.
     this.playEndAt = this._cutAt ? this._cutAt - (ECO_TAIL_MS - 300) : performance.now();
     this.lastActivity = performance.now(); this.face.setTalk(0);
@@ -475,8 +464,8 @@ L'heure et la date : appelle date_et_heure.`;
 Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies la famille. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles.
 
 Quand parler :
-- Au début de la conversation, quelqu'un vient de t'appeler par ton prénom : il s'adresse à toi, réponds-lui.
-- Ensuite, la conversation est engagée : réponds quand on te parle, même sans ton prénom.
+- On ne t'envoie que ce qui a été dit pendant qu'on te regardait : la personne s'adresse à toi, réponds-lui (pas besoin de ton prénom).
+- Pendant une discussion, réponds quand on te parle, même si on détourne un instant les yeux.
 - Si les gens parlent entre eux, au téléphone, si c'est la télé, ou si la phrase ne t'est pas destinée : ne dis rien du tout.
 - Si on te coupe la parole, arrête-toi et écoute.
 
@@ -499,12 +488,12 @@ Nous sommes ${fmtDate()}.${bat}`;
   // ---------- son ----------
   _wireAudio() {
     this.audio.on('frame', (f32, i16, db) => {
-      if (this.state === 'veille' || this.state === 'dodo') { this.ear.feed(f32); return; }
+      if (this.state === 'veille' || this.state === 'dodo') { this._watchFrame(); return; }
       if (this.state === 'eveil') { if (this.pending) this.pending.push(i16); return; }
       if (this.state === 'conversation' && this.mode === 'eco') {
         // Pendant qu'il parle, le micro entend sa propre voix : on n'enregistre rien, on guette seulement
         // « stop », « chut », « arrête » avec l'oreille locale (et la voix forte si « coupure directe » est choisie).
-        if (this.voice.speaking) { this.ear.feed(f32); if (this.settings.bargeIn === 'directe') this._bargeCheck(db); }
+        if (this.voice.speaking) { if (this.settings.bargeIn === 'directe') this._bargeCheck(db); }
         else this._ecoFrame(i16);
         return;
       }
@@ -655,6 +644,24 @@ Nous sommes ${fmtDate()}.${bat}`;
     const now = performance.now(), f = this.face, v = this.vision;
     // Regard : la personne suivie, sinon il laisse traîner ses yeux.
     f.setLook(v && v.target && this.state !== 'dodo' ? v.target[0] : null, v && v.target ? v.target[1] : 0);
+    // Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'éclaire → « je t'écoute ».
+    if (v && (this.state === 'veille' || this.state === 'dodo')) {
+      const look = !!(v.looking && v.gazeReady && (this.settings.listenMode || 'regard') === 'regard');
+      if (look !== this._lookShown) {
+        if (look && this.state === 'dodo') this.setState('veille');
+        this._lookShown = look;
+        if (look) {
+          f.setMood('attentif'); f.setBrightness(1); f.setFps(60); v.setRate(10); this.presenceAt = now;
+          if (!this._warmAt || now - this._warmAt > 60000) { this._warmAt = now; warmUp(this.settings.apiKey); }
+        } else { f.setMood(v.hasPerson ? 'neutre' : 'somnolent'); f.setBrightness(v.hasPerson ? 0.45 : 0.3); f.setFps(40); v.setRate(v.hasPerson ? 8 : 4); }
+      }
+    }
+    if (v && v.modelsDone && !this._gazeAnnounced && this.started) {
+      this._gazeAnnounced = true;
+      this.log(`Vision : ${v.mode}, regard ${v.gazeReady ? 'prêt (' + v.delegate + ')' : 'indisponible'}`);
+      if (v.gazeReady) this.badge('Regarde-moi et parle-moi : je t\'écoute', 5000);
+      else this.badge('Je ne vois pas bien les visages : touche-moi pour me parler', 10000, true);
+    }
     // Lèvres
     if (this.audio.playing) { const [l, r] = this.audio.outputLevels(); f.setTalk(l, r); }
     else if (this.voice.speaking) f.setTalk(this.voice.mouth(now), 0.25);

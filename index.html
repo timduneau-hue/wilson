@@ -9,7 +9,6 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="css/wilson.css">
-<script src="vendor/vosk.js" defer></script>
 </head>
 <body>
 <canvas id="face" aria-label="Visage de Wilson"></canvas>
@@ -36,7 +35,7 @@
     <label class="row"><span>Qui vit à la maison ? <em>(facultatif)</em></span></label>
     <textarea id="w-home" class="field" rows="2" placeholder="Ex. : Timothée, sa femme, leurs enfants… et le chat."></textarea>
     <button id="w-go" class="btn primary">Réveiller Wilson</button>
-    <p class="fine">La clé reste sur cette tablette. Rien n'est envoyé tant qu'on ne prononce pas « Wilson ».</p>
+    <p class="fine">La clé reste sur cette tablette. Rien n'est envoyé tant qu'on ne le regarde pas en lui parlant.</p>
   </div>
 </section>
 
@@ -73,16 +72,11 @@
 
       <section class="group">
         <h3>Écoute</h3>
-        <label class="row"><span>Oreille</span>
-          <select id="s-earmode" class="field">
-            <option value="local">Locale : n'écoute que « Wilson » (recommandé)</option>
-            <option value="gemini">Gemini en continu (consomme le quota)</option>
-          </select></label>
-        <label class="row"><span>Sensibilité au prénom</span>
-          <select id="s-sens" class="field">
-            <option value="stricte">Stricte (moins de faux réveils)</option>
-            <option value="normale">Normale</option>
-            <option value="large">Large (réagit plus facilement)</option>
+        <label class="row"><span>Je t'écoute quand…</span>
+          <select id="s-listen" class="field">
+            <option value="regard">tu me regardes en me parlant (recommandé)</option>
+            <option value="toujours">tu parles, même sans me regarder</option>
+            <option value="toucher">tu me touches, seulement</option>
           </select></label>
         <label class="row"><span>Fin de conversation après</span>
           <select id="s-timeout" class="field">
@@ -91,11 +85,11 @@
           </select></label>
         <label class="row"><span>Quand on le coupe</span>
           <select id="s-barge" class="field">
-            <option value="prudente">Prudente : on dit « stop », « chut » ou on le touche</option>
+            <option value="prudente">Prudente : on le touche pour l'arrêter</option>
             <option value="directe">Directe : il s'arrête aussi si on parle fort (risque d'écho)</option>
           </select></label>
-        <div class="buttons"><button id="t-ear" class="btn">Tester l'oreille</button></div>
-        <div id="ear-test" class="eartest" hidden><div>Entendu : <b id="ear-heard">—</b></div><div>Réveils : <b id="ear-count">0</b></div></div>
+        <div class="buttons wrap"><button id="t-gaze" class="btn">Tester le regard</button><button id="t-calib" class="btn" hidden>Je te regarde : calibrer</button></div>
+        <div id="gaze-test" class="eartest" hidden></div>
       </section>
 
       <section class="group">
