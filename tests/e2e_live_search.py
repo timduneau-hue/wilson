@@ -54,6 +54,20 @@ async def main():
             except Exception: pass
         await page.route(re.compile(r'.*generativelanguage\.googleapis\.com/v1beta/models/.*Content.*'), gen)
 
+        # Script de Timothée (journal + recherche Tavily), simulé.
+        script = {'mode': 'ok', 'questions': []}
+        async def script_route(route):
+            req = route.request
+            if req.method != 'POST': await route.fulfill(status=200, body='ok'); return
+            d = json.loads(req.post_data or '{}')
+            if d.get('action') != 'chercher' or script['mode'] == 'ancien':
+                await route.fulfill(status=200, content_type='text/plain', headers={'access-control-allow-origin': '*'}, body='ok'); return
+            script['questions'].append(d.get('question'))
+            body = {'ok': True, 'reponse': 'Demain à Angers : éclaircies, de 9 à 17 degrés.', 'resultats': [{'titre': 'Météo Angers', 'url': 'https://m.example', 'extrait': 'Samedi éclaircies, 9 à 17 °C.'}]} \
+                if script['mode'] == 'ok' else {'ok': False, 'erreur': 'clé Tavily absente du script'}
+            await route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': '*'}, body=json.dumps(body, ensure_ascii=False))
+        await page.route(re.compile(r'https://script\.google\.com/.*'), script_route)
+
         await page.goto('http://127.0.0.1:8765/index.html')
         await page.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
         await page.evaluate("wilson.startConversation('toucher')")
@@ -118,6 +132,30 @@ async def main():
         check('Recherche refusée retenue : la suivante part directement sans Internet (1 seule requête)', len(eco['reqs']) - k == 1 and 'tools' not in eco['reqs'][k], f"{len(eco['reqs']) - k} requête(s)")
         await page.evaluate("localStorage.removeItem('wilson.rechercheRefusee')")
         eco['quota_web'] = False
+
+        # 3c. Recherche gratuite par Tavily (via le script) : utilisée en premier, sans passer par Gemini.
+        await page.evaluate("wilson.settings.logUrl = 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTESTTESTTEST/exec'; localStorage.removeItem('wilson.rechercheRefusee')")
+        async def ask_tool(cid, q):
+            n0 = len(conn['tool_responses'])
+            conn['ws'].send(json.dumps({'toolCall': {'functionCalls': [{'id': cid, 'name': 'chercher', 'args': {'question': q}}]}}))
+            for _ in range(80):
+                if len(conn['tool_responses']) > n0: break
+                await asyncio.sleep(0.1)
+            return conn['tool_responses'][n0] if len(conn['tool_responses']) > n0 else {}
+        k = len(eco['reqs'])
+        r = await ask_tool('t1', 'Quel temps fera-t-il demain à Angers ?')
+        res = r.get('response', {}).get('result', '')
+        check('Recherche par Tavily (script) : infos rendues à Wilson, sans requête Gemini', 'éclaircies, de 9 à 17' in res and 'Source 1 (Météo Angers)' in res and len(eco['reqs']) == k
+              and script['questions'][-1:] == ['Quel temps fera-t-il demain à Angers ?'], res[:120])
+        check('Journal : recherche Tavily notée', any('Recherche Tavily faite' in l for l in logs))
+        script['mode'] = 'ancien'; k = len(eco['reqs'])
+        r = await ask_tool('t2', 'Et dimanche ?')
+        check('Script pas encore mis à jour : secours Gemini, et la raison est notée', r.get('id') == 't2' and len(eco['reqs']) > k and any('ancienne version' in l for l in logs))
+        script['mode'] = 'sanscle'; k = len(eco['reqs'])
+        r = await ask_tool('t3', 'Et lundi ?')
+        check('Clé Tavily absente du script : secours Gemini, raison notée', r.get('id') == 't3' and len(eco['reqs']) > k and any('clé Tavily absente' in l for l in logs))
+        script['mode'] = 'ok'
+        await page.evaluate("wilson.settings.logUrl = ''")
 
         # 4. On coupe Wilson pendant une recherche : elle est abandonnée, rien n'est renvoyé.
         eco['delay'] = 3; n = len(conn['tool_responses'])

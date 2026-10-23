@@ -1,14 +1,18 @@
-// Wilson — journal à distance : reçoit le journal de la tablette et le range dans la feuille Google « Wilson — journal ».
-// Claude lit cette feuille (via le Google Drive de Timothée) pour diagnostiquer Wilson sans capture d'écran.
+// Wilson — script de Timothée (application Web Apps Script, liée à la feuille « Wilson — journal ») :
+//  1. journal à distance : reçoit le journal de la tablette et le range dans la feuille (Claude la lit pour diagnostiquer) ;
+//  2. recherche Internet : Wilson lui envoie une question, le script interroge Tavily (gratuit : 1 000 recherches par mois)
+//     et renvoie la réponse. La clé Tavily reste ici, dans le Drive de Timothée, jamais dans le code publié.
 // Déploiement : Déployer → Nouveau déploiement → Application Web → Exécuter en tant que « moi », accès « Tout le monde ».
 // Ouvrir ensuite l'adresse du déploiement : la page affiche un QR code que Wilson scanne (Réglages → Journal à distance).
 
 var FEUILLE = 'COLLE_ICI_L_ID_DE_LA_FEUILLE';   // l'identifiant de « Wilson — journal » (dans son adresse, entre /d/ et /edit)
 var MAX = { 'Journal': 20000, 'Délais': 5000 };   // au-delà, les lignes les plus anciennes sont effacées
 var FORMAT_DATE = 'dd/mm/yy hh"h"mm:ss';
+var TAVILY_CLE = 'COLLE_ICI_TA_CLE_TAVILY';      // ta clé Tavily (app.tavily.com, commence par tvly-)
 
 function doPost(e) {
   var d = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+  if (d.action === 'chercher') return chercher_(d);
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -51,6 +55,35 @@ function etat_(sh, b, appareil) {
   sh.getRange(2, 1, sh.getMaxRows() - 1, 2).clearContent();
   sh.getRange(2, 2, rows.length, 1).setNumberFormat('@');
   sh.getRange(2, 1, rows.length, 2).setValues(rows);
+}
+
+// Recherche Internet par Tavily : réponse courte + extraits des meilleurs résultats, en français.
+function chercher_(d) {
+  var q = String(d.question || '').slice(0, 400);
+  if (!/^tvly-/.test(TAVILY_CLE)) return json_({ ok: false, erreur: 'clé Tavily absente du script' });
+  if (!q) return json_({ ok: false, erreur: 'question vide' });
+  var r = UrlFetchApp.fetch('https://api.tavily.com/search', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + TAVILY_CLE },
+    payload: JSON.stringify({ query: q, search_depth: 'basic', include_answer: 'basic', max_results: 5, country: 'france', topic: d.actualite ? 'news' : 'general' }),
+  });
+  var code = r.getResponseCode(), j = {};
+  try { j = JSON.parse(r.getContentText() || '{}'); } catch (err) {}
+  if (code !== 200) {
+    var msg = (j.detail && (j.detail.error || j.detail)) || j.error || ('erreur ' + code);
+    return json_({ ok: false, code: code, erreur: 'Tavily ' + code + ' : ' + msg });
+  }
+  return json_({
+    ok: true, reponse: j.answer || '', temps: j.response_time || null,
+    resultats: (j.results || []).slice(0, 5).map(function (x) { return { titre: x.title || '', url: x.url || '', extrait: String(x.content || '').slice(0, 500) }; }),
+  });
+}
+
+function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+// Essai de la recherche depuis l'éditeur : sélectionne « essaiRecherche » puis « Exécuter » (résultat dans « Journal d'exécution »).
+function essaiRecherche() {
+  Logger.log(chercher_({ question: 'Quel temps fera-t-il demain à Angers ?' }).getContent());
 }
 
 function num_(x) { return typeof x === 'number' && isFinite(x) ? Math.round(x * 10) / 10 : ''; }
