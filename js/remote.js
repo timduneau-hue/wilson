@@ -42,7 +42,8 @@ export class RemoteLog {
     const lignes = this.q.splice(0), mesures = this.mesures.splice(0);
     let bilan = null;
     try { bilan = this.app.bilan(); } catch (e) { bilan = { Bilan: 'erreur : ' + e.message }; }
-    const body = JSON.stringify({ appareil: 'tablette du salon', version: this.app.version, lignes, mesures, bilan });
+    const appareil = /Mobile/.test(navigator.userAgent) ? 'téléphone' : 'tablette';
+    const body = JSON.stringify({ appareil, version: this.app.version, lignes, mesures, bilan });
     if (beacon && navigator.sendBeacon) {
       try { if (navigator.sendBeacon(this.url, new Blob([body], { type: 'text/plain;charset=utf-8' }))) { this.sentAt = Date.now(); this.sent++; return true; } } catch (_) {}
     }

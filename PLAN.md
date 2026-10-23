@@ -15,7 +15,7 @@ Un visage original (grands yeux expressifs sur fond noir) qui vit, écoute, rega
 | R1 | Il ne parle que si on s'adresse à lui : **on lui parle en le regardant**. | Caméra : orientation de la tête (yeux, nez) → « on me regarde » ; voix + regard = phrase pour Wilson. Plus de mot-clé « Wilson » (abandonné le 23/10/26 : trop lent sur la tablette). |
 | R2 | La phrase est transmise en entier. | Mémoire tampon : le début de la phrase (avant que le regard soit confirmé) est inclus. |
 | R3 | Pendant une discussion, on peut détourner les yeux un instant. | 8 s après sa réponse, un visage présent suffit ; ensuite il faut de nouveau le regarder. |
-| R4 | Il se tait si on lui coupe la parole. | Toucher l'écran (fiable) ; coupure à la voix en option (l'écho de la tablette la rend risquée). |
+| R4 | Il se tait si on lui coupe la parole. | Toucher l'écran (fiable). Coupure « prudente » (défaut) : micro sans annulation d'écho, Wilson n'écoute pas pendant qu'il parle. Coupure à la voix (« directe ») en option : annulation d'écho, mais sur Android le son passe alors en « mode appel » (plus faible, écouteur sur un téléphone). |
 | R5 | Il se tait si les gens parlent entre eux. | Pas de regard = pas d'écoute ; Gemini filtre en plus (« pour_moi ») ; 2 refus d'affilée → veille. |
 | R6 | Il voit ce qu'on lui montre. | Une photo jointe à chaque phrase. |
 | R7 | Il retient ce qu'on lui dit. | Souvenirs stockés sur la tablette, rappelés à chaque requête. |
@@ -70,6 +70,9 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 - **GitHub Pages** : gratuit, HTTPS (obligatoire pour micro et caméra).
 - **Gemini 3.8 Live** : gratuit (palier gratuit), voix naturelle, vue, interruptions, outils, recherche Google.
   Attention : sur le palier gratuit, Google peut utiliser les échanges pour améliorer ses produits.
+- **Micro sans annulation d'écho par défaut** : sur Android, l'annulation d'écho bascule tout le son de la page en
+  « mode appel » (volume d'appel, écouteur d'un téléphone) — la voix du mode direct était inaudible (23/10/26).
+  La voix de la tablette (mode économique) n'est pas touchée : c'est un autre programme (le moteur de synthèse vocale).
 - **Regard calculé sur la tablette** (MediaPipe) : aucune donnée envoyée en veille, aucun quota consommé.
   Le mot-clé « Wilson » (Vosk) a été retiré le 23/10/26 : il ralentissait trop la tablette.
 - **La clé API** n'est jamais dans le code publié : elle est saisie sur la tablette et reste dessus.
@@ -105,13 +108,14 @@ pour ne jamais provoquer un refus « trop de requêtes » du palier gratuit.
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 23/10/26 : **version 1.8.0** en ligne.
+État au 23/10/26 : **version 1.8.1** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
   Pour forcer : appui long sur le visage → « Relancer l'appli ».
-- **Compte Gemini de Timothée** : aucun quota gratuit pour le direct (Gemini Live, « limite 0 ») → Wilson tourne en
-  **mode économique** (Gemini Flash-Lite + voix de la tablette).
+- **Compte Gemini de Timothée** : le **direct fonctionne** avec `gemini-2.5-flash-native-audio-preview-12-2025`
+  (constaté dans le journal le 23/10/26 ; `gemini-3.8-live` et `gemini-3.1-flash-live-preview` refusés pour quota).
+  Mode économique (Gemini Flash-Lite + voix de la tablette) en secours si le direct est refusé.
 - **Règles de travail** : ne jamais saisir soi-même la clé API ou des identifiants (Timothée colle sa clé sur la tablette) ;
   dates jj/mm/aa, heures « 10h00 » ; sur un gros changement, mettre d'abord ce plan à jour, puis les détails.
 - **Tests** : dossier `tests/` (voir `tests/README.md`), à relancer avant chaque publication.
@@ -132,11 +136,13 @@ Historique récent :
   recherche Google en deux temps, relance quand Google traîne, voix réchauffée ; ligne « Délais » plus complète.
 - 1.8.0 (23/10/26) — journal à distance : journal, délais, erreurs et bilan de la tablette envoyés dans la feuille
   « Wilson — journal », que Claude lit lui-même. Réglages → « Journal à distance (pour Claude) ».
+- 1.8.1 (23/10/26) — son du mode direct rétabli (micro sans annulation d'écho, voir section 5) ; Wilson ne se coupe plus
+  lui-même ; délai du direct mesuré (onglet Délais, réflexion « direct ») ; bouton « Son d'essai » ; batterie signalée
+  une seule fois. Le journal (État → Appareil) montrait un écran de téléphone : Timothée testait peut-être sur son téléphone.
 
 En attente :
-- Timothée doit coller `apps-script/journal.gs` dans un script lié à la feuille « Wilson — journal », le déployer
-  (application Web, « moi », « Tout le monde ») et scanner le QR code avec Wilson ; ensuite, lire la feuille avant de lui
-  poser des questions ;
+- Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;
+- confirmer que le son du mode direct est audible en 1.8.1 ;
 - les yeux sont-ils fluides ? les réponses assez rapides ? (onglets Délais et État de la feuille, plus besoin de capture) ;
 - il a écrit que « ça ne fonctionne pas comme je voudrais » : préciser ce qui ne va pas (réaction au regard, réponses
   intempestives, coupures…).

@@ -15,7 +15,7 @@ function doPost(e) {
     var ss = SpreadsheetApp.openById(FEUILLE);
     var v = String(d.version || '');
     var lignes = (d.lignes || []).map(function (l) { return [new Date(l.t), v, String(l.m).slice(0, 3000)]; });
-    ajoute_(ss.getSheetByName('Journal'), lignes);
+    ajoute_(ss.getSheetByName('Journal'), lignes, 2);   // colonnes 2-3 en texte : « 1.8.0 » n'est pas une date
     var mesures = (d.mesures || []).map(function (m) {
       return [new Date(m.t), num_(m.envoi), num_(m.google), num_(m.phrase1), num_(m.voix), num_(m.complet),
         m.modele || '', m.reflexion || '', m.relance ? 'oui' : '', num_(m.recherche), m.anticipe ? 'oui' : '', num_(m.phrase)];
@@ -29,10 +29,11 @@ function doPost(e) {
 }
 
 // Les plus récentes en haut (ligne 2) : il suffit de lire le haut de la feuille.
-function ajoute_(sh, rows) {
+function ajoute_(sh, rows, texteDes) {
   if (!sh || !rows.length) return;
   rows.reverse();
   sh.insertRowsBefore(2, rows.length);
+  if (texteDes) sh.getRange(2, texteDes, rows.length, rows[0].length - texteDes + 1).setNumberFormat('@');
   var r = sh.getRange(2, 1, rows.length, rows[0].length);
   r.setValues(rows).setFontWeight('normal').setBackground(null);
   sh.getRange(2, 1, rows.length, 1).setNumberFormat(FORMAT_DATE);
@@ -48,6 +49,7 @@ function etat_(sh, b, appareil) {
   var n = sh.getMaxRows();
   if (n < rows.length + 1) sh.insertRowsAfter(n, rows.length + 1 - n);
   sh.getRange(2, 1, sh.getMaxRows() - 1, 2).clearContent();
+  sh.getRange(2, 2, rows.length, 1).setNumberFormat('@');
   sh.getRange(2, 1, rows.length, 2).setValues(rows);
 }
 

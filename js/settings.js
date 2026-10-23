@@ -113,6 +113,7 @@ export class SettingsUI {
     $('s-close').onclick = () => this.close();
     $('s-reload').onclick = () => location.reload();
     $('t-voice').onclick = () => { this.close(); app.startConversation('test'); };
+    $('t-chime').onclick = () => { app.audio.resume(); app.audio.chime(); app.log(`Son d'essai joué — son : ${app.audio.describe()}`); };
     $('t-ecovoice').onclick = () => { app.voice.voiceName = this.s.ecoVoice; app.voice.speak("Bonjour ! Je suis Wilson. Voilà ma voix quand je suis en mode économique.").catch(() => {}); };
     if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', () => { if (app.settingsOpen) this.fillVoices(); });
     $('t-gaze').onclick = () => {
