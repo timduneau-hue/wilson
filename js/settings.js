@@ -2,6 +2,7 @@
 
 import { EXPRESSIONS, STYLES } from './face.js';
 import { checkKey, cleanKey, sessionsToday } from './brain.js';
+import { SCRIPT_URL, scanQR } from './remote.js';
 
 const AISTUDIO = '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>';
 // Message clair selon le résultat de la vérification de la clé.
@@ -21,6 +22,7 @@ export const DEFAULTS = {
   listenMode: 'regard', gazeCalib: { yaw: 0, pitch: 0, down: 0 }, convTimeout: 12, bargeIn: 'prudente',
   home: '', city: '', nightStart: 23, nightEnd: 7,
   camera: true, mirror: false, subtitles: false, face: 'lumiere', brainMode: 'auto', ecoVoice: '', ecoSpeed: 'rapide',
+  logUrl: '', logContent: true,
 };
 export const VOICES = [
   ['Puck', 'enjoué'], ['Achird', 'amical'], ['Charon', 'posé'], ['Fenrir', 'énergique'], ['Umbriel', 'décontracté'],
@@ -75,6 +77,38 @@ export class SettingsUI {
     bind('s-timeout', 'convTimeout', Number); bind('s-barge', 'bargeIn');
     bind('s-home', 'home'); bind('s-city', 'city'); bind('s-night1', 'nightStart', Number); bind('s-night2', 'nightEnd', Number);
     bind('s-cam', 'camera', Boolean, 'checked'); bind('s-mirror', 'mirror', Boolean, 'checked'); bind('s-subs', 'subtitles', Boolean, 'checked');
+
+    // Journal à distance : l'adresse du script Apps Script (collée ou scannée en QR code) reste sur la tablette.
+    bind('s-logcontent', 'logContent', Boolean, 'checked');
+    $('s-logurl').addEventListener('change', () => {
+      const v = $('s-logurl').value.trim();
+      if (v && !SCRIPT_URL.test(v)) { this.logStatus('Ce n\'est pas l\'adresse d\'un script Apps Script déployé (elle commence par https://script.google.com/macros/s/ et finit par /exec).', 'err'); return; }
+      this.s.logUrl = v; saveSettings(this.s); app.applySettings('logUrl');
+      this.logStatus(v ? 'Adresse enregistrée ✓ — le journal part maintenant toutes les 30 s.' : 'Journal à distance coupé.', v ? 'ok' : '');
+    });
+    $('t-logsend').onclick = async () => {
+      if (!app.remote.on) { this.logStatus('Indique d\'abord l\'adresse du script (ou scanne son QR code).', 'err'); return; }
+      app.log('Envoi du journal demandé depuis les réglages');
+      const ok = await app.remote.flush();
+      this.logStatus(ok ? 'Journal envoyé ✓ (onglets Journal et État de la feuille « Wilson — journal »).' : 'Envoi impossible pour l\'instant (réseau ?) : nouvel essai automatique.', ok ? 'ok' : 'err');
+    };
+    $('t-logscan').onclick = async () => {
+      const v = app.vision && app.vision.video, cv = $('logscan');
+      if (this._scan) { this._scan.abort(); return; }
+      if (!v) { this.logStatus('La caméra est coupée : colle l\'adresse à la main.', 'err'); return; }
+      this._scan = new AbortController(); cv.hidden = false; $('t-logscan').textContent = 'Arrêter';
+      this.logStatus('Montre-moi le QR code de la page « Journal de Wilson : prêt » (écran de l\'ordinateur ou photo sur ton téléphone)…', '');
+      const g = cv.getContext('2d');
+      try {
+        const url = await scanQR(v, { signal: this._scan.signal, onFrame: (vid) => { try { g.drawImage(vid, 0, 0, cv.width, cv.height); } catch (_) {} } });
+        if (url) {
+          this.s.logUrl = url; saveSettings(this.s); $('s-logurl').value = url; app.applySettings('logUrl');
+          app.face.setEmotion('joie', 2000);
+          this.logStatus('QR code lu ✓ — le journal part maintenant toutes les 30 s.', 'ok');
+        } else this.logStatus('', '');
+      } catch (e) { this.logStatus('Lecture impossible : ' + e.message + '.', 'err'); }
+      this._scan = null; cv.hidden = true; $('t-logscan').textContent = 'Scanner le QR code';
+    };
 
     $('s-close').onclick = () => this.close();
     $('s-reload').onclick = () => location.reload();
@@ -142,6 +176,10 @@ export class SettingsUI {
     $('s-barge').value = s.bargeIn; $('s-home').value = s.home; $('s-city').value = s.city;
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
+    $('s-logurl').value = s.logUrl || ''; $('s-logcontent').checked = s.logContent !== false;
+    const r = this.app.remote;
+    if (r.on) this.logStatus(r.sentAt ? `Actif ✓ — dernier envoi à ${new Date(r.sentAt).getHours()}h${String(new Date(r.sentAt).getMinutes()).padStart(2, '0')}${r.fails ? ` (${r.fails} échec(s) depuis, réseau ?)` : ''}.` : 'Actif ✓ — premier envoi dans quelques secondes.', r.fails ? 'err' : 'ok');
+    else $('s-logstatus').hidden = true;
     const v = this.app.vision;
     const gaze = !v ? 'caméra coupée' : v.gazeReady ? `regard prêt (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}, ${Math.round(v.stats.ms || 0)} ms)` : v.modelsDone ? 'regard indisponible' : 'regard en chargement';
     $('version').textContent = `Wilson ${this.app.version} · visage ${this.app.drawFps || '—'} images/s · vision : ${v ? v.mode : 'coupée'}, ${gaze} · connexions Gemini aujourd'hui : ${sessionsToday()}`;
@@ -161,8 +199,9 @@ export class SettingsUI {
       : '<li class="empty">Wilson ne sait encore rien. Dis-lui : « Wilson, retiens que… »</li>';
   }
   renderLog() { const el = $('log'); el.textContent = this.app.logs.join('\n'); el.scrollTop = el.scrollHeight; }
+  logStatus(msg, cls) { const el = $('s-logstatus'); el.hidden = !msg; el.className = 'status ' + (cls || ''); el.textContent = msg; }
   open() { this.fill(); $('settings').hidden = false; this.app.settingsOpen = true; }
-  close() { $('settings').hidden = true; this.app.settingsOpen = false; clearInterval(this._gz); $('gaze-test').hidden = true; $('t-calib').hidden = true; $('t-gaze').textContent = 'Tester le regard'; }
+  close() { if (this._scan) this._scan.abort(); $('settings').hidden = true; this.app.settingsOpen = false; clearInterval(this._gz); $('gaze-test').hidden = true; $('t-calib').hidden = true; $('t-gaze').textContent = 'Tester le regard'; }
   showWelcome() { $('w-home').value = this.s.home; $('w-key').value = this.s.apiKey || ''; $('welcome').hidden = false; }
 }
 

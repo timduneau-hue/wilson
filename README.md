@@ -16,6 +16,8 @@ Fonctionnement et règles : voir [PLAN.md](PLAN.md).
 - Pendant une conversation, le son et une image de la caméra partent vers Gemini (Google).
   Sur le palier gratuit de l'API Gemini, Google peut utiliser ces échanges pour améliorer ses produits.
 - La clé API, les souvenirs et le journal restent dans le stockage local de la tablette.
+- Journal à distance (facultatif) : si l'adresse d'un script Apps Script est indiquée, le journal, les délais et l'état
+  de la tablette partent dans une feuille Google du propriétaire (les phrases échangées peuvent être exclues dans les réglages).
 
 ## Composants tiers
 - [MediaPipe Tasks Vision](https://github.com/google-ai-edge/mediapipe) 1.1.1 — Apache-2.0 (`vendor/mediapipe/`, version script classique pour le Web Worker)

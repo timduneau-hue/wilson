@@ -121,6 +121,16 @@
       </section>
 
       <section class="group">
+        <h3>Journal à distance (pour Claude)</h3>
+        <p class="fine" style="margin:0 0 10px">Wilson envoie son journal dans ta feuille Google « Wilson — journal » : Claude peut le lire pour trouver lui-même ce qui ne va pas.</p>
+        <label class="row"><span>Adresse du script</span><input id="s-logurl" class="field" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec"></label>
+        <label class="row check"><input id="s-logcontent" type="checkbox"><span>Envoyer aussi les phrases échangées (sinon : délais, erreurs et état seulement)</span></label>
+        <div class="buttons wrap"><button id="t-logscan" class="btn">Scanner le QR code</button><button id="t-logsend" class="btn">Envoyer maintenant</button></div>
+        <canvas id="logscan" class="scan" width="320" height="180" hidden></canvas>
+        <p id="s-logstatus" class="status" hidden></p>
+      </section>
+
+      <section class="group">
         <h3>Journal</h3>
         <pre id="log" class="log"></pre>
         <div class="buttons"><button id="s-reload" class="btn">Relancer l'appli</button></div>

@@ -20,7 +20,7 @@ Un visage original (grands yeux expressifs sur fond noir) qui vit, écoute, rega
 | R6 | Il voit ce qu'on lui montre. | Une photo jointe à chaque phrase. |
 | R7 | Il retient ce qu'on lui dit. | Souvenirs stockés sur la tablette, rappelés à chaque requête. |
 | R8 | **Fluide** : visage sans à-coups, réponse ~1 à 2 s après la fin de la phrase. | Analyse de la caméra en arrière-plan (Web Worker, autre cœur) : l'animation ne se fige jamais ; processeur ou carte graphique choisi en mesurant sur la tablette ; fin de phrase détectée même avec la télé ; réponse lue dès la 1re phrase ; mode le plus rapide par défaut ; délais détaillés dans le journal. Budget de latence détaillé en section 6 bis. |
-| R9 | Rien d'inutile ne quitte la maison. | Seules les phrases dites en le regardant partent vers Gemini. |
+| R9 | Rien d'inutile ne quitte la maison. | Seules les phrases dites en le regardant partent vers Gemini. Le journal à distance va dans la feuille Google de Timothée (son compte), phrases échangées désactivables. |
 | R10 | L'écran ne s'abîme pas et ne s'éteint pas. | Anti-veille, veille sombre, visage qui dérive. |
 
 Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'éclaire → on sait qu'il écoute.
@@ -61,6 +61,8 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 | `js/memory.js` | Souvenirs et petit journal des échanges | localStorage |
 | `js/sensors.js` | Toucher, mouvement de la tablette, batterie, réseau | API du navigateur |
 | `js/settings.js` | Écran de réglages et premier lancement | — |
+| `js/remote.js` | Journal à distance : journal, délais et bilan → feuille Google « Wilson — journal » (lue par Claude) ; lecture du QR code | `apps-script/journal.gs` |
+| `apps-script/journal.gs` | Script Apps Script de Timothée (application Web) qui range le journal dans la feuille | Google Sheets |
 
 ## 5. Choix techniques et pourquoi
 
@@ -103,7 +105,7 @@ pour ne jamais provoquer un refus « trop de requêtes » du palier gratuit.
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 23/10/26 : **version 1.7.0** en ligne.
+État au 23/10/26 : **version 1.8.0** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -113,6 +115,14 @@ pour ne jamais provoquer un refus « trop de requêtes » du palier gratuit.
 - **Règles de travail** : ne jamais saisir soi-même la clé API ou des identifiants (Timothée colle sa clé sur la tablette) ;
   dates jj/mm/aa, heures « 10h00 » ; sur un gros changement, mettre d'abord ce plan à jour, puis les détails.
 - **Tests** : dossier `tests/` (voir `tests/README.md`), à relancer avant chaque publication.
+- **Journal à distance (à lire pour diagnostiquer, sans demander de capture)** : feuille Google **« Wilson — journal »**
+  dans le Drive de Timothée (la trouver avec le connecteur Google Drive, recherche par titre). Plus récent en haut :
+  - `Journal!A1:C300` : les dernières lignes du journal (erreurs JavaScript comprises, préfixe « Erreur : ») ;
+  - `Délais!A1:L100` : une ligne par réponse (envoi, Google, 1re phrase, voix, complet, modèle, réflexion, relance, recherche) ;
+  - `État!A1:B40` : dernier bilan (version, état, vision, images/s du visage, retard, batterie, quotas, navigateur) ;
+    « Mis à jour » vieux de plus de 10 min = tablette éteinte, appli fermée ou hors ligne.
+  La tablette envoie toutes les 30 s par le script « Wilson journal » (code : `apps-script/journal.gs`, déployé par
+  Timothée en application Web) ; l'adresse du script est saisie ou scannée (QR code) sur la tablette et n'est pas dans le dépôt.
 
 Historique récent :
 - 1.5.0 (23/10/26) — le mot « Wilson » (Vosk, trop lent sur la tablette) est remplacé par l'**écoute au regard**.
@@ -120,9 +130,13 @@ Historique récent :
   Gemini sait qu'on le regardait ; délais détaillés dans le journal (ligne « Délais »).
 - 1.7.0 (23/10/26) — réponses plus rapides (section 6 bis) : envoi anticipé, réflexion jamais au réglage par défaut,
   recherche Google en deux temps, relance quand Google traîne, voix réchauffée ; ligne « Délais » plus complète.
+- 1.8.0 (23/10/26) — journal à distance : journal, délais, erreurs et bilan de la tablette envoyés dans la feuille
+  « Wilson — journal », que Claude lit lui-même. Réglages → « Journal à distance (pour Claude) ».
 
-En attente du retour de Timothée sur la 1.7.0 :
-- les yeux sont-ils fluides ? les réponses assez rapides ? (capture de la ligne « Délais » du journal si c'est encore lent :
-  elle dit où part le temps — fin de phrase, Google, voix de la tablette) ;
+En attente :
+- Timothée doit coller `apps-script/journal.gs` dans un script lié à la feuille « Wilson — journal », le déployer
+  (application Web, « moi », « Tout le monde ») et scanner le QR code avec Wilson ; ensuite, lire la feuille avant de lui
+  poser des questions ;
+- les yeux sont-ils fluides ? les réponses assez rapides ? (onglets Délais et État de la feuille, plus besoin de capture) ;
 - il a écrit que « ça ne fonctionne pas comme je voudrais » : préciser ce qui ne va pas (réaction au regard, réponses
   intempestives, coupures…).

@@ -11,8 +11,9 @@ import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
+import { RemoteLog } from './remote.js';
 
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
@@ -25,8 +26,10 @@ const $ = (id) => document.getElementById(id);
 
 class App {
   constructor() {
-    this.version = VERSION; this.logs = [];
+    this.version = VERSION; this.logs = []; this.bootAt = Date.now();
     this.settings = loadSettings();
+    this.remote = new RemoteLog(this);           // journal à distance (feuille Google lue par Claude)
+    this._catchErrors();
     this.face = new Face($('face'), { style: this.settings.face });
     this.face.setMood('somnolent'); this.face.setBrightness(0.35);
     this.audio = new AudioIO(); this.brain = new Brain();
@@ -71,7 +74,47 @@ class App {
 
   get speaking() { return this.audio.playing || this.voice.speaking; }
 
-  log(m) { const d = new Date(); this.logs.push(`${pad(d.getHours())}h${pad(d.getMinutes())}:${pad(d.getSeconds())}  ${m}`); if (this.logs.length > 200) this.logs.shift(); console.log('[Wilson]', m); if (this.settingsOpen) this.ui.renderLog(); }
+  // priv : la ligne contient ce que dit la famille (le journal à distance peut la masquer, voir réglages).
+  log(m, priv = false) {
+    const d = new Date(); this.logs.push(`${pad(d.getHours())}h${pad(d.getMinutes())}:${pad(d.getSeconds())}  ${m}`); if (this.logs.length > 200) this.logs.shift();
+    console.log('[Wilson]', m); if (this.settingsOpen && this.ui) this.ui.renderLog();
+    if (this.remote) this.remote.line(m, priv);
+  }
+
+  // Erreurs JavaScript : notées dans le journal (et donc visibles à distance).
+  _catchErrors() {
+    let n = 0;
+    const note = (msg) => { if (n++ < 50) this.log('Erreur : ' + String(msg).slice(0, 400)); };
+    window.addEventListener('error', (e) => note(`${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`));
+    window.addEventListener('unhandledrejection', (e) => note('promesse : ' + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason)));
+    // La page se ferme ou passe en arrière-plan : ce qui attend part tout de suite.
+    const bye = () => { if (Date.now() - (this._byeAt || 0) < 2000) return; this._byeAt = Date.now(); this.remote.flush({ beacon: true }); };
+    window.addEventListener('pagehide', bye);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) bye(); });
+  }
+
+  // Bilan de la tablette pour l'onglet « État » du journal à distance.
+  bilan() {
+    const v = this.vision, b = this.battery, s = this.settings, e = this.eco, now = Date.now();
+    const d = (t) => { const x = new Date(t); return `${pad(x.getDate())}/${pad(x.getMonth() + 1)}/${String(x.getFullYear()).slice(2)} ${pad(x.getHours())}h${pad(x.getMinutes())}`; };
+    return {
+      'Version': VERSION, 'Démarré le': d(this.bootAt), 'État': this.state, 'Cerveau en cours': this.mode || '—', 'Réglage cerveau': s.brainMode,
+      'Écoute': s.listenMode, 'Coupure': s.bargeIn, 'Fin de conversation': `${s.convTimeout} s`,
+      'Vision': v ? `${v.mode}, regard ${v.gazeReady ? 'prêt' : v.modelsDone ? 'indisponible' : 'en chargement'} (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}), analyse ${Math.round(v.stats.ms || 0)} ms (visages ${Math.round(v.stats.fd || 0)}, regard ${Math.round(v.stats.lm || 0)}), ${v.faces || 0} visage(s), on le regarde : ${v.looking ? 'oui' : 'non'}${v.errors.length ? ' — ' + v.errors.join(' · ') : ''}` : 'caméra coupée',
+      'Visage': `${this.drawFps || 0} images/s${this._light ? ', mode allégé' : ''}${this.face.maxDpr ? ', finesse ' + this.face.maxDpr : ''}`,
+      'Retard de la tablette': `${Math.round(this.lag || 0)} ms`,
+      'Batterie': b ? `${Math.round(b.level * 100)} %${b.charging ? ', branchée' : ', NON branchée'}` : '—',
+      'Réseau': navigator.onLine ? 'en ligne' : 'hors ligne',
+      'Mode économique': `${e.modelUsed || '—'}, réflexion ${e.thinking ?? 'par défaut'}${e.noSchema ? ', sans schéma' : ''}${e.noSearch ? ', sans recherche' : ''}, ${e.recent()} requête(s) dans la dernière minute`,
+      'Quota direct': this.quotaUntil && now < this.quotaUntil ? `en pause : ${this.quotaMsg || ''}` : 'pas de pause',
+      'Quota économique': this.ecoQuotaUntil && now < this.ecoQuotaUntil ? `en pause : ${this.ecoQuotaMsg || ''}` : 'pas de pause',
+      'Voix de la tablette': `${s.ecoVoice || 'automatique'} (${this.voice.voices().length} voix françaises)`,
+      'Souvenirs': `${this.memory.facts.length}`,
+      'Phrases échangées dans le journal': s.logContent === false ? 'masquées' : 'envoyées',
+      'Écran': `${screen.width}×${screen.height}, densité ${devicePixelRatio}`,
+      'Navigateur': navigator.userAgent,
+    };
+  }
   badge(text, ms = 5000, important = false) {
     const b = $('badge'), now = performance.now();
     if (!important && this._badgeImportantUntil > now) return;          // un message d'erreur reste lisible
@@ -102,6 +145,8 @@ class App {
     if (!this.audio.running) this._showWake(); else this._hideWake();
     this.voice.warm();
     this._loadQuota();
+    this.log(`Wilson ${VERSION} démarré${this.remote.on ? ' (journal à distance actif)' : ''}`);
+    setTimeout(() => this.remote.flush(), 20000);   // 1er bilan une fois la vision chargée
     this.setState('veille');
     this.applySettings();
   }
@@ -133,7 +178,7 @@ class App {
     const go = () => {
       if (this.state === 'eveil' || this.state === 'conversation' || this.settingsOpen) return setTimeout(go, 15000);
       try { sessionStorage.setItem('wilson.reloadedFor', `${why}|${Date.now()}`); } catch (_) {}
-      this.log('Mise à jour : rechargement'); location.reload();
+      this.log('Mise à jour : rechargement'); this.remote.flush({ beacon: true }); location.reload();
     };
     go();
   }
@@ -150,6 +195,7 @@ class App {
       this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.eco.modelUsed = null; this.log('Clé ou modèle changé');
     }
     if (this.vision) this.vision.mirror = !s.mirror;
+    if (key === 'logUrl' && this.remote.on) { this.log('Journal à distance activé'); this.remote.flush(); }
     if (key === 'camera') { if (s.camera && !this.vision && this.started) this._startVision(); if (!s.camera && this.vision) { this.vision.stop(); this.vision = null; } }
     $('subtitle').hidden = !s.subtitles;
     this.continuous = false;
@@ -394,7 +440,7 @@ class App {
       if (!out.pourMoi || notForMe || repeated || (!out.reponse && !out.chercher)) {
         if (!emoSet) this.face.clearEmotion();
         E.ignored++;
-        this.log(`Pas pour moi (${E.ignored}) : « ${out.entendu.slice(0, 80)} » (${ms(performance.now())} s, ${out.model})`);
+        this.log(`Pas pour moi (${E.ignored}) : « ${out.entendu.slice(0, 80)} » (${ms(performance.now())} s, ${out.model})`, true);
         if (sess) sess.end();
         // Bruits, télé, conversations entre vous : au 2e d'affilée, Wilson retourne en veille.
         if (E.ignored >= 2 && !sess) { setTimeout(() => conv === this.convId && this.endConversation('pas pour moi'), 200); }
@@ -404,7 +450,7 @@ class App {
         this._applyEco(out, emoSet);
         // 2e temps : une info récente est nécessaire → recherche Google pendant que Wilson dit sa phrase d'attente.
         if (out.chercher && !this.eco.noSearch && conv === this.convId) {
-          this.log(`Recherche Google : « ${out.chercher} »`);
+          this.log(`Recherche Google : « ${out.chercher} »`, true);
           tSearch = performance.now(); emoSet = false;
           if (!sess) this.face.setEmotion('reflexion', 30000, 0.6);
           const st2 = { spoken: 0 };
@@ -423,11 +469,16 @@ class App {
             speakChunk("Je n'arrive pas à chercher ça pour le moment.");
           }
         }
-        this.log(`« ${out.entendu.slice(0, 90)} » → ${said.slice(0, 110)}`);
+        this.log(`« ${out.entendu.slice(0, 90)} » → ${said.slice(0, 110)}`, true);
         // Délais mesurés depuis la fin de la phrase (dernier son de voix) : où part le temps.
         const tAll = performance.now();
-        timing = () => this.log(`Délais : envoi ${ms(tSend)} s${req.spec ? ' (anticipé)' : ''} · Google ${ms(tNet || tAll)} s · 1re phrase ${ms(tFirst || tAll)} s · voix ${this.voice.startedAt ? ms(this.voice.startedAt) + ' s' : '—'} · complet ${ms(tAll)} s`
+        const sec = (t) => (t ? Math.round((t - (req.endAt || tSend)) / 100) / 10 : null);
+        timing = () => this.remote.mesure({ envoi: sec(tSend), google: sec(tNet), phrase1: sec(tFirst), voix: this.voice.startedAt ? sec(this.voice.startedAt) : null,
+          complet: sec(tAll), modele: out.model, reflexion: out.think || 'par défaut', relance: !!(out.hedged || last.hedged),
+          recherche: tSearch ? Math.round((tAll - tSearch) / 100) / 10 : null, anticipe: !!req.spec, phrase: req.audio ? Math.round(req.audio.length / 1600) / 10 : null });
+        const logTiming = () => this.log(`Délais : envoi ${ms(tSend)} s${req.spec ? ' (anticipé)' : ''} · Google ${ms(tNet || tAll)} s · 1re phrase ${ms(tFirst || tAll)} s · voix ${this.voice.startedAt ? ms(this.voice.startedAt) + ' s' : '—'} · complet ${ms(tAll)} s`
           + ` (${out.model}, réflexion ${out.think || 'par défaut'}${out.hedged ? ', relancée' : ''}${tSearch ? `, recherche ${((tAll - tSearch) / 1000).toFixed(1)} s${last.hedged ? ' relancée' : ''}` : ''}, phrase de ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
+        const mesure = timing; timing = () => { logTiming(); mesure(); };
         this.memory.addExchange(out.entendu, said);
         this._lastReply = said;
         if (this.settings.subtitles) $('subtitle').textContent = said.slice(0, 220);
@@ -460,8 +511,8 @@ class App {
   // Effets d'une réponse : émotion (si pas déjà montrée pendant l'écriture), souvenirs, geste.
   _applyEco(out, emoShown) {
     if (!emoShown && out.emotion) { if (out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9); else this.face.clearEmotion(); }
-    for (const f of out.memoriser) { this.memory.add(f); this.log('Retenu : ' + f); }
-    if (out.oublier) { const g = this.memory.forget(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}`); }
+    for (const f of out.memoriser) { this.memory.add(f); this.log('Retenu : ' + f, true); }
+    if (out.oublier) { const g = this.memory.forget(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}`, true); }
     const g = { oui: 'nod', non: 'shake', sautiller: 'bounce', pencher_la_tete: 'tilt' }[out.geste];
     if (g) this.face.play(g); if (out.geste === 'clin_oeil') this.face.doWink(1);
     if (out.memoriser.length && !g) this.face.play('nod');
@@ -662,7 +713,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     b.on('turn', ({ user, wilson }) => {
       this.discard = false;
       if (user || wilson) this.memory.addExchange(user, wilson);
-      if (wilson) this.log('Wilson : ' + wilson.slice(0, 120));
+      if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
       setTimeout(() => { if (!this.audio.playing) $('subtitle').textContent = ''; }, 5000);
     });
     b.on('heard', (t) => { if (this.state === 'conversation') this.lastActivity = performance.now(); });
@@ -700,8 +751,8 @@ Nous sommes ${fmtDate()}.${bat}`;
           if (g) this.face.play(g); if (a.geste === 'clin_oeil') this.face.doWink(1);
           break;
         }
-        case 'memoriser': this.memory.add(a.fait); this.log('Retenu : ' + a.fait); this.face.play('nod'); out = { result: 'mémorisé' }; break;
-        case 'oublier': { const g = this.memory.forget(a.sujet || ''); out = { result: g.length ? 'Oublié : ' + g.join(' ; ') : 'Aucun souvenir ne correspond.' }; silent = false; this.log('Oublier « ' + a.sujet + ' » : ' + g.length); break; }
+        case 'memoriser': this.memory.add(a.fait); this.log('Retenu : ' + a.fait, true); this.face.play('nod'); out = { result: 'mémorisé' }; break;
+        case 'oublier': { const g = this.memory.forget(a.sujet || ''); out = { result: g.length ? 'Oublié : ' + g.join(' ; ') : 'Aucun souvenir ne correspond.' }; silent = false; this.log('Oublier « ' + a.sujet + ' » : ' + g.length, true); break; }
         case 'date_et_heure': out = { result: fmtDate() }; silent = false; break;
         case 'terminer_conversation': { this.endAfterSpeech = true; const id = this.convId; setTimeout(() => { if (id === this.convId && this.endAfterSpeech && !this.audio.playing) this.endConversation('au revoir'); }, 4000); break; }
         default: out = { error: 'outil inconnu' }; silent = false;
