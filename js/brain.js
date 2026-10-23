@@ -41,9 +41,12 @@ async function ephemeralToken(key) {
 }
 
 const FALLBACK_MODELS = ['gemini-3.1-flash-live-preview', 'gemini-2.5-flash-native-audio-preview-12-2025'];
+const QUOTA_SKIP_MS = 6 * 3600000;    // un modèle refusé pour quota est essayé en dernier pendant 6 h (gagne ~2 s par essai inutile)
 
-// Niveau 0 = tout ; 1 = sans recherche Google ni options avancées ; 2 = le strict minimum pour parler.
-function buildSetup({ model, voice, system, level, handle }) {
+// Niveau 0 = tout ; 1 = sans options avancées ; 2 = le strict minimum pour parler.
+// La recherche Google n'est plus l'outil intégré de Gemini Live (lent, « Let me check » en anglais, et resté bloqué
+// le 23/10/26) : c'est l'outil « chercher », exécuté par l'appli (voir app.js, PLAN 6 bis).
+function buildSetup({ model, voice, system, level, handle, think }) {
   const setup = {
     model: `models/${model}`,
     generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
@@ -55,8 +58,9 @@ function buildSetup({ model, voice, system, level, handle }) {
     setup.tools = [{ functionDeclarations: TOOLS[0].functionDeclarations.map(({ behavior, ...f }) => (level === 0 ? { behavior, ...f } : f)) }];
     setup.realtimeInputConfig = { automaticActivityDetection: { prefixPaddingMs: 200, silenceDurationMs: 700 } };
   }
+  // Gemini 2.5 « native audio » réfléchit par défaut avant de parler : plusieurs secondes de silence. On coupe la réflexion.
+  if (think === false && level <= 1) setup.generationConfig.thinkingConfig = { thinkingBudget: 0 };
   if (level === 0) {
-    setup.tools.push({ googleSearch: {} });
     setup.generationConfig.mediaResolution = 'MEDIA_RESOLUTION_LOW';
     setup.realtimeInputConfig.activityHandling = 'START_OF_ACTIVITY_INTERRUPTS';
     setup.contextWindowCompression = { slidingWindow: {} };
@@ -104,14 +108,30 @@ export const TOOLS = [{
       description: 'Donne la date et l\'heure exactes maintenant.' },
     { name: 'terminer_conversation', behavior: 'NON_BLOCKING',
       description: 'À appeler quand on te dit au revoir, bonne nuit, ou « merci, c\'est tout » : tu retournes en veille après ta réponse.' },
+    { name: 'chercher', behavior: 'BLOCKING',
+      description: "Recherche sur Internet (Google) pour une information récente ou qui change : météo, actualité, sport, horaires, prix, programme télé, commerces, événements. Avant de l'appeler, dis en français une très courte phrase d'attente.",
+      parameters: { type: 'OBJECT', properties: { question: { type: 'STRING', description: 'la question complète, avec le lieu et la date si utile' } }, required: ['question'] } },
   ],
-}, { googleSearch: {} }];
+}];
 
 export class Brain {
   constructor() {
     this.ws = null; this.ready = false; this.handle = null; this.handlers = {};
     this.inText = ''; this.outText = ''; this._closing = false;
     this.authMode = null;          // 'key' ou 'token' : la méthode qui a marché, retenue pour la suite
+    this.think = false;            // false : réflexion coupée (thinkingBudget 0) ; null : réglage refusé par le modèle
+    this.refused = {};             // modèle → heure jusqu'à laquelle il passe en dernier (refusé pour quota)
+    this._restore();
+  }
+  // Ce qui a marché est retenu même après un redémarrage : la 1re conversation ne perd plus ~4 s en essais refusés.
+  _restore() {
+    try {
+      const o = JSON.parse(localStorage.getItem('wilson.live') || 'null');
+      if (o) { this.modelUsed = o.model || null; this.level = o.level ?? null; this.authMode = o.auth || null; this.think = o.think === null ? null : false; this.refused = o.refused || {}; }
+    } catch (_) {}
+  }
+  _save() {
+    try { localStorage.setItem('wilson.live', JSON.stringify({ model: this.modelUsed, level: this.level, auth: this.authMode, think: this.think, refused: this.refused })); } catch (_) {}
   }
   on(ev, fn) { this.handlers[ev] = fn; }
   _emit(ev, ...a) { const f = this.handlers[ev]; if (f) try { f(...a); } catch (e) { console.error(ev, e); } }
@@ -126,27 +146,32 @@ export class Brain {
     const key = cleanKey(opts.key);
     const first = (arr, v) => (v != null && arr.includes(v) ? [v, ...arr.filter((x) => x !== v)] : arr);
     const auths = first(['key', 'token'], this.authMode);
-    const models = first([...new Set([opts.model, ...FALLBACK_MODELS])], this.modelUsed);
+    const now = Date.now();
+    const all = first([...new Set([opts.model, ...FALLBACK_MODELS])], this.modelUsed);
+    const models = [...all.filter((m) => !(this.refused[m] > now)), ...all.filter((m) => this.refused[m] > now)];   // refusés récemment : en dernier
     const levels = first([0, 1, 2], this.level);
     let last, authErr, serverErr, quotaErr, tries = 0;
     auth: for (const mode of auths) {
       for (const model of models) {
-        for (const level of levels) {
-          if (++tries > 7) break auth;
+        for (let li = 0; li < levels.length; li++) {
+          const level = levels[li];
+          if (++tries > 8) break auth;
           try {
             const url = mode === 'key'
               ? `${WS_ROOT}BidiGenerateContent?key=${encodeURIComponent(key)}`
               : `${WS_ROOT}BidiGenerateContentConstrained?access_token=${encodeURIComponent(await ephemeralToken(key))}`;
-            await this._open(url, { ...opts, model, level });
+            const think = /2\.5/.test(model) ? this.think : undefined;
+            await this._open(url, { ...opts, model, level, think });
             const changed = mode !== this.authMode || model !== this.modelUsed || level !== this.level;
-            this.authMode = mode; this.modelUsed = model; this.level = level;
-            if (changed) this._emit('log', `Gemini connecté : ${mode === 'key' ? 'clé' : 'jeton'}, ${model}, configuration ${['complète', 'simplifiée', 'minimale'][level]}`);
+            this.authMode = mode; this.modelUsed = model; this.level = level; delete this.refused[model]; this._save();
+            if (changed) this._emit('log', `Gemini connecté : ${mode === 'key' ? 'clé' : 'jeton'}, ${model}, configuration ${['complète', 'simplifiée', 'minimale'][level]}${think === false ? ', sans réflexion préalable' : ''}`);
             return;
           } catch (e) {
             last = e; const kind = classify(e); if (e.code && !serverErr) serverErr = e;   // réponse réelle de Google
             this._emit('log', `Essai ${mode}/${model}/niv.${level} → ${kind} : ${e.message}`);
             if (kind === 'auth') { authErr = e; continue auth; }      // la clé ne passe pas ainsi : autre méthode
-            if (kind === 'quota') { e.quota = true; e.model = model; quotaErr = quotaErr || e; break; }   // quota du modèle : modèle de secours, rien d'autre
+            if (kind === 'quota') { e.quota = true; e.model = model; quotaErr = quotaErr || e; this.refused[model] = Date.now() + QUOTA_SKIP_MS; this._save(); break; }   // quota du modèle : modèle de secours, rien d'autre
+            if (kind === 'config' && /think/i.test(e.message) && this.think === false) { this.think = null; this._save(); li--; continue; }   // réglage de réflexion refusé : même niveau, sans lui
             if (kind === 'config') continue;                         // un réglage refusé : configuration plus simple
             if (kind === 'model') break;                             // modèle indisponible : modèle de secours
             break auth;                                              // réseau, délai… : inutile d'insister
@@ -160,7 +185,7 @@ export class Brain {
   // Les réponses « silencieuses » aux outils n'existent qu'avec la configuration complète du modèle 3.8.
   get canSchedule() { return this.level === 0 && /3\.8/.test(this.modelUsed || ''); }
 
-  _open(url, { model, voice, system, resume = true, level = 0 }) {
+  _open(url, { model, voice, system, resume = true, level = 0, think }) {
     countSession();
     return new Promise((resolve, reject) => {
       this._closing = false; this.ready = false;
@@ -168,7 +193,7 @@ export class Brain {
       this.ws = ws;
       const timer = setTimeout(() => { reject(new Error('Délai de connexion dépassé (Google ne répond pas)')); try { ws.close(); } catch (_) {} }, 15000);
       ws.onopen = () => {
-        const setup = buildSetup({ model, voice, system, level, handle: resume ? this.handle : null });
+        const setup = buildSetup({ model, voice, system, level, think, handle: resume ? this.handle : null });
         ws.send(JSON.stringify({ setup }));
       };
       ws.onmessage = async (e) => {

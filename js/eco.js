@@ -138,12 +138,12 @@ export class EcoBrain {
 
   // req : { audio: Int16Array 16 kHz, image: base64 jpeg, text, hint } ; onPartial({pourMoi, emotion, reponse, closed}) pendant l'écriture.
   // search : 2e requête, avec Google Search (texte seul). La réponse n'entre dans l'historique que par commit().
-  async ask({ key, system, audio, image, text, hint, signal, onPartial, search = false }) {
+  async ask({ key, system, audio, image, text, hint, signal, onPartial, search = false, fresh = false }) {
     const parts = [];
     if (audio && audio.length) parts.push({ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio) } });
     if (image) parts.push({ inlineData: { mimeType: 'image/jpeg', data: image } });
     parts.push({ text: text || `[Enregistrement ci-dessus.${hint ? ' ' + hint : ''} Réponds au format JSON demandé.]` });
-    const contents = [...this.history.slice(-12), { role: 'user', parts }];
+    const contents = [...(fresh ? [] : this.history.slice(-12)), { role: 'user', parts }];   // fresh : question isolée (outil « chercher »)
     const order = ECO_MODELS[this.speed] || ECO_MODELS.rapide;
     const models = this.modelUsed ? [this.modelUsed, ...order.filter((m) => m !== this.modelUsed)] : order;
     const stream = this.stream && !!onPartial;
