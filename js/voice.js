@@ -5,12 +5,15 @@ export class Voice {
   constructor() {
     this.ok = 'speechSynthesis' in window;
     this.speaking = false; this.voiceName = ''; this._gen = 0; this._t0 = 0; this._pulse = 0; this._session = null; this.startedAt = 0; this._warm = false;
+    this._gap = false; this._warmAt = 0;
   }
 
   // Réveille le moteur de synthèse vocale (phrase muette) : la 1re vraie réponse démarre plus vite.
-  warm() {
-    if (!this.ok || this._warm || this.speaking) return;
-    this._warm = true;
+  // again : de nouveau (quand on le regarde), au plus une fois par minute — le moteur d'Android se rendort après un moment.
+  warm(again = false) {
+    if (!this.ok || this.speaking) return;
+    if (this._warm && !(again && performance.now() - this._warmAt > 60000)) return;
+    this._warm = true; this._warmAt = performance.now();
     try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; u.lang = 'fr-FR'; const v = this._pick(); if (v) u.voice = v; u.onerror = () => { this._warm = false; }; speechSynthesis.speak(u); } catch (_) { this._warm = false; }
   }
 
@@ -33,7 +36,8 @@ export class Voice {
       if (self._session === session) self._session = null;
       err ? rejectDone(err) : resolveDone();
     };
-    const maybeDone = () => { if (ended && finished >= queued) settle(); };
+    // Entre deux morceaux (ex. phrase d'attente puis résultat d'une recherche) : bouche fermée.
+    const maybeDone = () => { if (gen === self._gen) self._gap = finished >= queued; if (ended && finished >= queued) settle(); };
     // Filet de sécurité si « onend » n'arrive jamais : on se fie à la durée estimée de la parole,
     // pas à speechSynthesis.speaking (peu fiable sur certains Android, ce qui faisait réécouter Wilson pendant qu'il parlait).
     let expectedEnd = performance.now();
@@ -60,7 +64,7 @@ export class Voice {
             if (e.error === 'not-allowed') return settle({ code: 'not-allowed' });
             fin();
           };
-          queued++;
+          queued++; self._gap = false;
           expectedEnd = Math.max(expectedEnd, performance.now()) + (400 + part.length * 72 / rate);
           if (!self.speaking) { self.speaking = true; self._t0 = performance.now(); }
           try { speechSynthesis.speak(u); } catch (e) { fin(); }
@@ -86,7 +90,7 @@ export class Voice {
 
   // Ouverture de la bouche simulée (0..1) pendant la parole.
   mouth(now = performance.now()) {
-    if (!this.speaking) return 0;
+    if (!this.speaking || this._gap) return 0;
     const t = (now - this._t0) / 1000;
     this._pulse *= 0.86;
     const syll = Math.max(0, Math.sin(t * Math.PI * 2 * 4.6 + Math.sin(t * 1.7) * 2));

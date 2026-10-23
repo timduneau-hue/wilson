@@ -10,12 +10,13 @@ import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, SettingsUI } from './settings.js';
 import { Voice } from './voice.js';
-import { EcoBrain, ECO_FORMAT, sentenceCut, sayable, warmUp } from './eco.js';
+import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
+const ECO_SPEC_MS = 250;          // envoi anticipé : la phrase part dès ce silence, Wilson ne parle qu'à la fin confirmée (PLAN 6 bis)
 const ECO_TAIL_MS = 1000;         // après avoir parlé : le son de la tablette finit de sortir après l'annonce « fini »
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const pad = (n) => String(n).padStart(2, '0');
@@ -299,7 +300,19 @@ class App {
         if (this._addressed(now)) C.looked = (C.looked || 0) + 1;
         if (this._gazing(now)) C.gazed = (C.gazed || 0) + 1;
       }
-      if (now - C.lastVoice > ECO_SILENCE_MS || C.len > 16000 * 12) { E.cap = null; this._ecoUtterance(C); }
+      // La personne a repris après l'envoi anticipé : on l'annule, la phrase continue d'être enregistrée (R2).
+      if (C.spec && C.lastVoice > C.spec.endAt) this._specCancel(C);
+      const quiet = now - C.lastVoice;
+      if (quiet > ECO_SILENCE_MS || C.len > 16000 * 12) {
+        E.cap = null;
+        if (C.spec) this._specConfirm(C.spec);                     // la réponse est déjà en route : Wilson peut parler
+        else { const req = this._ecoPrepare(C); if (req) this._ecoSend(req); }
+      } else if (quiet > ECO_SPEC_MS && !C.spec && (C.specN || 0) < 2 && !E.busy && this.eco.canExtra()) {
+        // Envoi anticipé (PLAN 6 bis) : la phrase part dès un court silence ; Wilson ne parlera qu'à la fin confirmée.
+        C.specN = (C.specN || 0) + 1;
+        const req = this._ecoPrepare(C, true);
+        if (req) { C.spec = req; this._ecoSend(req); }
+      }
     } else if (this.audio.speaking && now - this.audio.lastVoicedAt < 60 && this._addressed(now)) {   // voix présente maintenant, et pour lui
       // Juste après sa réponse, la personne a pu commencer à parler pendant la garde anti-écho : on reprend un peu plus loin.
       const pre = this.audio.recent(now - this.playEndAt < ECO_TAIL_MS + 400 ? 900 : 450);
@@ -307,27 +320,38 @@ class App {
     }
   }
 
-  _ecoUtterance(cap) {
+  // Prépare l'envoi d'une phrase enregistrée (null si ce n'est qu'un bruit ou si personne ne le regardait).
+  _ecoPrepare(cap, spec = false) {
     const raw = concat(cap.chunks);
     let audio = trimSilence(raw, this.audio.floor);
     if (!audio && cap.wake) audio = raw.subarray(Math.max(0, raw.length - 16000 * 6));   // l'oreille a entendu « Wilson » : on envoie quand même
-    if (!audio) { this.log('Rien d\'audible, phrase ignorée'); return; }
-    if (!cap.wake && (audio.length < 16000 * 0.5 || (cap.voiced || 0) < 15)) return;  // trop court : un bruit
-    if (!cap.wake && !cap.looked) return;                                                // personne ne le regardait
+    if (!audio) { if (!spec) this.log('Rien d\'audible, phrase ignorée'); return null; }
+    if (!cap.wake && (audio.length < 16000 * 0.5 || (cap.voiced || 0) < 15)) return null;  // trop court : un bruit
+    if (!cap.wake && !cap.looked) return null;                                              // personne ne le regardait
     // Indication pour Gemini : on le regardait (réponds), ou simple suite de la discussion (réponds seulement si c'est clair).
     const pol = this.settings.listenMode || 'regard';
     const hint = pol !== 'regard' || cap.wake ? '' : cap.gazed ? 'La personne te regardait en disant cela : elle te parle, réponds-lui (pour_moi true) sauf si on n\'entend que ta propre voix ou rien d\'intelligible.'
       : 'Phrase dite juste après ta réponse, sans te regarder : réponds seulement si c\'est clairement la suite de votre échange.';
-    this._ecoSend({ audio, endAt: cap.lastVoice, hint });
+    return { audio, endAt: cap.lastVoice, hint, spec, ctl: new AbortController() };
   }
+
+  // Envoi anticipé : la personne a repris → la requête est annulée (rien n'a été dit, rien n'est retenu).
+  _specCancel(C) {
+    const r = C.spec; C.spec = null; if (!r) return;
+    r.cancelled = true; r.ctl.abort(); if (r.gateFail) r.gateFail();
+    this.face.clearEmotion();
+  }
+  // Fin de phrase confirmée : la réponse préparée peut être dite.
+  _specConfirm(r) { r.confirmed = true; if (r.gateOk) r.gateOk(); }
 
   async _ecoSend(req) {
     const E = this.ecoState; if (!E) return;
-    if (E.busy) { E.queue.push(req); return; }
+    if (E.busy) { if (!req.spec) E.queue.push(req); return; }
     E.busy = true; const conv = this.convId;
+    if (!req.ctl) req.ctl = new AbortController();
     this.face.setEmotion('reflexion', 30000, 0.6);
     const tSend = performance.now(); let answered = false;
-    let sess = null, spoken = 0, emoSet = false, notForMe = false, tFirst = 0, tNet = 0, lastTxt = '', repeated = false, timing = null;
+    let sess = null, emoSet = false, notForMe = false, tFirst = 0, tNet = 0, repeated = false, timing = null, held = null;
     const speakChunk = (chunk) => {
       chunk = sayable(chunk);
       if (!chunk || repeated) return;
@@ -335,52 +359,86 @@ class App {
       if (!sess) { sess = this._startSpeech(); tFirst = performance.now(); if (!emoSet) this.face.clearEmotion(); }
       sess.push(chunk);
     };
+    // Envoi anticipé : la réponse se prépare pendant qu'on vérifie que la phrase est finie ; Wilson ne parle qu'après.
+    const live = () => !req.spec || req.confirmed;
     // Lecture en flux : Wilson commence à parler dès la première phrase écrite.
-    const onPartial = (pr) => {
+    const reader = (st) => (pr) => {
       if (!tNet) tNet = performance.now();
       if (conv !== this.convId) return;
+      if (!live()) { held = [st, pr]; return; }
       if (pr.pourMoi === false) { notForMe = true; return; }
       if (pr.emotion && !emoSet) { emoSet = true; if (pr.emotion !== 'neutre') this.face.setEmotion(pr.emotion, 6500, 0.9); else this.face.clearEmotion(); }
-      const txt = pr.reponse || ''; lastTxt = txt;
-      const cut = pr.closed ? txt.length : sentenceCut(txt, spoken);
-      if (cut > spoken) { speakChunk(txt.slice(spoken, cut).trim()); spoken = cut; }
+      const txt = pr.reponse || '';
+      const cut = pr.closed ? txt.length : sentenceCut(txt, st.spoken);
+      if (cut > st.spoken) { speakChunk(txt.slice(st.spoken, cut).trim()); st.spoken = cut; }
       if (this.settings.subtitles && txt) $('subtitle').textContent = txt.slice(0, 220);
     };
+    const st1 = { spoken: 0 }, onPartial = reader(st1);
+    let gate = null;
+    if (req.spec && !req.confirmed) {
+      gate = new Promise((ok, ko) => {
+        req.gateOk = () => { ok(); if (held) { const [s, p] = held; held = null; reader(s)(p); } };
+        req.gateFail = () => { const e = new Error('Annulé'); e.name = 'AbortError'; ko(e); };
+      });
+      gate.catch(() => {});
+    }
+    const ms = (t) => ((t - (req.endAt || tSend)) / 1000).toFixed(1);
     try {
       const image = this.vision ? this.vision.snapshot(0.7, 384) : null;
-      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, image, text: req.text, hint: req.hint, onPartial });
+      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, image, text: req.text, hint: req.hint, onPartial, signal: req.ctl.signal });
+      if (gate) await gate;                                  // envoi anticipé : fin de phrase confirmée (sinon : annulé)
       if (conv !== this.convId) return;
-      if (!emoSet) { this.face.clearEmotion(); if (out.emotion && out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9); }
-      for (const f of out.memoriser) { this.memory.add(f); this.log('Retenu : ' + f); }
-      if (out.oublier) { const g = this.memory.forget(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}`); }
-      const g = { oui: 'nod', non: 'shake', sautiller: 'bounce', pencher_la_tete: 'tilt' }[out.geste];
-      if (g) this.face.play(g); if (out.geste === 'clin_oeil') this.face.doWink(1);
-      if (out.memoriser.length && !g) this.face.play('nod');
-      const ms = (t) => ((t - (req.endAt || tSend)) / 1000).toFixed(1);
+      this.eco.commit(out, req.text);
       out.reponse = sayable(out.reponse);
-      if (!out.pourMoi || notForMe || !out.reponse || repeated) {
+      let said = out.reponse, last = out, tSearch = 0;
+      if (!out.pourMoi || notForMe || repeated || (!out.reponse && !out.chercher)) {
+        if (!emoSet) this.face.clearEmotion();
         E.ignored++;
         this.log(`Pas pour moi (${E.ignored}) : « ${out.entendu.slice(0, 80)} » (${ms(performance.now())} s, ${out.model})`);
         if (sess) sess.end();
-        // Bruits, télé, conversations entre vous : au 2e d'affilée, Wilson se rendort (il faudra redire « Wilson »).
+        // Bruits, télé, conversations entre vous : au 2e d'affilée, Wilson retourne en veille.
         if (E.ignored >= 2 && !sess) { setTimeout(() => conv === this.convId && this.endConversation('pas pour moi'), 200); }
       } else {
         E.ignored = 0; answered = true; this.lastAnswerAt = performance.now();
-        if (!spoken) speakChunk(out.reponse);                       // réponse hors format : on la dit d'un bloc
-        this.log(`« ${out.entendu.slice(0, 90)} » → ${out.reponse.slice(0, 110)}`);
-        // Délais mesurés depuis la fin de la phrase : réponse de Google, 1re phrase prête, voix de la tablette.
+        if (!sess && out.reponse) speakChunk(out.reponse);          // réponse hors format : on la dit d'un bloc
+        this._applyEco(out, emoSet);
+        // 2e temps : une info récente est nécessaire → recherche Google pendant que Wilson dit sa phrase d'attente.
+        if (out.chercher && !this.eco.noSearch && conv === this.convId) {
+          this.log(`Recherche Google : « ${out.chercher} »`);
+          tSearch = performance.now(); emoSet = false;
+          if (!sess) this.face.setEmotion('reflexion', 30000, 0.6);
+          const st2 = { spoken: 0 };
+          try {
+            const out2 = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco-search'), search: true, signal: req.ctl.signal, onPartial: reader(st2),
+              text: `[Question : « ${out.entendu || '(voir l\'enregistrement précédent)'} ». Recherche Google à faire : « ${out.chercher} ». Réponds au format JSON demandé.]` });
+            if (conv !== this.convId) return;
+            this.eco.commit(out2, `[Recherche Google : ${out.chercher}]`);
+            out2.reponse = sayable(out2.reponse);
+            if (!st2.spoken) speakChunk(out2.reponse || "Je n'ai rien trouvé de sûr, désolé.");
+            this._applyEco(out2, emoSet);
+            said = [said, out2.reponse].filter(Boolean).join(' '); last = out2; out.fin = out.fin || out2.fin;
+          } catch (e) {
+            if (e.name === 'AbortError') throw e;
+            this.log('Recherche impossible : ' + e.message);
+            speakChunk("Je n'arrive pas à chercher ça pour le moment.");
+          }
+        }
+        this.log(`« ${out.entendu.slice(0, 90)} » → ${said.slice(0, 110)}`);
+        // Délais mesurés depuis la fin de la phrase (dernier son de voix) : où part le temps.
         const tAll = performance.now();
-        timing = () => this.log(`Délais : Google ${ms(tNet || tAll)} s · 1re phrase ${ms(tFirst || tAll)} s · voix ${this.voice.startedAt ? ms(this.voice.startedAt) + ' s' : '—'} · réponse complète ${ms(tAll)} s (${out.model}, phrase de ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
-        this.memory.addExchange(out.entendu, out.reponse);
-        this._lastReply = out.reponse;
-        if (this.settings.subtitles) $('subtitle').textContent = out.reponse.slice(0, 220);
+        timing = () => this.log(`Délais : envoi ${ms(tSend)} s${req.spec ? ' (anticipé)' : ''} · Google ${ms(tNet || tAll)} s · 1re phrase ${ms(tFirst || tAll)} s · voix ${this.voice.startedAt ? ms(this.voice.startedAt) + ' s' : '—'} · complet ${ms(tAll)} s`
+          + ` (${out.model}, réflexion ${out.think || 'par défaut'}${out.hedged ? ', relancée' : ''}${tSearch ? `, recherche ${((tAll - tSearch) / 1000).toFixed(1)} s${last.hedged ? ' relancée' : ''}` : ''}, phrase de ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
+        this.memory.addExchange(out.entendu, said);
+        this._lastReply = said;
+        if (this.settings.subtitles) $('subtitle').textContent = said.slice(0, 220);
       }
-      if (sess) { sess.end(); await this._endSpeech(sess, out.reponse); }
+      if (sess) { sess.end(); await this._endSpeech(sess, said); }
       if (timing) timing();
       if (conv !== this.convId) return;
       if (out.fin) setTimeout(() => conv === this.convId && this.endConversation('au revoir'), 600);
     } catch (e) {
       if (sess) sess.cancel();
+      if (e.name === 'AbortError' || req.cancelled) { if (req.cancelled) this.log('Envoi anticipé annulé : la phrase continuait'); return; }
       if (conv !== this.convId) return;
       this.face.clearEmotion(); this.log('Mode économique : ' + e.message);
       if (e.quota) {
@@ -397,6 +455,16 @@ class App {
       const next = E.queue.shift();
       if (next && conv === this.convId) this._ecoSend(next);
     }
+  }
+
+  // Effets d'une réponse : émotion (si pas déjà montrée pendant l'écriture), souvenirs, geste.
+  _applyEco(out, emoShown) {
+    if (!emoShown && out.emotion) { if (out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9); else this.face.clearEmotion(); }
+    for (const f of out.memoriser) { this.memory.add(f); this.log('Retenu : ' + f); }
+    if (out.oublier) { const g = this.memory.forget(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}`); }
+    const g = { oui: 'nod', non: 'shake', sautiller: 'bounce', pencher_la_tete: 'tilt' }[out.geste];
+    if (g) this.face.play(g); if (out.geste === 'clin_oeil') this.face.doWink(1);
+    if (out.memoriser.length && !g) this.face.play('nod');
   }
 
   _startSpeech() {
@@ -490,7 +558,9 @@ class App {
   _system(mode = 'live') {
     const s = this.settings, m = this.memory.forPrompt();
     const bat = this.battery && !this.battery.charging ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le gentiment.` : '';
-    const tools = mode === 'eco' ? ECO_FORMAT : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
+    const eco = mode === 'eco' || mode === 'eco-search';
+    // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
+    const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: !this.eco.noSearch }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
 Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
 La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
 L'heure et la date : appelle date_et_heure.`;
@@ -506,7 +576,7 @@ Quand parler :
 
 Ta vue : si on te montre quelque chose ou si on te demande ce que tu vois, décris et commente l'image la plus récente. Sinon, ne commente pas l'image.
 ${tools}
-Recherche Google : utilise-la dès qu'une réponse dépend de l'actualité ou d'informations qui changent (météo, actualités, sport, horaires, prix, programmes télé, adresses, personnes connues), quand on te demande de chercher, ${s.city ? ` ; la maison est à ${s.city}` : ''}. Résume le résultat à l'oral en une à trois phrases, sans lire de liens ni d'adresses web.
+${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche Google : utilise-la dès qu'une réponse dépend de l'actualité ou d'informations qui changent (météo, actualités, sport, horaires, prix, programmes télé, adresses, personnes connues), quand on te demande de chercher${s.city ? ` ; la maison est à ${s.city}` : ''}. Résume le résultat à l'oral en une à trois phrases, sans lire de liens ni d'adresses web.`}
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
 La maison : ${s.home || 'pas encore précisé — tu peux demander les prénoms et les retenir.'}
@@ -688,7 +758,8 @@ Nous sommes ${fmtDate()}.${bat}`;
         this._lookShown = look;
         if (look) {
           f.setMood('attentif'); f.setBrightness(1); f.setFps(60); v.setRate(10); this.presenceAt = now;
-          if (!this._warmAt || now - this._warmAt > 60000) { this._warmAt = now; warmUp(this.settings.apiKey); }
+          // On le regarde : on prépare la connexion à Google et la voix de la tablette (au plus une fois par minute).
+          if (!this._warmAt || now - this._warmAt > 60000) { this._warmAt = now; warmUp(this.settings.apiKey); this.voice.warm(true); }
         } else { f.setMood(v.hasPerson ? 'neutre' : 'somnolent'); f.setBrightness(v.hasPerson ? 0.45 : 0.3); f.setFps(40); v.setRate(v.hasPerson ? 8 : 4); }
       }
     }

@@ -19,7 +19,7 @@ Un visage original (grands yeux expressifs sur fond noir) qui vit, écoute, rega
 | R5 | Il se tait si les gens parlent entre eux. | Pas de regard = pas d'écoute ; Gemini filtre en plus (« pour_moi ») ; 2 refus d'affilée → veille. |
 | R6 | Il voit ce qu'on lui montre. | Une photo jointe à chaque phrase. |
 | R7 | Il retient ce qu'on lui dit. | Souvenirs stockés sur la tablette, rappelés à chaque requête. |
-| R8 | **Fluide** : visage sans à-coups, réponse ~1 à 2 s après la fin de la phrase. | Analyse de la caméra en arrière-plan (Web Worker, autre cœur) : l'animation ne se fige jamais ; processeur ou carte graphique choisi en mesurant sur la tablette ; fin de phrase détectée même avec la télé ; réponse lue dès la 1re phrase ; mode le plus rapide par défaut ; délais détaillés dans le journal. |
+| R8 | **Fluide** : visage sans à-coups, réponse ~1 à 2 s après la fin de la phrase. | Analyse de la caméra en arrière-plan (Web Worker, autre cœur) : l'animation ne se fige jamais ; processeur ou carte graphique choisi en mesurant sur la tablette ; fin de phrase détectée même avec la télé ; réponse lue dès la 1re phrase ; mode le plus rapide par défaut ; délais détaillés dans le journal. Budget de latence détaillé en section 6 bis. |
 | R9 | Rien d'inutile ne quitte la maison. | Seules les phrases dites en le regardant partent vers Gemini. |
 | R10 | L'écran ne s'abîme pas et ne s'éteint pas. | Anti-veille, veille sombre, visage qui dérive. |
 
@@ -53,7 +53,7 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 | `js/face.js` | Visage : dessin, émotions, regard, lèvres | — |
 | `js/audio.js` | Micro (16 kHz), tampon, niveau de voix, lecture 24 kHz | Web Audio |
 | `js/brain.js` | Client Gemini Live (WebSocket) — cerveau « direct » | clé API Gemini |
-| `js/eco.js` | Cerveau « économique » : phrase enregistrée + photo → Gemini Flash → réponse JSON | clé API Gemini |
+| `js/eco.js` | Cerveau « économique » : phrase enregistrée + photo → Gemini Flash → réponse JSON (schéma imposé, recherche en deux temps, relance) | clé API Gemini |
 | `js/voice.js` | Voix de la tablette (synthèse vocale) pour le mode économique | navigateur |
 | `js/faces/*.js` | Styles de visage : Lumière, Bouille, Rétro, Miel | `face.js` |
 | `js/vision.js` | Caméra, **regard** (tête + yeux → « on me regarde »), images pour Gemini | `vision-worker.js` |
@@ -80,6 +80,21 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 - **Automatique** (défaut) : direct si possible ; si Google refuse pour quota, bascule en économique sans perdre la phrase,
   et retient le refus jusqu'à la remise à zéro (minuit heure du Pacifique), ou une semaine si Google indique « limite 0 ».
 
+## 6 bis. Budget de latence du mode économique (R8)
+
+Mesuré depuis la fin de la phrase (dernier son de voix) jusqu'au premier mot de Wilson. Objectif : **1 à 2 s**.
+
+| Étape | Avant 1.7.0 | Levier (1.7.0) |
+|-------|-------------|----------------|
+| Silence de fin de phrase | 500 ms d'attente, puis envoi | **Envoi anticipé** dès 250 ms de silence ; annulé (et la phrase continue d'être enregistrée) si la personne reprend avant 500 ms. Wilson ne parle qu'une fois la fin confirmée. |
+| Réflexion du modèle | « minimal » ; si refusé → réglage par défaut (réflexion **maximale** sur les Gemini 3, plusieurs secondes) | Ordre minimal → low → défaut en tout dernier recours ; réglage affiché dans la ligne « Délais ». |
+| Recherche Google | Outil joint à chaque phrase : le modèle cherchait parfois sans raison (+2 à 5 s) | **Recherche en deux temps** : 1re requête sans outil (JSON garanti par un schéma) ; si une info récente est nécessaire, Wilson dit tout de suite « je regarde » et une 2e requête (texte seul) fait la recherche. |
+| Lenteurs aléatoires de Google | Flash-Lite répond parfois en 15 à 20 s au lieu de 1 s (signalé par d'autres développeurs) | **Relance** : sans premier mot après 2,2 s, la même requête part une 2e fois ; la première qui répond gagne, l'autre est annulée. |
+| Voix de la tablette | Moteur réveillé une seule fois au démarrage | Réveillé aussi quand on le regarde (au plus une fois par minute). |
+
+Garde-fou quota : un envoi anticipé ou une relance ne part que si moins de 10 requêtes sont parties dans la dernière minute,
+pour ne jamais provoquer un refus « trop de requêtes » du palier gratuit.
+
 ## 7. Lots suivants (prévus, pas dans ce lot)
 
 1. Domotique via Home Assistant (lumières, télé, prises).
@@ -88,7 +103,7 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 23/10/26 : **version 1.6.0** en ligne.
+État au 23/10/26 : **version 1.7.0** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -103,8 +118,11 @@ Historique récent :
 - 1.5.0 (23/10/26) — le mot « Wilson » (Vosk, trop lent sur la tablette) est remplacé par l'**écoute au regard**.
 - 1.6.0 (23/10/26) — vision en arrière-plan (Web Worker) : visage fluide ; fin de phrase plus rapide, même avec la télé ;
   Gemini sait qu'on le regardait ; délais détaillés dans le journal (ligne « Délais »).
+- 1.7.0 (23/10/26) — réponses plus rapides (section 6 bis) : envoi anticipé, réflexion jamais au réglage par défaut,
+  recherche Google en deux temps, relance quand Google traîne, voix réchauffée ; ligne « Délais » plus complète.
 
-En attente du retour de Timothée sur la 1.6.0 :
-- les yeux sont-ils fluides ? les réponses assez rapides ? (capture de la ligne « Délais » du journal si c'est encore lent) ;
+En attente du retour de Timothée sur la 1.7.0 :
+- les yeux sont-ils fluides ? les réponses assez rapides ? (capture de la ligne « Délais » du journal si c'est encore lent :
+  elle dit où part le temps — fin de phrase, Google, voix de la tablette) ;
 - il a écrit que « ça ne fonctionne pas comme je voudrais » : préciser ce qui ne va pas (réaction au regard, réponses
   intempestives, coupures…).

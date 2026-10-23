@@ -90,7 +90,10 @@ async def main():
         rate = struct.unpack('<I', raw[24:28])[0] if len(raw) > 44 else 0
         check('Phrase envoyée en WAV 16 kHz (silences retirés)', raw[:4] == b'RIFF' and rate == 16000 and (len(raw) - 44) / 32000 >= 1, f"{(len(raw)-44)/32000:.1f} s")
         check('Photo de la caméra jointe', any(p_.get('inlineData', {}).get('mimeType') == 'image/jpeg' for p_ in parts))
-        check('Recherche Google + consigne JSON + réflexion minimale', body.get('tools') == [{'googleSearch': {}}] and 'MODE ÉCONOMIQUE' in body['systemInstruction']['parts'][0]['text'] and body['generationConfig']['thinkingConfig']['thinkingLevel'] == 'minimal', r0['model'])
+        gc = body['generationConfig']
+        check('1re requête sans outil (pas de recherche « au cas où »), JSON imposé par schéma, réflexion minimale',
+              'tools' not in body and gc.get('responseMimeType') == 'application/json' and (gc.get('responseSchema') or {}).get('propertyOrdering', [])[:4] == ['pour_moi', 'chercher', 'emotion', 'reponse']
+              and 'MODE ÉCONOMIQUE' in body['systemInstruction']['parts'][0]['text'] and gc['thinkingConfig']['thinkingLevel'] == 'minimal', r0['model'])
         lst = await page.evaluate("wilson.face.listenShown")
         check("Plus de halo d'écoute en bas de l'écran", lst < 0.02, f"{lst:.3f}")
         check("Modèle rapide (Flash-Lite) en flux, clé dans l'en-tête", r0['model'] == 'gemini-3.5-flash-lite' and st.get('stream_used') and r0['key'].startswith('AQ.'), r0['model'])
@@ -155,7 +158,7 @@ async def main():
         await page.evaluate("wilson._onWakeWord({text:'wilson', conf:0.9})")
         await page.wait_for_function("window.__spoken.slice(-1)[0] === 'Il est sept heures.'", timeout=10000)
         thinks = [(x['body']['generationConfig'].get('thinkingConfig') or {}).get('thinkingLevel') for x in st['reqs'][n:]]
-        check('Réflexion « minimal » refusée → réessai sans réflexion (le plus rapide)', thinks == ['minimal', None], str(thinks))
+        check('Réflexion « minimal » refusée → réessai en « low » (jamais la réflexion par défaut, lente)', thinks == ['minimal', 'low'], str(thinks))
         live_calls = await page.evaluate('wilson.brain.modelUsed')
         await page.evaluate("wilson.endConversation('test')"); st['think_reject'] = False
 
