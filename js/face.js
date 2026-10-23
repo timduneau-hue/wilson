@@ -112,6 +112,7 @@ export class Face {
   setListen(level) { this.listen = level; }
   setBrightness(b) { this.p.bright.t = clamp(b, 0.03, 1); }
   setFps(f) { this.fpsDiv = f >= 50 ? 1 : f >= 28 ? 2 : 3; }          // 60, 30 ou 20 images/s, régulières
+  setMaxDpr(d) { this.maxDpr = d; this.W = 0; this._resize(); }
   blink() { if (this.blinkT < 0) this.blinkT = performance.now(); }
   doWink(side = 1) { this.wink = side; this.winkT = performance.now(); }
   play(name) { this.actions.push({ name, t0: performance.now() }); if (name === 'nod' || name === 'shake') this.blink(); }
@@ -162,6 +163,7 @@ export class Face {
     requestAnimationFrame((t) => this._frame(t));
     const div = Math.max(this.fpsDiv, this.style.maxFps === 30 || this.maxFpsLight ? 2 : 1);
     if (++this._n % div) return;
+    this.drawn = (this.drawn || 0) + 1; this.div = div;          // images réellement dessinées (surveillance de la fluidité)
     const dt = Math.min((now - this.last) / 1000, 0.1); this.last = now;
     const T = (now - this.t0) / 1000;
     if (this.emotion && now >= this.emotionUntil) { this.emotion = null; this._applyTargets(); }

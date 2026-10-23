@@ -18,7 +18,7 @@ export function keyMessage(r) {
 const KEY = 'wilson.settings';
 export const DEFAULTS = {
   apiKey: '', model: 'gemini-3.8-live', voice: 'Puck',
-  listenMode: 'regard', gazeCalib: { yaw: 0, pitch: 0 }, convTimeout: 12, bargeIn: 'prudente',
+  listenMode: 'regard', gazeCalib: { yaw: 0, pitch: 0, down: 0 }, convTimeout: 12, bargeIn: 'prudente',
   home: '', city: '', nightStart: 23, nightEnd: 7,
   camera: true, mirror: false, subtitles: false, face: 'lumiere', brainMode: 'auto', ecoVoice: '', ecoSpeed: 'rapide',
 };
@@ -91,14 +91,18 @@ export class SettingsUI {
         if (!v.gazeReady) { box.textContent = v.modelsDone ? 'Détection du regard indisponible sur cette tablette' : 'Chargement de la détection du regard…'; return; }
         const g = v.gaze;
         box.innerHTML = `<div>${v.looking ? '<b>Tu me regardes ✓</b>' : 'Tu ne me regardes pas'}</div>` +
-          (g ? `<div>Visages : ${v.faces} · tête ${Math.round(g.yaw)}° · regard ${Math.round(g.gazeYaw)}° · haut/bas ${Math.round(g.pitch)}° · distance ~${(0.12 / Math.max(g.size, 0.01)).toFixed(1)} m</div>` : '<div>Aucun visage</div>') +
-          `<div><em>Analyse : ${Math.round(v.stats.ms)} ms (${v.delegate || '—'})</em></div>`;
+          (g ? `<div>Visages : ${v.faces} · tête ${Math.round(g.yaw)}° · regard ${Math.round(g.gazeYaw)}° · haut/bas ${Math.round(g.pitch)}° · yeux baissés ${Math.round(g.down * 100)} % · distance ~${(0.12 / Math.max(g.size, 0.01)).toFixed(1)} m</div>` : '<div>Aucun visage</div>') +
+          `<div><em>Analyse en arrière-plan : ${Math.round(v.stats.ms)} ms (visages ${Math.round(v.stats.fd || 0)} ms, regard ${Math.round(v.stats.lm || 0)} ms, ${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'})</em></div>`;
       }, 300);
     };
     $('t-calib').onclick = () => {
       const v = app.vision, g = v && v.gaze; if (!g) return;
-      v.calib = { yaw: v.calib.yaw + g.gazeYaw, pitch: v.calib.pitch + g.pitch };
-      this.s.gazeCalib = v.calib; saveSettings(this.s); app.log(`Regard calibré : ${Math.round(v.calib.yaw)}°, ${Math.round(v.calib.pitch)}°`);
+      // Position actuelle = « il me regarde » (tablette posée plus haut, plus bas ou sur le côté). Yeux baissés : on garde une marge normale.
+      const downAbs = (v.calib.down || 0) + g.down;
+      v.calib = { yaw: (v.calib.yaw || 0) + g.gazeYaw, pitch: (v.calib.pitch || 0) + g.pitch, down: Math.max(0, downAbs - 0.2) };
+      this.s.gazeCalib = v.calib; saveSettings(this.s);
+      app.log(`Regard calibré : ${Math.round(v.calib.yaw)}°, ${Math.round(v.calib.pitch)}°, yeux ${Math.round(v.calib.down * 100)} %`);
+      app.badge('Regard calibré ✓', 3000);
     };
     $('m-export').onclick = () => {
       const a = document.createElement('a');
@@ -140,7 +144,7 @@ export class SettingsUI {
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
     const v = this.app.vision;
     const gaze = !v ? 'caméra coupée' : v.gazeReady ? `regard prêt (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}, ${Math.round(v.stats.ms || 0)} ms)` : v.modelsDone ? 'regard indisponible' : 'regard en chargement';
-    $('version').textContent = `Wilson ${this.app.version} · vision : ${v ? v.mode : 'coupée'}, ${gaze} · connexions Gemini aujourd'hui : ${sessionsToday()}`;
+    $('version').textContent = `Wilson ${this.app.version} · visage ${this.app.drawFps || '—'} images/s · vision : ${v ? v.mode : 'coupée'}, ${gaze} · connexions Gemini aujourd'hui : ${sessionsToday()}`;
     this.renderMemory(); this.renderLog();
   }
   fillVoices() {

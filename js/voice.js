@@ -4,7 +4,14 @@
 export class Voice {
   constructor() {
     this.ok = 'speechSynthesis' in window;
-    this.speaking = false; this.voiceName = ''; this._gen = 0; this._t0 = 0; this._pulse = 0; this._session = null;
+    this.speaking = false; this.voiceName = ''; this._gen = 0; this._t0 = 0; this._pulse = 0; this._session = null; this.startedAt = 0; this._warm = false;
+  }
+
+  // Réveille le moteur de synthèse vocale (phrase muette) : la 1re vraie réponse démarre plus vite.
+  warm() {
+    if (!this.ok || this._warm || this.speaking) return;
+    this._warm = true;
+    try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; u.lang = 'fr-FR'; const v = this._pick(); if (v) u.voice = v; u.onerror = () => { this._warm = false; }; speechSynthesis.speak(u); } catch (_) { this._warm = false; }
   }
 
   // Voix françaises disponibles : voix installées sur la tablette d'abord (plus rapides à démarrer).
@@ -16,7 +23,7 @@ export class Voice {
 
   // Lecture en flux : push(phrase) autant de fois que nécessaire, puis end(). done se résout à la fin ou à l'arrêt.
   stream({ rate = 1.06, pitch = 1.02 } = {}) {
-    this.cancel();
+    this.cancel(); this.startedAt = 0;
     const gen = ++this._gen, self = this;
     let queued = 0, finished = 0, ended = false, settled = false, watchdog = null, resolveDone, rejectDone;
     const done = new Promise((res, rej) => { resolveDone = res; rejectDone = rej; });
@@ -46,6 +53,7 @@ export class Voice {
           let counted = false;
           const fin = () => { if (counted) return; counted = true; finished++; arm(); maybeDone(); };
           u.onboundary = () => { self._pulse = 1; };
+          u.onstart = () => { if (gen === self._gen && !self.startedAt) self.startedAt = performance.now(); };
           u.onend = fin;
           u.onerror = (e) => {
             if (e.error === 'interrupted' || e.error === 'canceled') return settle();
