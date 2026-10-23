@@ -63,7 +63,9 @@ async def main():
         await page.evaluate("wilson.startConversation('toucher')")
         await page.wait_for_function('wilson.state === "conversation" && wilson.mode === "live"', timeout=10000)
         conn = conns[-1]
-        await page.wait_for_timeout(500)
+        # La personne parle 0,4 s (voix simulée), puis se tait : c'est la base du délai mesuré.
+        await page.evaluate("(() => { const iv = setInterval(() => { wilson.audio.lastVoicedAt = performance.now(); }, 20); setTimeout(() => clearInterval(iv), 400); })()")
+        await page.wait_for_timeout(1000)
         for c in audio_chunks(3.0):
             conn['ws'].send(json.dumps({'serverContent': {'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]}}}))
         conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': 'Bonjour, tu m\'entends bien maintenant ?'}}}))
@@ -76,7 +78,8 @@ async def main():
         conn['ws'].send(json.dumps({'serverContent': {'turnComplete': True}}))
         await page.wait_for_timeout(300)
         d = next((l for l in logs if 'Délais (direct)' in l), '')
-        check('Délai du mode direct mesuré', bool(re.search(r'1er son [\d.]+ s après la fin de ta phrase', d)), d)
+        m0 = re.search(r'1er son ([\d.]+) s après la fin de ta phrase', d)
+        check('Délai du mode direct mesuré depuis la fin de ta phrase (pas depuis l\'écho de Wilson)', m0 and 0.4 <= float(m0.group(1)) <= 1.2, d)
         v = next((l for l in logs if 'Voix du direct' in l), '')
         m = re.search(r'niveau de sortie max (\d+) %', v)
         check('Voix du direct : son réellement produit (niveau mesuré)', m and int(m.group(1)) > 5, v)

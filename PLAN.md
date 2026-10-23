@@ -100,6 +100,16 @@ Mesuré depuis la fin de la phrase (dernier son de voix) jusqu'au premier mot de
 Garde-fou quota : un envoi anticipé ou une relance ne part que si moins de 10 requêtes sont parties dans la dernière minute,
 pour ne jamais provoquer un refus « trop de requêtes » du palier gratuit.
 
+Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4 à 9 s, puis blocage) et corrigé en 1.8.2 :
+
+| Cause | Levier |
+|-------|--------|
+| ~4 s perdues à chaque démarrage à essayer deux modèles refusés (quota) | Modèle qui marche retenu sur la tablette ; modèle refusé pour quota essayé en dernier pendant 6 h. |
+| Gemini 2.5 « native audio » réfléchit avant de parler | `thinkingBudget: 0` (réflexion coupée) ; si refusé, même configuration sans ce réglage. |
+| Recherche intégrée de Gemini Live : « Let me check » en anglais, 8 à 15 s, puis bloquée après une coupure de connexion | Outil maison **« chercher »** : Wilson dit « Je regarde… » en français, l'appli interroge Gemini Flash-Lite + Google Search (texte, ~2 s), **9 s au maximum** puis « pas abouti » ; relance si Gemini reste muet 10 s après le résultat ; recherche abandonnée si on le coupe. |
+| Écho de sa voix (micro sans annulation d'écho) pris pour une phrase (« . ») | Garde de 450 ms après sa voix avant de renvoyer le micro. |
+| Délai mal mesuré (écho compté comme voix) | Délai mesuré depuis la dernière voix de la personne envoyée à Gemini ; suites de réponse non comptées. |
+
 ## 7. Lots suivants (prévus, pas dans ce lot)
 
 1. Domotique via Home Assistant (lumières, télé, prises).
@@ -108,7 +118,7 @@ pour ne jamais provoquer un refus « trop de requêtes » du palier gratuit.
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 23/10/26 : **version 1.8.1** en ligne.
+État au 23/10/26 : **version 1.8.2** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -139,10 +149,13 @@ Historique récent :
 - 1.8.1 (23/10/26) — son du mode direct rétabli (micro sans annulation d'écho, voir section 5) ; Wilson ne se coupe plus
   lui-même ; délai du direct mesuré (onglet Délais, réflexion « direct ») ; bouton « Son d'essai » ; batterie signalée
   une seule fois. Le journal (État → Appareil) montrait un écran de téléphone : Timothée testait peut-être sur son téléphone.
+- 1.8.2 (23/10/26) — mode direct plus rapide et jamais bloqué (section 6 bis, partie « Mode direct ») ; batterie non
+  signalée sur un téléphone ; toujours en français.
 
 En attente :
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;
-- confirmer que le son du mode direct est audible en 1.8.1 ;
+- son du mode direct confirmé audible en 1.8.1 (36 s jouées, Timothée a répondu) ;
+- vérifier dans l'onglet Délais que les réponses du direct tombent vers 1 à 2 s en 1.8.2 ;
 - les yeux sont-ils fluides ? les réponses assez rapides ? (onglets Délais et État de la feuille, plus besoin de capture) ;
 - il a écrit que « ça ne fonctionne pas comme je voudrais » : préciser ce qui ne va pas (réaction au regard, réponses
   intempestives, coupures…).

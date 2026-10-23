@@ -7,7 +7,7 @@ Tests de bout en bout dans Chromium (Playwright), avec faux micro, fausse camér
 pip install playwright && playwright install chromium   # une fois
 ./make_fixtures.sh                                       # fausses vidéos de caméra (.y4m) à partir des photos
 cd .. && python3 -m http.server 8765 --bind 127.0.0.1 &  # servir l'appli (dossier racine du dépôt)
-cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py; do python3 $t; done
+cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py; do python3 $t; done
 node apps_script_unit.js                                 # script Apps Script du journal, avec une fausse feuille
 ```
 
@@ -20,6 +20,7 @@ node apps_script_unit.js                                 # script Apps Script du
 | `e2e_update.py` | Mise à jour automatique (version.json) |
 | `stream_unit.py` | Lecture du JSON en flux (1 200 cas) |
 | `e2e_sound.py` | Son du direct : micro sans annulation d'écho (sinon « mode appel » sur Android), pas d'auto-coupure, délai du direct, son d'essai, coupure directe (micro rouvert), batterie signalée une fois |
+| `e2e_live_search.py` | Mode direct : outil « chercher » (Flash-Lite + Google Search), délai maximal 9 s, relance si Gemini reste muet, recherche annulée |
 | `e2e_remote.py` | Journal à distance : envoi des lignes, délais, bilan, phrases masquables, erreurs JS, coupure réseau, QR code, envoi au rechargement |
 | `apps_script_unit.js` | `apps-script/journal.gs` sur une fausse feuille : plus récent en haut, délais, état, purge, page QR |
 | `e2e_speed.py` | Rapidité (PLAN 6 bis) : envoi anticipé (confirmé / annulé), recherche en deux temps, relance si Google traîne, garde-fou de débit, schéma refusé, ancien réglage de réflexion |

@@ -13,9 +13,11 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.8.1';
+const VERSION = '1.8.2';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
+const TAIL_NOAEC_MS = 450;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce dure un peu plus
+const SEARCH_MAX_MS = 9000;       // outil « chercher » du mode direct : au-delà, Wilson dit qu'il n'a pas trouvé (jamais bloqué)
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
 const ECO_SPEC_MS = 250;          // envoi anticipé : la phrase part dès ce silence, Wilson ne parle qu'à la fin confirmée (PLAN 6 bis)
 const ECO_TAIL_MS = 1000;         // après avoir parlé : le son de la tablette finit de sortir après l'annonce « fini »
@@ -193,7 +195,7 @@ class App {
     if (s.face !== this.face.styleName) this.face.setStyle(s.face);
     this.eco.setSpeed(s.ecoSpeed);
     if (key === 'apiKey' || key === 'model') {          // nouvelle clé : nouveau quota, on repart de zéro
-      this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.eco.modelUsed = null; this.log('Clé ou modèle changé');
+      this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.brain.refused = {}; this.brain.think = false; this.brain._save(); this.eco.modelUsed = null; this.log('Clé ou modèle changé');
     }
     if (this.vision) this.vision.mirror = !s.mirror;
     if (key === 'bargeIn' && this.started) {
@@ -603,6 +605,7 @@ class App {
   endConversation(why) {
     if (this.state !== 'conversation' && this.state !== 'eveil') return;
     this.log(`Fin de conversation (${why})`); this.convId++; this.endAfterSpeech = false; this._liveTurn = null;
+    if (this._searches) { for (const c of this._searches.values()) c.abort(); this._searches.clear(); }
     this.brain.close(); this.audio.flush(); this.voice.cancel(); this.outBuf = []; this.outLen = 0;
     if (this.ecoState) this.ecoState.queue = []; this.ecoState = null; this.mode = null;
     this.face.setTalk(0); this.face.setListen(-1); this.face.clearEmotion();
@@ -613,7 +616,7 @@ class App {
 
   _system(mode = 'live') {
     const s = this.settings, m = this.memory.forPrompt();
-    const bat = this.battery && !this.battery.charging && !this._batTold ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le une seule fois, brièvement, puis n'en reparle plus.` : '';
+    const bat = this.battery && !this.battery.charging && !this._batTold && !/Mobile/.test(navigator.userAgent) ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le une seule fois, brièvement, puis n'en reparle plus.` : '';
     if (bat) this._batTold = true;
     const eco = mode === 'eco' || mode === 'eco-search';
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
@@ -633,7 +636,8 @@ Quand parler :
 
 Ta vue : si on te montre quelque chose ou si on te demande ce que tu vois, décris et commente l'image la plus récente. Sinon, ne commente pas l'image.
 ${tools}
-${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche Google : utilise-la dès qu'une réponse dépend de l'actualité ou d'informations qui changent (météo, actualités, sport, horaires, prix, programmes télé, adresses, personnes connues), quand on te demande de chercher${s.city ? ` ; la maison est à ${s.city}` : ''}. Résume le résultat à l'oral en une à trois phrases, sans lire de liens ni d'adresses web.`}
+${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (météo, actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
+Langue : parle toujours en français, y compris pour une phrase d'attente.`}
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
 La maison : ${s.home || 'pas encore précisé — tu peux demander les prénoms et les retenir.'}
@@ -664,8 +668,9 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (this.settings.bargeIn === 'prudente') {
         // Il parle : rien n'est envoyé (le micro, sans annulation d'écho, entend sa voix) ; on le coupe en touchant l'écran (R4).
         if (this.audio.playing) return;
-        if (now - this.playEndAt < TAIL_MS) return;
+        if (now - this.playEndAt < (this.audio.aec ? TAIL_MS : TAIL_NOAEC_MS)) return;
       }
+      if (now - this.audio.lastVoicedAt < 60 && !this.audio.playing) this.lastUserVoice = now;   // la personne parle (base du délai)
       this.outBuf.push(i16); this.outLen += i16.length;
       if (this.outLen >= 1600) { this.brain.sendAudio(concat(this.outBuf)); this.outBuf = []; this.outLen = 0; }
     });
@@ -714,19 +719,26 @@ Nous sommes ${fmtDate()}.${bat}`;
     b.on('audio', (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
       if (!this.audio.playing) { this.barge.n = 0; this.barge.echo = Math.max(-60, this.audio.db); }
+      this._modelOut = (this._modelOut || 0) + 1;
       if (!this._liveTurn) {
-        // 1er son de la réponse : délai depuis la dernière voix entendue (R8), pour l'onglet « Délais » du journal.
+        // 1er son de la réponse : délai depuis la fin de la phrase de la personne (R8), pour l'onglet « Délais » du journal.
+        // Si Wilson enchaîne (suite de sa réponse, après une recherche…), ce n'est pas une nouvelle attente : pas de mesure.
         this._liveTurn = { t: performance.now(), sec: 0 };
-        const s = Math.round((performance.now() - this.audio.lastVoicedAt) / 100) / 10;
-        this.log(`Délais (direct) : 1er son ${s} s après la fin de ta phrase (${this.brain.modelUsed})`);
-        this.remote.mesure({ google: s, voix: Math.round((s + 0.06 + (this.audio.ctx.outputLatency || 0)) * 10) / 10, modele: this.brain.modelUsed, reflexion: 'direct' });
+        const u = this.lastUserVoice || 0;
+        if (u > (this.playEndAt || 0) && u > (this._lastTurnAt || 0)) {
+          const s = Math.round((performance.now() - u) / 100) / 10;
+          this.log(`Délais (direct) : 1er son ${s} s après la fin de ta phrase (${this.brain.modelUsed}${this._searchMs ? `, dont recherche ${(this._searchMs / 1000).toFixed(1)} s` : ''})`);
+          this.remote.mesure({ google: s, voix: Math.round((s + 0.06 + (this.audio.ctx.outputLatency || 0)) * 10) / 10, modele: this.brain.modelUsed, reflexion: 'direct',
+            recherche: this._searchMs ? Math.round(this._searchMs / 100) / 10 : null });
+        }
+        this._searchMs = 0;
       }
       this._liveTurn.sec += i16.length / (rate || 24000);
       this.audio.play(i16, rate); this.lastActivity = performance.now();
     });
     b.on('interrupted', () => { this.audio.flush(); this.discard = false; this.face.setTalk(0); this._liveTurn = null; });
     b.on('turn', ({ user, wilson }) => {
-      this.discard = false;
+      this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._lastTurnAt = performance.now();
       if (this._liveTurn) { this.log(`Voix du direct : ${this._liveTurn.sec.toFixed(1)} s reçues, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %`); this._liveTurn = null; this._outPeak = 0; }
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
@@ -735,6 +747,9 @@ Nous sommes ${fmtDate()}.${bat}`;
     b.on('heard', (t) => { if (this.state === 'conversation') this.lastActivity = performance.now(); });
     b.on('said', (t) => { if (this.settings.subtitles) $('subtitle').textContent = t.slice(-220); });
     b.on('toolcall', (calls) => this._tools(calls));
+    b.on('toolcancel', (ids) => {        // la personne a coupé Wilson pendant une recherche : on l'abandonne
+      for (const id of ids) { const c = this._searches && this._searches.get(id); if (c) { this._searches.delete(id); c.abort(); this.log('Recherche annulée'); } }
+    });
     b.on('goaway', () => this._reconnect('goAway'));
     b.on('closed', (e) => {
       if (e.expected) return;
@@ -771,12 +786,46 @@ Nous sommes ${fmtDate()}.${bat}`;
         case 'oublier': { const g = this.memory.forget(a.sujet || ''); out = { result: g.length ? 'Oublié : ' + g.join(' ; ') : 'Aucun souvenir ne correspond.' }; silent = false; this.log('Oublier « ' + a.sujet + ' » : ' + g.length, true); break; }
         case 'date_et_heure': out = { result: fmtDate() }; silent = false; break;
         case 'terminer_conversation': { this.endAfterSpeech = true; const id = this.convId; setTimeout(() => { if (id === this.convId && this.endAfterSpeech && !this.audio.playing) this.endConversation('au revoir'); }, 4000); break; }
+        case 'chercher': this._search(c, a.question || ''); continue;      // réponse envoyée à la fin de la recherche
         default: out = { error: 'outil inconnu' }; silent = false;
       }
       const r = { id: c.id, name: c.name, response: out }; if (silent && this.brain.canSchedule) r.scheduling = 'SILENT';
       res.push(r);
     }
-    this.brain.respond(res);
+    if (res.length) this.brain.respond(res);
+  }
+
+  // Outil « chercher » du mode direct : Gemini Flash-Lite + Google Search (requête texte, rapide), avec un délai maximal.
+  // Remplace la recherche intégrée de Gemini Live, restée bloquée sur « je cherche ça tout de suite » le 23/10/26.
+  async _search(call, question) {
+    const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
+    this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
+    this.face.setEmotion('reflexion', SEARCH_MAX_MS + 2000, 0.6);
+    this.log(`Recherche (direct) : « ${question.slice(0, 120)} »`, true);
+    const timer = setTimeout(() => ctl.abort(), SEARCH_MAX_MS);
+    let result;
+    try {
+      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco-search'), search: true, fresh: true, signal: ctl.signal,
+        text: `[Question : « ${question} ». Fais une recherche Google, puis réponds au format JSON demandé.]` });
+      result = sayable(out.reponse) || "Je n'ai rien trouvé de sûr.";
+      this.log(`Recherche faite en ${((performance.now() - t0) / 1000).toFixed(1)} s (${out.model}${out.searched ? '' : ', sans résultat Google'})`);
+    } catch (e) {
+      if (!this._searches.has(call.id)) return;                                  // annulée : rien à répondre
+      result = "La recherche n'a pas abouti à temps. Dis-le simplement et propose de réessayer.";
+      this.log(`Recherche impossible (${((performance.now() - t0) / 1000).toFixed(1)} s) : ${e.name === 'AbortError' ? 'trop longue' : e.message}`);
+    } finally { clearTimeout(timer); }
+    if (conv !== this.convId || !this._searches.has(call.id)) return;
+    this._searches.delete(call.id);
+    this._searchMs = performance.now() - t0;
+    this.face.clearEmotion();
+    this.brain.respond([{ id: call.id, name: call.name, response: { result } }]);
+    // Filet de sécurité : si Gemini ne dit rien 10 s après le résultat, on lui demande de répondre.
+    const n = this._modelOut;
+    setTimeout(() => {
+      if (conv !== this.convId || this._modelOut !== n || !this.brain.open || this.audio.playing) return;
+      this.log('Pas de réponse 10 s après la recherche : relance');
+      this.brain.sendText('[Donne maintenant ta réponse à voix haute, en français, à partir du résultat de la recherche.]');
+    }, 10000);
   }
 
   _sendFrame(force) {

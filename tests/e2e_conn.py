@@ -41,8 +41,12 @@ async def main():
                 bad = None
                 if empty_obj_params(s):
                     bad = (1007, f"* GenerateContentRequest.tools[0].function_declarations[3].parameters.properties: should be non-empty for OBJECT type")
-                elif pol == 'nosearch' and any('googleSearch' in t for t in s.get('tools', [])):
-                    bad = (1007, 'Request contains an invalid argument.')
+                elif pol == 'noadv' and 'mediaResolution' in s.get('generationConfig', {}):
+                    bad = (1007, 'Invalid JSON payload received. Unknown name "media_resolution" at \'setup.generation_config\'')
+                elif pol in ('only25', 'nothink25') and not s['model'].endswith('native-audio-preview-12-2025'):
+                    bad = (1011, 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: h')
+                elif pol == 'nothink25' and 'thinkingConfig' in s.get('generationConfig', {}):
+                    bad = (1007, 'Invalid JSON payload received. Unknown name "thinking_config" at \'setup.generation_config\'')
                 elif pol == 'quota38' and s['model'].endswith('3.8-live'):
                     bad = (1011, 'You exceeded your current quota, please check your plan and billing details.')
                 elif pol == 'nobehavior31' and s['model'].endswith('flash-live-preview') and any('behavior' in f for t in s.get('tools', []) for f in t.get('functionDeclarations', [])):
@@ -72,13 +76,15 @@ async def main():
         # 1. Serveur strict (refuse les OBJECT vides) : la config complète doit passer du premier coup
         ok, info, ss = await converse()
         check('Config complète acceptée du 1er coup (plus de paramètres vides)', ok and len(ss) == 1 and info['lv'] == 0 and not empty_obj_params(ss[0]), f"{len(ss)} essai(s), {info}")
-        check('Recherche Google + 5 outils présents', any('googleSearch' in t for t in ss[0]['tools']) and len(ss[0]['tools'][0]['functionDeclarations']) == 5)
+        fd = ss[0]['tools'][0]['functionDeclarations']
+        check('Recherche par l\'outil maison « chercher » (plus la recherche intégrée, restée bloquée) + 6 outils',
+              not any('googleSearch' in t for t in ss[0]['tools']) and len(fd) == 6 and any(f['name'] == 'chercher' and f.get('behavior') == 'BLOCKING' for f in fd))
 
-        # 2. Google refuse la recherche → configuration simplifiée
-        st['policy'] = 'nosearch'; await page.evaluate('wilson.brain.level = null; wilson.brain.modelUsed = null')
+        # 2. Google refuse une option avancée → configuration simplifiée
+        st['policy'] = 'noadv'; await page.evaluate('wilson.brain.level = null; wilson.brain.modelUsed = null')
         ok, info, ss = await converse()
         check('Réglage refusé → repli sur config simplifiée', ok and info['lv'] == 1 and len(ss) == 2, f"{len(ss)} essais, niveau {info['lv']}")
-        check('… outils (mémoire, émotions) conservés', ok and len(ss[-1].get('tools', [{}])[0].get('functionDeclarations', [])) == 5)
+        check('… outils (mémoire, émotions, chercher) conservés', ok and len(ss[-1].get('tools', [{}])[0].get('functionDeclarations', [])) == 6)
         ok2, info2, ss2 = await converse()
         check('… niveau retenu : 1 seul essai la fois suivante', ok2 and len(ss2) == 1, f"{len(ss2)} essai(s)")
 
@@ -88,6 +94,21 @@ async def main():
         check('Quota 3.8 → modèle de secours 3.1', ok and info['m'] == 'gemini-3.1-flash-live-preview', f"{[x['model'] for x in ss]}")
         st['policy'] = 'quota38+'
         check('Réponses silencieuses désactivées hors 3.8', info['sched'] is False)
+
+        # 3b. Seul Gemini 2.5 « native audio » a du quota (cas réel du 23/10/26) : réflexion coupée, choix retenu au redémarrage
+        st['policy'] = 'only25'; await page.evaluate("wilson.brain.level = null; wilson.brain.modelUsed = null; wilson.brain.refused = {}")
+        ok, info, ss = await converse()
+        g = ss[-1].get('generationConfig', {}) if ss else {}
+        check('2.5 native audio : connecté sans réflexion préalable (thinkingBudget 0)', ok and info['m'].endswith('native-audio-preview-12-2025') and g.get('thinkingConfig') == {'thinkingBudget': 0}, f"{[x['model'][7:] for x in ss]}")
+        saved = await page.evaluate("JSON.parse(localStorage.getItem('wilson.live'))")
+        await page.reload(); await page.wait_for_function('window.wilson && window.wilson.state === "veille"', timeout=20000)
+        ok, info, ss = await converse()
+        check('Après redémarrage : bon modèle du premier coup (plus ~4 s d\'essais refusés)', ok and len(ss) == 1 and ss[0]['model'].endswith('native-audio-preview-12-2025'), f"{[x['model'][7:] for x in ss]} ; retenu : {saved.get('model') if saved else None}")
+        # Réglage de réflexion refusé par le modèle → même niveau, sans lui
+        st['policy'] = 'nothink25'; await page.evaluate("wilson.brain.think = false")
+        ok, info, ss = await converse()
+        check('Réflexion refusée → même configuration sans ce réglage', ok and info['lv'] == 0 and len(ss) == 2 and 'thinkingConfig' not in ss[-1]['generationConfig'] and await page.evaluate('wilson.brain.think === null'), f"{len(ss)} essais, niveau {info['lv']}")
+        await page.evaluate("wilson.brain.think = false; wilson.brain.refused = {}; wilson.brain._save()")
 
         # 4. Service en panne : message avec la vraie raison
         st['policy'] = 'down'; await page.evaluate('wilson.brain.level = null; wilson.brain.modelUsed = null')
