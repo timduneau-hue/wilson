@@ -13,7 +13,7 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
@@ -103,6 +103,7 @@ class App {
       'Vision': v ? `${v.mode}, regard ${v.gazeReady ? 'prêt' : v.modelsDone ? 'indisponible' : 'en chargement'} (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}), analyse ${Math.round(v.stats.ms || 0)} ms (visages ${Math.round(v.stats.fd || 0)}, regard ${Math.round(v.stats.lm || 0)}), ${v.faces || 0} visage(s), on le regarde : ${v.looking ? 'oui' : 'non'}${v.errors.length ? ' — ' + v.errors.join(' · ') : ''}` : 'caméra coupée',
       'Visage': `${this.drawFps || 0} images/s${this._light ? ', mode allégé' : ''}${this.face.maxDpr ? ', finesse ' + this.face.maxDpr : ''}`,
       'Retard de la tablette': `${Math.round(this.lag || 0)} ms`,
+      'Son': this.audio.describe(),
       'Batterie': b ? `${Math.round(b.level * 100)} %${b.charging ? ', branchée' : ', NON branchée'}` : '—',
       'Réseau': navigator.onLine ? 'en ligne' : 'hors ligne',
       'Mode économique': `${e.modelUsed || '—'}, réflexion ${e.thinking ?? 'par défaut'}${e.noSchema ? ', sans schéma' : ''}${e.noSearch ? ', sans recherche' : ''}, ${e.recent()} requête(s) dans la dernière minute`,
@@ -132,8 +133,8 @@ class App {
     if (this.started) { await this.audio.resume(); this._hideWake(); return; }
     this.started = true;
     try {
-      await this.audio.start();
-      this.log(`Micro prêt (${this.audio.ctx.sampleRate} Hz)`);
+      await this.audio.start({ aec: this.settings.bargeIn === 'directe' });
+      this.log(`Micro prêt — son : ${this.audio.describe()}`);
     } catch (e) {
       this.started = false; this.log('Micro refusé : ' + e.message);
       this.face.setEmotion('triste', 6000); this.badge("J'ai besoin du micro pour t'entendre", 8000); this._showWake(); return;
@@ -195,6 +196,10 @@ class App {
       this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.eco.modelUsed = null; this.log('Clé ou modèle changé');
     }
     if (this.vision) this.vision.mirror = !s.mirror;
+    if (key === 'bargeIn' && this.started) {
+      this.audio.setEchoCancel(s.bargeIn === 'directe').then((ch) => ch && this.log(`Micro rouvert — son : ${this.audio.describe()}`))
+        .catch((e) => this.log('Micro : ' + e.message));
+    }
     if (key === 'logUrl' && this.remote.on) { this.log('Journal à distance activé'); this.remote.flush(); }
     if (key === 'camera') { if (s.camera && !this.vision && this.started) this._startVision(); if (!s.camera && this.vision) { this.vision.stop(); this.vision = null; } }
     $('subtitle').hidden = !s.subtitles;
@@ -597,7 +602,7 @@ class App {
 
   endConversation(why) {
     if (this.state !== 'conversation' && this.state !== 'eveil') return;
-    this.log(`Fin de conversation (${why})`); this.convId++; this.endAfterSpeech = false;
+    this.log(`Fin de conversation (${why})`); this.convId++; this.endAfterSpeech = false; this._liveTurn = null;
     this.brain.close(); this.audio.flush(); this.voice.cancel(); this.outBuf = []; this.outLen = 0;
     if (this.ecoState) this.ecoState.queue = []; this.ecoState = null; this.mode = null;
     this.face.setTalk(0); this.face.setListen(-1); this.face.clearEmotion();
@@ -608,7 +613,8 @@ class App {
 
   _system(mode = 'live') {
     const s = this.settings, m = this.memory.forPrompt();
-    const bat = this.battery && !this.battery.charging ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le gentiment.` : '';
+    const bat = this.battery && !this.battery.charging && !this._batTold ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le une seule fois, brièvement, puis n'en reparle plus.` : '';
+    if (bat) this._batTold = true;
     const eco = mode === 'eco' || mode === 'eco-search';
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
     const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: !this.eco.noSearch }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
@@ -656,7 +662,8 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (this.state !== 'conversation' || !this.brain.open) return;
       const now = performance.now();
       if (this.settings.bargeIn === 'prudente') {
-        if (this.audio.playing) { this._bargeCheck(db); return; }      // il parle : on écoute s'il est coupé, sans renvoyer sa voix
+        // Il parle : rien n'est envoyé (le micro, sans annulation d'écho, entend sa voix) ; on le coupe en touchant l'écran (R4).
+        if (this.audio.playing) return;
         if (now - this.playEndAt < TAIL_MS) return;
       }
       this.outBuf.push(i16); this.outLen += i16.length;
@@ -707,11 +714,20 @@ Nous sommes ${fmtDate()}.${bat}`;
     b.on('audio', (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
       if (!this.audio.playing) { this.barge.n = 0; this.barge.echo = Math.max(-60, this.audio.db); }
+      if (!this._liveTurn) {
+        // 1er son de la réponse : délai depuis la dernière voix entendue (R8), pour l'onglet « Délais » du journal.
+        this._liveTurn = { t: performance.now(), sec: 0 };
+        const s = Math.round((performance.now() - this.audio.lastVoicedAt) / 100) / 10;
+        this.log(`Délais (direct) : 1er son ${s} s après la fin de ta phrase (${this.brain.modelUsed})`);
+        this.remote.mesure({ google: s, voix: Math.round((s + 0.06 + (this.audio.ctx.outputLatency || 0)) * 10) / 10, modele: this.brain.modelUsed, reflexion: 'direct' });
+      }
+      this._liveTurn.sec += i16.length / (rate || 24000);
       this.audio.play(i16, rate); this.lastActivity = performance.now();
     });
-    b.on('interrupted', () => { this.audio.flush(); this.discard = false; this.face.setTalk(0); });
+    b.on('interrupted', () => { this.audio.flush(); this.discard = false; this.face.setTalk(0); this._liveTurn = null; });
     b.on('turn', ({ user, wilson }) => {
       this.discard = false;
+      if (this._liveTurn) { this.log(`Voix du direct : ${this._liveTurn.sec.toFixed(1)} s reçues, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %`); this._liveTurn = null; this._outPeak = 0; }
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
       setTimeout(() => { if (!this.audio.playing) $('subtitle').textContent = ''; }, 5000);
@@ -792,6 +808,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       const was = this.battery; this.battery = b;
       if (was && was.charging && !b.charging) { this.face.setEmotion('triste', 4000); this.badge('Je ne suis plus branché', 8000); }
       if (was && !was.charging && b.charging) this.face.setEmotion('joie', 2500);
+      if (b.charging) this._batTold = false;
     });
     s.on('network', (on) => { if (!on) { this.badge('Plus de réseau', 6000); this.face.setEmotion('confus', 3000); if (this.state === 'conversation') this.endConversation('réseau'); } });
   }
@@ -821,7 +838,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       else this.badge('Je ne vois pas bien les visages : touche-moi pour me parler', 10000, true);
     }
     // Lèvres
-    if (this.audio.playing) { const [l, r] = this.audio.outputLevels(); f.setTalk(l, r); }
+    if (this.audio.playing) { const [l, r] = this.audio.outputLevels(); f.setTalk(l, r); this._outPeak = Math.max(this._outPeak || 0, l); }
     else if (this.voice.speaking) f.setTalk(this.voice.mouth(now), 0.25);
     if (this.state === 'conversation') {
       const E = this.ecoState, thinking = E && (E.busy || E.cap);
