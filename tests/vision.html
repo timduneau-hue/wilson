@@ -1,0 +1,10 @@
+<!doctype html><meta charset="utf-8"><body><script type="module">
+import { Vision } from '../js/vision.js';   // page de test (tests/vision_run.py)
+const v = new Vision(); v.setRate(8); window.v = v;
+await v.start();
+const t0 = performance.now();
+while (!v.gazeReady && performance.now() - t0 < 60000) await new Promise((r) => setTimeout(r, 200));
+await new Promise((r) => setTimeout(r, 35000));
+window.__out = { mode: v.mode, gazeReady: v.gazeReady, delegate: v.delegate, faces: v.faces, looking: v.looking, gaze: v.gaze && Object.fromEntries(Object.entries(v.gaze).map(([k, x]) => [k, typeof x === 'number' ? +x.toFixed(2) : x])), ms: Math.round(v.stats.ms), n: v.stats.n, trip: Math.round(v.stats.trip), fd: Math.round(v.stats.fd), lm: Math.round(v.stats.lm), tuned: v.tuned, errors: v.errors, video: v.video.videoWidth + 'x' + v.video.videoHeight };
+document.title = 'done';
+</script></body>
