@@ -39,16 +39,24 @@ export function sayable(t) {
 }
 
 export class EcoBrain {
-  constructor() { this.history = []; this.modelUsed = null; this.thinking = 'minimal'; this.noSearch = false; this.speed = 'rapide'; this.stream = true; }
+  constructor() { this.history = []; this.modelUsed = null; this.thinking = 'minimal'; this.noSearch = false; this.speed = 'rapide'; this.stream = true; this._restore(); }
   reset() { this.history = []; }
-  setSpeed(sp) { if (sp !== this.speed) { this.speed = ECO_MODELS[sp] ? sp : 'rapide'; this.modelUsed = null; this.thinking = 'minimal'; } }
+  setSpeed(sp) { if (sp !== this.speed) { this.speed = ECO_MODELS[sp] ? sp : 'rapide'; this.modelUsed = null; this.thinking = 'minimal'; this._restore(); } }
+  // Le modèle et le réglage qui ont marché sont retenus (même après un redémarrage) : pas d'essai inutile à la 1re phrase.
+  _restore() {
+    try {
+      const o = JSON.parse(localStorage.getItem('wilson.eco') || 'null');
+      if (o && o.speed === this.speed && (ECO_MODELS[this.speed] || []).includes(o.model)) { this.modelUsed = o.model; this.thinking = o.thinking ?? null; this.noSearch = !!o.noSearch; }
+    } catch (_) {}
+  }
+  _save() { try { localStorage.setItem('wilson.eco', JSON.stringify({ speed: this.speed, model: this.modelUsed, thinking: this.thinking, noSearch: this.noSearch })); } catch (_) {} }
 
   // req : { audio: Int16Array 16 kHz, image: base64 jpeg, text } ; onPartial({pourMoi, emotion, reponse, closed}) pendant l'écriture.
-  async ask({ key, system, audio, image, text, signal, onPartial }) {
+  async ask({ key, system, audio, image, text, hint, signal, onPartial }) {
     const parts = [];
     if (audio && audio.length) parts.push({ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio) } });
     if (image) parts.push({ inlineData: { mimeType: 'image/jpeg', data: image } });
-    parts.push({ text: text || '[Enregistrement ci-dessus. Réponds au format JSON demandé.]' });
+    parts.push({ text: text || `[Enregistrement ci-dessus.${hint ? ' ' + hint : ''} Réponds au format JSON demandé.]` });
     const contents = [...this.history.slice(-12), { role: 'user', parts }];
     const order = ECO_MODELS[this.speed] || ECO_MODELS.rapide;
     const models = this.modelUsed ? [this.modelUsed, ...order.filter((m) => m !== this.modelUsed)] : order;
@@ -76,7 +84,7 @@ export class EcoBrain {
             out = parseReply(await r.json());
             if (onPartial) onPartial({ pourMoi: out.pourMoi, emotion: out.emotion, reponse: out.reponse, closed: true });
           }
-          this.modelUsed = model; this.thinking = think;
+          if (this.modelUsed !== model || this.thinking !== think) { this.modelUsed = model; this.thinking = think; this._save(); }
           // Historique en texte seulement (l'audio est lourd) : ce qui a été entendu, puis la réponse.
           this.history.push({ role: 'user', parts: [{ text: out.entendu ? `[Entendu] ${out.entendu}` : (text || '[bruit]') }] });
           this.history.push({ role: 'model', parts: [{ text: JSON.stringify(out.raw) }] });

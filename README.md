@@ -18,6 +18,6 @@ Fonctionnement et règles : voir [PLAN.md](PLAN.md).
 - La clé API, les souvenirs et le journal restent dans le stockage local de la tablette.
 
 ## Composants tiers
-- [MediaPipe Tasks Vision](https://github.com/google-ai-edge/mediapipe) — Apache-2.0 (`vendor/mediapipe/`)
+- [MediaPipe Tasks Vision](https://github.com/google-ai-edge/mediapipe) 1.1.1 — Apache-2.0 (`vendor/mediapipe/`, version script classique pour le Web Worker)
 - [MediaPipe Face Detection](https://www.npmjs.com/package/@mediapipe/face_detection) (modèle longue portée) — Apache-2.0 (`vendor/face_detection/`)
 - Modèle MediaPipe Face Landmarker (`face_landmarker.task`) — Apache-2.0 (`vendor/models/`)

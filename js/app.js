@@ -12,7 +12,7 @@ import { loadSettings, SettingsUI } from './settings.js';
 import { Voice } from './voice.js';
 import { EcoBrain, ECO_FORMAT, sentenceCut, sayable, warmUp } from './eco.js';
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
@@ -49,11 +49,22 @@ class App {
     setInterval(() => this._tick(), 50);
     // Surveillance de la charge : si la tablette prend du retard, on allège l'animation (jamais de file d'attente qui s'allonge).
     let lastBeat = performance.now(); this.lag = 0; this._t0 = lastBeat;   // on ignore le démarrage (chargement des modèles)
+    let lastDrawn = 0, slow = 0;
     setInterval(() => {
       const t = performance.now(), late = t - lastBeat - 1000; lastBeat = t;
       this.lag = this.lag * 0.8 + Math.max(0, late) * 0.2;
       if (late > 400) this.log(`Tablette en retard de ${Math.round(late)} ms`);
       if (t - this._t0 > 30000 && this.lag > 150 && !this._light) { this._light = true; this.face.maxFpsLight = true; this.log('Mode allégé : animation à 30 images/s'); }
+      // Images du visage réellement dessinées : si l'écran n'arrive pas à suivre, on dessine moins de pixels, puis moins d'images.
+      const f = this.face, drawn = (f.drawn || 0) - lastDrawn; lastDrawn = f.drawn || 0;
+      const want = 60 / (f.div || 1);
+      this.drawFps = drawn;
+      slow = !document.hidden && t - this._t0 > 20000 && drawn < want * 0.6 ? slow + 1 : 0;
+      if (slow >= 5) {
+        slow = 0;
+        if (f.maxDpr > 1) { f.setMaxDpr(1); this.log(`Visage saccadé (${drawn} images/s) : dessin allégé (moins de pixels)`); }
+        else if (!this._light) { this._light = true; f.maxFpsLight = true; this.log(`Visage saccadé (${drawn} images/s) : animation à 30 images/s`); }
+      }
     }, 1000);
   }
 
@@ -88,6 +99,7 @@ class App {
     this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._wakeLock(); this.audio.resume(); } });
     if (fromGesture && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
     if (!this.audio.running) this._showWake(); else this._hideWake();
+    this.voice.warm();
     this._loadQuota();
     this.setState('veille');
     this.applySettings();
@@ -95,8 +107,9 @@ class App {
 
   async _startVision() {
     try {
-      this.vision = new Vision(); this.vision.mirror = !this.settings.mirror; this.vision.calib = { yaw: 0, pitch: 0, ...(this.settings.gazeCalib || {}) };
+      this.vision = new Vision(); this.vision.mirror = !this.settings.mirror; this.vision.calib = { yaw: 0, pitch: 0, down: 0, ...(this.settings.gazeCalib || {}) };
       this.vision.onPresence = (p) => this._presence(p);
+      this.vision.onInfo = (m) => this.log(m);
       await this.vision.start(); this.log('Caméra prête');
     } catch (e) { this.vision = null; this.log('Caméra indisponible : ' + e.message); }
   }
@@ -136,7 +149,7 @@ class App {
       this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.eco.modelUsed = null; this.log('Clé ou modèle changé');
     }
     if (this.vision) this.vision.mirror = !s.mirror;
-    if (key === 'camera') { if (s.camera && !this.vision && this.started) this._startVision(); if (!s.camera && this.vision) { this.vision.stream.getTracks().forEach((t) => t.stop()); this.vision = null; } }
+    if (key === 'camera') { if (s.camera && !this.vision && this.started) this._startVision(); if (!s.camera && this.vision) { this.vision.stop(); this.vision = null; } }
     $('subtitle').hidden = !s.subtitles;
     this.continuous = false;
   }
@@ -182,6 +195,12 @@ class App {
     if (v.looking || now - v.lookAt < 1500) return true;
     // Pendant une discussion, on peut détourner les yeux un instant (visage toujours là, réponse récente).
     return this.state === 'conversation' && now - (this.lastAnswerAt || 0) < 8000 && now - v.faceAt < 1500;
+  }
+
+  // On le regarde vraiment (pas seulement « discussion en cours ») : la phrase lui est destinée à coup sûr.
+  _gazing(now = performance.now()) {
+    const v = this.vision;
+    return !!(v && v.gazeReady && (this.settings.listenMode || 'regard') === 'regard' && (v.looking || now - v.lookAt < 1500));
   }
 
   // En veille : quelqu'un parle en regardant Wilson → la conversation démarre avec le début de sa phrase.
@@ -260,7 +279,7 @@ class App {
     this.log(`Conversation ouverte en mode économique (${reason})`);
     if ((reason === 'prenom' || reason === 'regard') && chunks.length) {
       const len = chunks.reduce((a, c) => a + c.length, 0);
-      this.ecoState.cap = { chunks: chunks.slice(), len, lastVoice: now, wake: reason === 'prenom', voiced: 3, looked: 1 };
+      this.ecoState.cap = { chunks: chunks.slice(), len, lastVoice: now, wake: reason === 'prenom', voiced: 3, looked: 1, gazed: reason === 'regard' ? 1 : 0, peak: this.audio.db };
     } else if (reason === 'test') this._ecoSend({ text: '[Présente-toi en une phrase, avec chaleur.]' });
     else if (reason === 'toucher') this._say(['Oui ?', "Je t'écoute.", 'Oui, dis-moi ?'][Math.floor(Math.random() * 3)]);
   }
@@ -271,13 +290,20 @@ class App {
     if (this.voice.speaking) return;                       // il parle : seule la détection de coupure écoute (voir _wireAudio)
     if (now - this.playEndAt < ECO_TAIL_MS) return;        // fin de sa propre voix (écho)
     if (E.cap) {
-      E.cap.chunks.push(i16); E.cap.len += i16.length;
-      if (now - this.audio.lastVoicedAt < 60) { E.cap.lastVoice = now; E.cap.voiced = (E.cap.voiced || 0) + 1; if (this._addressed(now)) E.cap.looked = (E.cap.looked || 0) + 1; }
-      if (now - E.cap.lastVoice > ECO_SILENCE_MS || E.cap.len > 16000 * 14) { const cap = E.cap; E.cap = null; this._ecoUtterance(cap); }
+      const C = E.cap, db = this.audio.db;
+      C.chunks.push(i16); C.len += i16.length;
+      // Fin de phrase : silence, OU voix nettement plus faible que celle de la personne (télé, bruit de fond) → on n'attend pas.
+      C.peak = Math.max(db, (C.peak == null ? db : C.peak) - 0.05);
+      if (now - this.audio.lastVoicedAt < 60 && db > C.peak - 15) {
+        C.lastVoice = now; C.voiced = (C.voiced || 0) + 1;
+        if (this._addressed(now)) C.looked = (C.looked || 0) + 1;
+        if (this._gazing(now)) C.gazed = (C.gazed || 0) + 1;
+      }
+      if (now - C.lastVoice > ECO_SILENCE_MS || C.len > 16000 * 12) { E.cap = null; this._ecoUtterance(C); }
     } else if (this.audio.speaking && now - this.audio.lastVoicedAt < 60 && this._addressed(now)) {   // voix présente maintenant, et pour lui
       // Juste après sa réponse, la personne a pu commencer à parler pendant la garde anti-écho : on reprend un peu plus loin.
       const pre = this.audio.recent(now - this.playEndAt < ECO_TAIL_MS + 400 ? 900 : 450);
-      E.cap = { chunks: [pre], len: pre.length, lastVoice: now, looked: 1 };
+      E.cap = { chunks: [pre], len: pre.length, lastVoice: now, looked: 1, gazed: this._gazing(now) ? 1 : 0, peak: this.audio.db };
     }
   }
 
@@ -288,7 +314,11 @@ class App {
     if (!audio) { this.log('Rien d\'audible, phrase ignorée'); return; }
     if (!cap.wake && (audio.length < 16000 * 0.5 || (cap.voiced || 0) < 15)) return;  // trop court : un bruit
     if (!cap.wake && !cap.looked) return;                                                // personne ne le regardait
-    this._ecoSend({ audio, endAt: cap.lastVoice });
+    // Indication pour Gemini : on le regardait (réponds), ou simple suite de la discussion (réponds seulement si c'est clair).
+    const pol = this.settings.listenMode || 'regard';
+    const hint = pol !== 'regard' || cap.wake ? '' : cap.gazed ? 'La personne te regardait en disant cela : elle te parle, réponds-lui (pour_moi true) sauf si on n\'entend que ta propre voix ou rien d\'intelligible.'
+      : 'Phrase dite juste après ta réponse, sans te regarder : réponds seulement si c\'est clairement la suite de votre échange.';
+    this._ecoSend({ audio, endAt: cap.lastVoice, hint });
   }
 
   async _ecoSend(req) {
@@ -297,7 +327,7 @@ class App {
     E.busy = true; const conv = this.convId;
     this.face.setEmotion('reflexion', 30000, 0.6);
     const tSend = performance.now(); let answered = false;
-    let sess = null, spoken = 0, emoSet = false, notForMe = false, tFirst = 0, lastTxt = '', repeated = false;
+    let sess = null, spoken = 0, emoSet = false, notForMe = false, tFirst = 0, tNet = 0, lastTxt = '', repeated = false, timing = null;
     const speakChunk = (chunk) => {
       chunk = sayable(chunk);
       if (!chunk || repeated) return;
@@ -307,6 +337,7 @@ class App {
     };
     // Lecture en flux : Wilson commence à parler dès la première phrase écrite.
     const onPartial = (pr) => {
+      if (!tNet) tNet = performance.now();
       if (conv !== this.convId) return;
       if (pr.pourMoi === false) { notForMe = true; return; }
       if (pr.emotion && !emoSet) { emoSet = true; if (pr.emotion !== 'neutre') this.face.setEmotion(pr.emotion, 6500, 0.9); else this.face.clearEmotion(); }
@@ -317,7 +348,7 @@ class App {
     };
     try {
       const image = this.vision ? this.vision.snapshot(0.7, 384) : null;
-      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, image, text: req.text, onPartial });
+      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, image, text: req.text, hint: req.hint, onPartial });
       if (conv !== this.convId) return;
       if (!emoSet) { this.face.clearEmotion(); if (out.emotion && out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9); }
       for (const f of out.memoriser) { this.memory.add(f); this.log('Retenu : ' + f); }
@@ -337,12 +368,16 @@ class App {
         E.ignored = 0; answered = true; this.lastAnswerAt = performance.now();
         if (!spoken) speakChunk(out.reponse);                       // réponse hors format : on la dit d'un bloc
         this.log(`« ${out.entendu.slice(0, 90)} » → ${out.reponse.slice(0, 110)}`);
-        this.log(`Latence : ${ms(tFirst || performance.now())} s avant la 1re phrase, ${ms(performance.now())} s au total (${out.model}, audio ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
+        // Délais mesurés depuis la fin de la phrase : réponse de Google, 1re phrase prête, voix de la tablette.
+        const tAll = performance.now();
+        timing = () => this.log(`Délais : Google ${ms(tNet || tAll)} s · 1re phrase ${ms(tFirst || tAll)} s · voix ${this.voice.startedAt ? ms(this.voice.startedAt) + ' s' : '—'} · réponse complète ${ms(tAll)} s (${out.model}, phrase de ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
         this.memory.addExchange(out.entendu, out.reponse);
         this._lastReply = out.reponse;
         if (this.settings.subtitles) $('subtitle').textContent = out.reponse.slice(0, 220);
       }
-      if (sess) { sess.end(); await this._endSpeech(sess, out.reponse); if (conv !== this.convId) return; }
+      if (sess) { sess.end(); await this._endSpeech(sess, out.reponse); }
+      if (timing) timing();
+      if (conv !== this.convId) return;
       if (out.fin) setTimeout(() => conv === this.convId && this.endConversation('au revoir'), 600);
     } catch (e) {
       if (sess) sess.cancel();
@@ -620,6 +655,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     $('wake').addEventListener('pointerup', () => this.start(true));
     s.on('tap', () => {
       if (!this.started) { this.boot(); return; }
+      this.voice.warm();
       if (!this.audio.running) { this.audio.resume(); this._hideWake(); return; }
       if (this.speaking) { this.interrupt('toucher'); return; }
       if (this.state === 'veille' || this.state === 'dodo') { this.face.setEmotion('surprise', 900); this.startConversation('toucher'); return; }
@@ -658,7 +694,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     }
     if (v && v.modelsDone && !this._gazeAnnounced && this.started) {
       this._gazeAnnounced = true;
-      this.log(`Vision : ${v.mode}, regard ${v.gazeReady ? 'prêt (' + v.delegate + ')' : 'indisponible'}`);
+      this.log(`Vision (en arrière-plan) : ${v.mode}, regard ${v.gazeReady ? 'prêt (' + (v.delegate === 'GPU' ? 'carte graphique' : 'processeur') + ')' : 'indisponible'}${v.errors.length ? ' — ' + v.errors.join(' · ') : ''}`);
       if (v.gazeReady) this.badge('Regarde-moi et parle-moi : je t\'écoute', 5000);
       else this.badge('Je ne vois pas bien les visages : touche-moi pour me parler', 10000, true);
     }
@@ -696,7 +732,8 @@ function nextPacificMidnight() {
 
 function quotaInfo(msg, what) {
   const m = /retry in ([\d.]+)\s*s/i.exec(msg || ''), now = Date.now();
-  if (/limit:\s*0\b/i.test(msg || '')) return { until: nextPacificMidnight(), txt: `Google n'accorde aucun quota gratuit à ce projet pour ${what} (limite 0).` };
+  // Limite 0 : ce projet n'a pas du tout accès à ce service ; inutile de réessayer chaque jour (on revérifie chaque semaine, ou avec « Vérifier »).
+  if (/limit:\s*0\b/i.test(msg || '')) return { until: now + 7 * 24 * 3600000, txt: `Google n'accorde aucun quota gratuit à ce projet pour ${what} (limite 0).` };
   if (m && +m[1] < 3600) return { until: now + Math.ceil(+m[1]) * 1000, txt: `Google me demande de patienter ${Math.ceil(+m[1])} s (limite par minute du compte gratuit).` };
   const until = nextPacificMidnight(), d = new Date(until);
   return { until, txt: `Mon quota gratuit Google pour ${what} est épuisé pour aujourd'hui. Je pourrai reparler à ${d.getHours()}h${String(d.getMinutes()).padStart(2, '0')}.` };

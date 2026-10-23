@@ -19,7 +19,7 @@ Un visage original (grands yeux expressifs sur fond noir) qui vit, écoute, rega
 | R5 | Il se tait si les gens parlent entre eux. | Pas de regard = pas d'écoute ; Gemini filtre en plus (« pour_moi ») ; 2 refus d'affilée → veille. |
 | R6 | Il voit ce qu'on lui montre. | Une photo jointe à chaque phrase. |
 | R7 | Il retient ce qu'on lui dit. | Souvenirs stockés sur la tablette, rappelés à chaque requête. |
-| R8 | **Fluide** : réponse ~1 s après la fin de la phrase. | Aucun traitement lourd en continu ; réponse lue dès la 1re phrase ; mode le plus rapide par défaut. |
+| R8 | **Fluide** : visage sans à-coups, réponse ~1 à 2 s après la fin de la phrase. | Analyse de la caméra en arrière-plan (Web Worker, autre cœur) : l'animation ne se fige jamais ; processeur ou carte graphique choisi en mesurant sur la tablette ; fin de phrase détectée même avec la télé ; réponse lue dès la 1re phrase ; mode le plus rapide par défaut ; délais détaillés dans le journal. |
 | R9 | Rien d'inutile ne quitte la maison. | Seules les phrases dites en le regardant partent vers Gemini. |
 | R10 | L'écran ne s'abîme pas et ne s'éteint pas. | Anti-veille, veille sombre, visage qui dérive. |
 
@@ -56,7 +56,8 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 | `js/eco.js` | Cerveau « économique » : phrase enregistrée + photo → Gemini Flash → réponse JSON | clé API Gemini |
 | `js/voice.js` | Voix de la tablette (synthèse vocale) pour le mode économique | navigateur |
 | `js/faces/*.js` | Styles de visage : Lumière, Bouille, Rétro, Miel | `face.js` |
-| `js/vision.js` | Caméra, visages jusqu'à ~4 m, **regard** (tête + yeux), images pour Gemini | MediaPipe Face Detection (longue portée) + Face Landmarker (repli : mouvement) |
+| `js/vision.js` | Caméra, **regard** (tête + yeux → « on me regarde »), images pour Gemini | `vision-worker.js` |
+| `js/vision-worker.js` | En arrière-plan : visages jusqu'à ~4 m, repères fins, lumière, mouvement | MediaPipe Face Detection (longue portée) + Face Landmarker (repli : mouvement) |
 | `js/memory.js` | Souvenirs et petit journal des échanges | localStorage |
 | `js/sensors.js` | Toucher, mouvement de la tablette, batterie, réseau | API du navigateur |
 | `js/settings.js` | Écran de réglages et premier lancement | — |

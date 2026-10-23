@@ -1,12 +1,12 @@
-// Wilson — service worker : l'appli démarre même sans réseau et le modèle vocal (46 Mo) n'est téléchargé qu'une fois.
-const VERSION = 'wilson-1.5.0';
+// Wilson — service worker : l'appli démarre même sans réseau et les modèles de vision ne sont téléchargés qu'une fois.
+const VERSION = 'wilson-1.6.0';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'version.json', 'css/wilson.css',
-  'js/app.js', 'js/voice.js', 'js/eco.js', 'js/face.js', 'js/audio.js', 'js/brain.js', 'js/vision.js', 'js/memory.js', 'js/sensors.js', 'js/settings.js',
+  'js/app.js', 'js/vision-worker.js', 'js/voice.js', 'js/eco.js', 'js/face.js', 'js/audio.js', 'js/brain.js', 'js/vision.js', 'js/memory.js', 'js/sensors.js', 'js/settings.js',
   'js/faces/util.js', 'js/faces/lumiere.js', 'js/faces/bouille.js', 'js/faces/led.js', 'js/faces/miel.js', 'visages.html',
   'js/worklets/capture.js', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
-const HEAVY = 'wilson-lourd-v2';   // modèle vocal + moteurs : gardés d'une version à l'autre
+const HEAVY = 'wilson-lourd-v2';   // modèles de vision + moteurs : gardés d'une version à l'autre
 
 self.addEventListener('install', (e) => {
   // « reload » : on ignore le cache HTTP du navigateur pour stocker vraiment la nouvelle version.
