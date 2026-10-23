@@ -63,6 +63,14 @@ export class RemoteLog {
   }
 }
 
+// Question au script (réponse lisible, contrairement au journal) : utilisé pour la recherche Internet (Tavily).
+RemoteLog.prototype.ask = async function (payload, signal) {
+  if (!this.on) throw new Error('script non configuré');
+  const r = await fetch(this.url, { method: 'POST', cache: 'no-store', signal, headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+  const txt = await r.text();
+  try { return JSON.parse(txt); } catch (_) { throw new Error(/^ok$/i.test(txt.trim()) ? 'le script déployé ne sait pas encore chercher (ancienne version)' : `réponse illisible du script (${r.status})`); }
+};
+
 // Lecture d'un QR code avec la caméra de Wilson (adresse du script). onFrame(video) sert à afficher l'aperçu.
 export async function scanQR(video, { timeoutMs = 60000, onFrame, signal } = {}) {
   if (!('BarcodeDetector' in window)) throw new Error('cette tablette ne sait pas lire les QR codes : colle l\'adresse à la main');

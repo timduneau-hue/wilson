@@ -54,7 +54,7 @@ async def main():
             if req.method == 'OPTIONS':
                 await route.fulfill(status=204, headers={'access-control-allow-origin': '*', 'access-control-allow-headers': '*'}); return
             body = json.loads(req.post_data); model = req.url.split('/models/')[1].split(':')[0]
-            entry = {'model': model, 'body': body, 't': time.monotonic(), 'search': 'tools' in body}
+            entry = {'model': model, 'body': body, 't': time.monotonic(), 'search': 'tools' in body or 'RECHERCHE' in body['systemInstruction']['parts'][0]['text']}
             st['reqs'].append(entry)
             H = {'access-control-allow-origin': '*'}
             gc = body.get('generationConfig', {})
@@ -72,10 +72,19 @@ async def main():
             n = max(1, len(text) // 4); chunks = [text[i:i + n] for i in range(0, len(text), n)]
             sse = ''.join('data: ' + json.dumps({'candidates': [{'content': {'role': 'model', 'parts': [{'text': c}]}}]}, ensure_ascii=False) + '\r\n\r\n' for c in chunks)
             try:
-                await route.fulfill(status=200, content_type='text/event-stream', headers=H, body=sse)
+                if 'streamGenerateContent' in req.url:
+                    await route.fulfill(status=200, content_type='text/event-stream', headers=H, body=sse)
+                else:                                   # requête simple (formulation d'un résultat de recherche) : JSON
+                    await route.fulfill(status=200, content_type='application/json', headers=H, body=json.dumps({'candidates': [{'content': {'role': 'model', 'parts': [{'text': text}]}}]}, ensure_ascii=False))
             except Exception:
                 entry['aborted'] = True     # la tablette a annulé cette requête (envoi anticipé ou relance perdante)
         await page.route(re.compile(r'.*generativelanguage\.googleapis\.com/v1beta/models/.*:(stream)?[gG]enerateContent.*'), gen)
+
+        async def script_route(route):          # script de Timothée : recherche Tavily simulée
+            d = json.loads(route.request.post_data or '{}')
+            body = {'ok': True, 'reponse': 'Pluie faible demain, 12 degrés.', 'resultats': [{'titre': 'Météo', 'url': 'https://m.example', 'extrait': 'Dimanche : pluie faible, 12 °C.'}]} if d.get('action') == 'chercher' else 'ok'
+            await route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': '*'}, body=json.dumps(body) if isinstance(body, dict) else body)
+        await page.route(re.compile(r'https://script\.google\.com/.*'), script_route)
 
         async def boot():
             await page.goto('http://127.0.0.1:8765/index.html')
@@ -150,6 +159,21 @@ async def main():
         d = await new_delais(c)
         check('Recherche notée dans « Délais »', 'recherche' in d, d)
 
+        # 3b. Mode économique + script : la recherche passe par Tavily, Gemini ne fait que formuler la réponse (sans Internet).
+        await page.evaluate("wilson.settings.logUrl = 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTESTTESTTEST/exec'")
+        await open_conv(); n = len(st['reqs']); k = len(await page.evaluate('window.__spoken'))
+        st['replies'] = [{'pour_moi': True, 'chercher': 'météo dimanche', 'emotion': 'reflexion', 'reponse': 'Je regarde.', 'entendu': 'Il fera quel temps dimanche ?'}]
+        st['search_reply'] = {'pour_moi': True, 'emotion': 'neutre', 'reponse': 'Dimanche, pluie faible et 12 degrés.'}
+        await page.evaluate('window.__voice()')
+        await page.wait_for_function(f'window.__spoken.length > {k + 1}', timeout=10000)
+        sp = (await page.evaluate('window.__spoken'))[k:]
+        reqs = st['reqs'][n:]
+        txt = json.dumps(reqs[-1]['body']['contents'], ensure_ascii=False) if reqs else ''
+        check('Mode économique : recherche par Tavily, puis réponse formulée sans Internet', sp == ['Je regarde.', 'Dimanche, pluie faible et 12 degrés.'] and len(reqs) == 2
+              and 'tools' not in reqs[-1]['body'] and "Résultats d'une recherche Internet" in txt and 'pluie faible, 12' in txt, str(sp) + ' | ' + ' / '.join(l for l in logs if 'echerche' in l)[-400:])
+        await page.evaluate("wilson.settings.logUrl = ''")
+
+        await page.evaluate('wilson.eco.sent = []')
         # 4. Relance : Google ne répond pas (lenteur aléatoire) → la même requête repart après ~2,2 s ; la plus rapide gagne.
         await open_conv(); n = len(st['reqs']); k = len(await page.evaluate('window.__spoken')); c = len(delais())
         st['replies'] = [{'pour_moi': True, 'emotion': 'neutre', 'reponse': 'Me voilà.', 'entendu': 'Tu es là ?'}]

@@ -31,12 +31,16 @@ const sheets = { 'Journal': fakeSheet('Journal'), 'Délais': fakeSheet('Délais'
 sheets['Journal'].data[0] = ['Date', 'Version', 'Message'];
 sheets['Délais'].data[0] = ['Date', 'Envoi'];
 sheets['État'].data[0] = ['Clé', 'Valeur'];
-let opened = null, locked = 0;
+let opened = null, locked = 0; const fetched = [], logged = [];
+let tavily = () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ answer: 'Demain à Angers : éclaircies, 9 à 17 °C.', response_time: 0.8,
+  results: [{ title: 'Météo Angers', url: 'https://meteo.example/angers', content: 'Samedi : éclaircies, minimales 9 °C, maximales 17 °C. '.repeat(20) }] }) });
 const ctx = {
   console, JSON, Date, Math, String, Object, isFinite,
   SpreadsheetApp: { openById: (id) => { opened = id; return { getSheetByName: (n) => sheets[n] || null }; } },
   LockService: { getScriptLock: () => ({ waitLock: () => { locked++; }, releaseLock: () => { locked--; } }) },
-  ContentService: { createTextOutput: (t) => ({ text: t }) },
+  ContentService: { createTextOutput: (t) => ({ text: t, getContent() { return t; }, setMimeType(m) { this.mime = m; return this; } }), MimeType: { JSON: 'json' } },
+  UrlFetchApp: { fetch: (url, o) => { fetched.push({ url, o }); return tavily(url, o); } },
+  Logger: { log: (x) => logged.push(x) },
   Utilities: { formatDate: () => '23/10/26 15h30:00' },
   ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' }) },
   HtmlService: { createHtmlOutput: (h) => ({ html: h, setTitle(t) { this.title = t; return this; } }) },
@@ -78,5 +82,23 @@ const g = ctx.doGet();
 check('Page de contrôle avec QR code de l\'adresse', /QRCode/.test(g.html) && g.html.includes('AKfycbTESTTESTTESTTESTTEST/exec') && g.title === 'Journal de Wilson');
 ctx.essai();
 check('Fonction essai', J[1][2].startsWith('Essai du journal'));
+
+// Recherche Internet (Tavily)
+const lignesAvant = sheets['Journal'].getLastRow();
+let s = JSON.parse(post({ action: 'chercher', question: 'météo demain à Angers' }).text);
+check('Recherche sans clé Tavily : refus clair, rien d\'envoyé', s.ok === false && /clé Tavily absente/.test(s.erreur) && fetched.length === 0);
+vm.runInContext("TAVILY_CLE = 'tvly-TESTTEST';", ctx);
+const out = post({ action: 'chercher', question: 'météo demain à Angers' });
+s = JSON.parse(out.text);
+const f = fetched[0] || { o: {} }, pl = JSON.parse(f.o.payload || '{}');
+check('Recherche : appel Tavily (clé en en-tête, question, France, réponse courte)', f.url === 'https://api.tavily.com/search' && f.o.headers.Authorization === 'Bearer tvly-TESTTEST'
+  && pl.query === 'météo demain à Angers' && pl.country === 'france' && pl.include_answer === 'basic' && pl.search_depth === 'basic', JSON.stringify(pl));
+check('Recherche : réponse JSON (réponse + extraits raccourcis)', out.mime === 'json' && s.ok && /éclaircies/.test(s.reponse) && s.resultats.length === 1 && s.resultats[0].extrait.length <= 500);
+check('Recherche : rien d\'écrit dans le journal, pas de verrou', sheets['Journal'].getLastRow() === lignesAvant && locked === 0);
+tavily = () => ({ getResponseCode: () => 432, getContentText: () => JSON.stringify({ detail: { error: 'This request exceeds your plan\'s set usage limit.' } }) });
+s = JSON.parse(post({ action: 'chercher', question: 'x' }).text);
+check('Recherche : quota Tavily épuisé → message clair', s.ok === false && s.code === 432 && /usage limit/.test(s.erreur), s.erreur);
+ctx.essaiRecherche();
+check('Fonction essaiRecherche', logged.length === 1);
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);

@@ -62,7 +62,7 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 | `js/sensors.js` | Toucher, mouvement de la tablette, batterie, réseau | API du navigateur |
 | `js/settings.js` | Écran de réglages et premier lancement | — |
 | `js/remote.js` | Journal à distance : journal, délais et bilan → feuille Google « Wilson — journal » (lue par Claude) ; lecture du QR code | `apps-script/journal.gs` |
-| `apps-script/journal.gs` | Script Apps Script de Timothée (application Web) qui range le journal dans la feuille | Google Sheets |
+| `apps-script/journal.gs` | Script Apps Script de Timothée (application Web) : range le journal dans la feuille ; recherche Internet par Tavily (clé dans le script) | Google Sheets, Tavily |
 
 ## 5. Choix techniques et pourquoi
 
@@ -107,6 +107,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 | ~4 s perdues à chaque démarrage à essayer deux modèles refusés (quota) | Modèle qui marche retenu sur la tablette ; modèle refusé pour quota essayé en dernier pendant 6 h. |
 | Gemini 2.5 « native audio » réfléchit avant de parler | `thinkingBudget: 0` (réflexion coupée) ; si refusé, même configuration sans ce réglage. |
 | Recherche intégrée de Gemini Live : « Let me check » en anglais, 8 à 15 s, puis bloquée après une coupure de connexion | Outil maison **« chercher »** : Wilson dit en français qu'il cherche l'information, l'appli interroge Gemini Flash-Lite + Google Search (texte, ~2 s), et Wilson répond **dès que l'info arrive** (filet de sécurité 30 s) ; relance si Gemini reste muet 10 s après le résultat ; recherche abandonnée si on le coupe. Règle de Timothée (23/10/26) : **pas d'outil spécial par sujet** (météo ou autre), une seule façon de chercher. |
+| **Recherche Internet gratuite** : Google n'offre aucune recherche gratuite sur les Gemini 3, et ses Gemini 2.5 (500 recherches par jour) sont fermés aux nouvelles clés (vérifié le 23/10/26) | **Tavily** (1 000 recherches par mois, renouvelées, sans carte bancaire), interrogé par le script de Timothée (action « chercher » de `apps-script/journal.gs`, clé Tavily dans le script, jamais dans le dépôt). Ordre : Tavily → recherche Google de Gemini → réponse sans Internet. Le mode direct reçoit les infos brutes et les reformule ; le mode économique les fait formuler par Flash-Lite (sans Internet). |
 | Recherche refusée par Google pour quota (météo du 23/10/26 : 429 sur les trois Flash 3.x) | Modèles de secours Gemini 2.5 (quotas gratuits séparés) ; modèle refusé essayé en dernier pendant 6 h ; si la recherche reste refusée, même question sans Internet (réponse prudente) et la recherche n'est plus retentée pendant 6 h ; détail exact du quota écrit dans le journal. |
 | Écho de sa voix (micro sans annulation d'écho) pris pour une phrase (« . ») | Garde de 450 ms après sa voix avant de renvoyer le micro. |
 | Délai mal mesuré (écho compté comme voix) | Délai mesuré depuis la dernière voix de la personne envoyée à Gemini ; suites de réponse non comptées. |
@@ -119,7 +120,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 23/10/26 : **version 1.8.3** en ligne.
+État au 23/10/26 : **version 1.9.0** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -154,11 +155,13 @@ Historique récent :
   signalée sur un téléphone ; toujours en français. Retour de Timothée : « beaucoup mieux qu'avant ».
 - 1.8.3 (23/10/26) — recherche : Wilson attend l'info au lieu d'abandonner à 9 s ; secours Gemini 2.5 si les 3.x refusent
   (quota) ; réponse sans Internet en dernier recours ; tutoiement imposé. Le direct tourne désormais avec gemini-3.8-live.
+- 1.9.0 (23/10/26) — recherche Internet gratuite par Tavily via le script (voir section 6 bis). Timothée doit créer un compte
+  Tavily, coller la clé dans le script, et déployer une nouvelle version (même adresse : rien à refaire sur la tablette).
 
 En attente :
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;
 - son du mode direct confirmé audible en 1.8.1 (36 s jouées, Timothée a répondu) ;
-- vérifier dans le journal si la recherche (météo) passe en 1.8.3 et quel quota Google refusait (ligne « Recherche Google refusée … [quota : …] ») ;
+- vérifier dans le journal que la recherche passe par Tavily (« Recherche Tavily faite ») ; onglet État → « Recherche Internet » ;
 - les yeux sont-ils fluides ? les réponses assez rapides ? (onglets Délais et État de la feuille, plus besoin de capture) ;
 - il a écrit que « ça ne fonctionne pas comme je voudrais » : préciser ce qui ne va pas (réaction au regard, réponses
   intempestives, coupures…).

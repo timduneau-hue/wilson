@@ -13,7 +13,7 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.8.3';
+const VERSION = '1.9.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 450;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce dure un peu plus
@@ -108,6 +108,7 @@ class App {
       'Son': this.audio.describe(),
       'Batterie': b ? `${Math.round(b.level * 100)} %${b.charging ? ', branchée' : ', NON branchée'}` : '—',
       'Réseau': navigator.onLine ? 'en ligne' : 'hors ligne',
+      'Recherche Internet': this.remote.on ? `Tavily par le script${this._searchState ? ' — dernière : ' + this._searchState : ''}` : 'Gemini seulement (pas de script)',
       'Mode économique': `${e.modelUsed || '—'}, réflexion ${e.thinking ?? 'par défaut'}${e.noSchema ? ', sans schéma' : ''}${e.noSearch ? ', sans recherche' : ''}, ${e.recent()} requête(s) dans la dernière minute`,
       'Quota direct': this.quotaUntil && now < this.quotaUntil ? `en pause : ${this.quotaMsg || ''}` : 'pas de pause',
       'Quota économique': this.ecoQuotaUntil && now < this.ecoQuotaUntil ? `en pause : ${this.ecoQuotaMsg || ''}` : 'pas de pause',
@@ -456,12 +457,19 @@ class App {
         if (!sess && out.reponse) speakChunk(out.reponse);          // réponse hors format : on la dit d'un bloc
         this._applyEco(out, emoSet);
         // 2e temps : une info récente est nécessaire → recherche Google pendant que Wilson dit sa phrase d'attente.
-        if (out.chercher && !this.eco.noSearch && conv === this.convId) {
-          this.log(`Recherche Google : « ${out.chercher} »`, true);
+        if (out.chercher && (this.remote.on || !this.eco.noSearch) && conv === this.convId) {
+          this.log(`Recherche : « ${out.chercher} »`, true);
           tSearch = performance.now(); emoSet = false;
           if (!sess) this.face.setEmotion('reflexion', 30000, 0.6);
           const st2 = { spoken: 0 };
-          try {
+          if (this.remote.on) {                                   // Tavily par le script (gratuit), Gemini en secours
+            try {
+              const txt = await this._lookup(`${out.entendu || ''} (${out.chercher})`, req.ctl.signal, tSearch);
+              if (conv !== this.convId) return;
+              speakChunk(txt); this.eco.commit({ raw: { reponse: txt }, entendu: '' }, `[Recherche : ${out.chercher}]`);
+              said = [said, txt].filter(Boolean).join(' ');
+            } catch (e) { if (e.name === 'AbortError') throw e; speakChunk("Je n'arrive pas à trouver l'information pour le moment."); }
+          } else try {
             const out2 = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco-search'), search: true, signal: req.ctl.signal, onPartial: reader(st2),
               text: `[Question : « ${out.entendu || '(voir l\'enregistrement précédent)'} ». Recherche Google à faire : « ${out.chercher} ». Réponds au format JSON demandé.]` });
             if (conv !== this.convId) return;
@@ -621,7 +629,7 @@ class App {
     if (bat) this._batTold = true;
     const eco = mode === 'eco' || mode === 'eco-search';
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
-    const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: !this.eco.noSearch }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
+    const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
 Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
 La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
 L'heure et la date : appelle date_et_heure.`;
@@ -797,8 +805,31 @@ Nous sommes ${fmtDate()}.${bat}`;
   }
 
   // Trouve l'info : recherche Google ; si Google la refuse (quota de recherche…), même question sans Internet, réponse prudente.
-  async _lookup(question, signal, t0 = performance.now()) {
+  // 1. Tavily par le script de Timothée (gratuit : 1 000 recherches par mois) ; 2. recherche Google de Gemini (pas gratuite
+  // sur les Gemini 3) ; 3. sans Internet. raw : renvoie les infos trouvées telles quelles (le mode direct les reformule lui-même).
+  async _lookup(question, signal, t0 = performance.now(), { raw = false } = {}) {
     const key = this.settings.apiKey, sys = this._system('eco-search');
+    if (this.remote.on) {
+      try {
+        const r = await this.remote.ask({ action: 'chercher', question }, signal);
+        if (r && r.ok) {
+          const info = [r.reponse ? `Réponse trouvée : ${r.reponse}` : '', ...(r.resultats || []).slice(0, 4).map((x, i) => `Source ${i + 1} (${x.titre}) : ${x.extrait}`)].filter(Boolean).join('\n');
+          this.log(`Recherche Tavily faite en ${((performance.now() - t0) / 1000).toFixed(1)} s (${(r.resultats || []).length} résultat(s))`);
+          this._searchState = 'Tavily ✓';
+          if (!info) return "Je n'ai rien trouvé.";
+          if (raw) return `${info}\nRéponds à l'oral en une à trois phrases, sans lire de liens ni d'adresses web.`;
+          const out = await this.eco.ask({ key, system: sys, search: true, web: false, fresh: true, signal,
+            text: `[Question : « ${question} ». Résultats d'une recherche Internet :\n${info}\nRéponds à partir de ces résultats, au format JSON demandé.]` });
+          return sayable(out.reponse) || "Je n'ai rien trouvé de sûr.";
+        }
+        this._searchState = 'Tavily refusé : ' + ((r && r.erreur) || '?');
+        this.log('Recherche Tavily impossible : ' + ((r && r.erreur) || 'réponse vide'));
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        this._searchState = 'Tavily injoignable : ' + e.message;
+        this.log('Recherche Tavily impossible : ' + e.message);
+      }
+    }
     const noWeb = () => this.eco.ask({ key, system: sys, search: true, web: false, fresh: true, signal,
       text: `[Question : « ${question} ». La recherche Internet est impossible pour l'instant : réponds avec ce que tu sais en le précisant, ou dis que tu ne peux pas savoir. Réponds au format JSON demandé.]` });
     let out, until = 0;
@@ -829,7 +860,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     this.log(`Recherche (direct) : « ${question.slice(0, 120)} »`, true);
     const timer = setTimeout(() => ctl.abort(), SEARCH_MAX_MS);
     let result;
-    try { result = await this._lookup(question, ctl.signal, t0); }
+    try { result = await this._lookup(question, ctl.signal, t0, { raw: true }); }
     catch (e) {
       if (!this._searches.has(call.id)) return;                                  // annulée : rien à répondre
       result = e.name === 'AbortError' ? "La recherche a pris trop de temps. Dis-le simplement et propose de réessayer."
