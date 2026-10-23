@@ -78,10 +78,33 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 - **Économique** (Gemini Flash + voix de la tablette) : une requête par phrase, recherche Google comprise, réponse en JSON
   (`entendu`, `pour_moi`, `reponse`, `emotion`, `geste`, `memoriser`, `oublier`, `fin`). Mêmes règles R1 à R10.
 - **Automatique** (défaut) : direct si possible ; si Google refuse pour quota, bascule en économique sans perdre la phrase,
-  et retient le refus jusqu'à la remise à zéro (minuit heure du Pacifique).
+  et retient le refus jusqu'à la remise à zéro (minuit heure du Pacifique), ou une semaine si Google indique « limite 0 ».
 
 ## 7. Lots suivants (prévus, pas dans ce lot)
 
 1. Domotique via Home Assistant (lumières, télé, prises).
 2. Alertes e-mail (intrusion, fumée) quand la maison est vide.
 3. Reconnaissance des membres de la famille.
+
+## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
+
+État au 23/10/26 : **version 1.6.0** en ligne.
+
+- **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
+  la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
+  Pour forcer : appui long sur le visage → « Relancer l'appli ».
+- **Compte Gemini de Timothée** : aucun quota gratuit pour le direct (Gemini Live, « limite 0 ») → Wilson tourne en
+  **mode économique** (Gemini Flash-Lite + voix de la tablette).
+- **Règles de travail** : ne jamais saisir soi-même la clé API ou des identifiants (Timothée colle sa clé sur la tablette) ;
+  dates jj/mm/aa, heures « 10h00 » ; sur un gros changement, mettre d'abord ce plan à jour, puis les détails.
+- **Tests** : dossier `tests/` (voir `tests/README.md`), à relancer avant chaque publication.
+
+Historique récent :
+- 1.5.0 (23/10/26) — le mot « Wilson » (Vosk, trop lent sur la tablette) est remplacé par l'**écoute au regard**.
+- 1.6.0 (23/10/26) — vision en arrière-plan (Web Worker) : visage fluide ; fin de phrase plus rapide, même avec la télé ;
+  Gemini sait qu'on le regardait ; délais détaillés dans le journal (ligne « Délais »).
+
+En attente du retour de Timothée sur la 1.6.0 :
+- les yeux sont-ils fluides ? les réponses assez rapides ? (capture de la ligne « Délais » du journal si c'est encore lent) ;
+- il a écrit que « ça ne fonctionne pas comme je voudrais » : préciser ce qui ne va pas (réaction au regard, réponses
+  intempestives, coupures…).

@@ -1,1 +1,4 @@
 _test/
+tests/shots/
+tests/fixtures/*.y4m
+__pycache__/
