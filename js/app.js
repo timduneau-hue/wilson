@@ -14,7 +14,7 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.12.1';
+const VERSION = '1.12.2';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -116,7 +116,7 @@ class App {
     return {
       'Version': VERSION, 'Démarré le': d(this.bootAt), 'État': this.state, 'Cerveau en cours': this.mode || '—', 'Réglage cerveau': s.brainMode,
       'Écoute': `${s.listenMode}${this._gazeMode ? ' (regard actif : veille après 3 s sans regard)' : ''}${this.paused ? ', EN VEILLE (plus regardé)' : ''}`, 'Coupure': s.bargeIn, 'Fin de conversation': `${s.convTimeout} s`,
-      'Vision': v ? `${v.mode}, regard ${v.gazeReady ? 'prêt' : v.modelsDone ? 'indisponible' : 'en chargement'} (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}), analyse ${Math.round(v.stats.ms || 0)} ms (visages ${Math.round(v.stats.fd || 0)}, regard ${Math.round(v.stats.lm || 0)}), ${v.faces || 0} visage(s), on le regarde : ${v.looking ? 'oui' : 'non'}${v.errors.length ? ' — ' + v.errors.join(' · ') : ''}` : 'caméra coupée',
+      'Vision': v ? `${v.mode}, regard ${v.gazeReady ? 'prêt' : v.modelsDone ? 'indisponible' : 'en chargement'} (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}), analyse ${Math.round(v.stats.ms || 0)} ms (visages ${Math.round(v.stats.fd || 0)}, regard ${Math.round(v.stats.lm || 0)}), ${v.faces || 0} visage(s), on le regarde : ${v.looking ? 'oui' : 'non'}${v.errors.length ? ' — ' + v.errors.join(' · ') : ''}${v.restarts ? `, relancée ${v.restarts} fois` : ''}${v.fixes.length ? `, ${v.fixes.length} réparation(s)` : ''}` : 'caméra coupée',
       'Visage': `${this.drawFps || 0} images/s${this._light ? ', mode allégé' : ''}${this.face.maxDpr ? ', finesse ' + this.face.maxDpr : ''}`,
       'Retard de la tablette': `${Math.round(this.lag || 0)} ms`,
       'Son': this.audio.describe(),
