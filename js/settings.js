@@ -3,6 +3,7 @@
 import { EXPRESSIONS, STYLES } from './face.js';
 import { checkKey, cleanKey, sessionsToday } from './brain.js';
 import { SCRIPT_URL, scanQR } from './remote.js';
+import { settingsLink } from './sync.js';
 
 const AISTUDIO = '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>';
 // Message clair selon le résultat de la vérification de la clé.
@@ -86,6 +87,24 @@ export class SettingsUI {
       this.s.logUrl = v; saveSettings(this.s); app.applySettings('logUrl');
       this.logStatus(v ? 'Adresse enregistrée ✓ — le journal part maintenant toutes les 30 s.' : 'Journal à distance coupé.', v ? 'ok' : '');
     });
+    // Mes appareils : copie de tous les réglages vers un autre appareil (QR code ou lien).
+    $('t-copy').onclick = () => {
+      const box = $('copy-box'); box.hidden = !box.hidden;
+      if (box.hidden) return;
+      this._link = settingsLink(this.s, DEFAULTS);
+      drawQR($('copy-qr'), this._link);
+      $('t-share').hidden = !navigator.share;
+      app.log('Lien de copie des réglages affiché');
+    };
+    const copyStatus = (m, cls) => { const el = $('s-copystatus'); el.hidden = !m; el.className = 'status ' + (cls || ''); el.textContent = m; };
+    $('t-share').onclick = async () => {
+      try { await navigator.share({ title: 'Réglages de Wilson', text: 'Ouvre ce lien sur ton autre appareil pour y installer Wilson avec tes réglages.', url: this._link }); copyStatus('Lien partagé ✓', 'ok'); }
+      catch (e) { if (e.name !== 'AbortError') copyStatus('Partage impossible : utilise « Copier le lien ».', 'err'); }
+    };
+    $('t-copylink').onclick = async () => {
+      try { await navigator.clipboard.writeText(this._link); copyStatus('Lien copié ✓ — colle-le dans un message à toi-même.', 'ok'); }
+      catch (_) { copyStatus('Copie impossible sur cet appareil : utilise le QR code.', 'err'); }
+    };
     $('t-logsend').onclick = async () => {
       if (!app.remote.on) { this.logStatus('Indique d\'abord l\'adresse du script (ou scanne son QR code).', 'err'); return; }
       app.log('Envoi du journal demandé depuis les réglages');
@@ -184,6 +203,11 @@ export class SettingsUI {
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
     $('s-logurl').value = s.logUrl || ''; $('s-logcontent').checked = s.logContent !== false;
+    const sy = $('s-sync'), sys = this.app.sync.state;
+    sy.className = 'status ' + (!this.app.remote.on ? '' : /^à jour/.test(sys) ? 'ok' : sys ? 'err' : '');
+    sy.textContent = !this.app.remote.on ? 'Synchronisation : pas de script sur cet appareil (copie tes réglages depuis le téléphone).'
+      : `Synchronisation des réglages : ${sys || 'vérification en cours…'}`;
+    $('copy-box').hidden = true;
     const ss = this.app._searchState || '', sr = $('s-search');
     sr.className = 'status ' + (!this.app.remote.on ? 'err' : /✓/.test(ss) ? 'ok' : ss ? 'err' : '');
     sr.textContent = !this.app.remote.on ? 'Recherche Internet : pas de script configuré (rubrique « Journal à distance »).'
@@ -214,6 +238,17 @@ export class SettingsUI {
   open() { this.fill(); $('settings').hidden = false; this.app.settingsOpen = true; }
   close() { if (this._scan) this._scan.abort(); $('settings').hidden = true; this.app.settingsOpen = false; clearInterval(this._gz); $('gaze-test').hidden = true; $('t-calib').hidden = true; $('t-gaze').textContent = 'Tester le regard'; }
   showWelcome() { $('w-home').value = this.s.home; $('w-key').value = this.s.apiKey || ''; $('welcome').hidden = false; }
+}
+
+// QR code (bibliothèque qrcode-generator, MIT) dessiné sur un canevas blanc avec sa marge.
+function drawQR(cv, text) {
+  const g = cv.getContext('2d');
+  if (!window.qrcode) { g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); return; }
+  const qr = window.qrcode(0, 'L'); qr.addData(text); qr.make();      // correction « L » : code moins dense (écran net)
+  const n = qr.getModuleCount(), q = 4, cell = Math.max(2, Math.floor(600 / (n + 2 * q)));
+  cv.width = cv.height = cell * (n + 2 * q);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.fillStyle = '#000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) g.fillRect((c + q) * cell, (r + q) * cell, cell, cell);
 }
 
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

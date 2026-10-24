@@ -8,12 +8,13 @@ import { Brain } from './brain.js';
 import { Vision } from './vision.js';
 import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
-import { loadSettings, SettingsUI } from './settings.js';
+import { loadSettings, saveSettings, SettingsUI, DEFAULTS } from './settings.js';
+import { SettingsSync, LOCAL_ONLY, takeSettingsFromHash, mergeInto, shareable } from './sync.js';
 import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -32,8 +33,13 @@ const $ = (id) => document.getElementById(id);
 class App {
   constructor() {
     this.version = VERSION; this.logs = []; this.bootAt = Date.now();
+    const imported = takeSettingsFromHash();     // « …#reglages=… » : réglages copiés depuis un autre appareil (PLAN 2 ter)
     this.settings = loadSettings();
+    if (imported) {   // réglages absents du lien = valeur d'origine
+      mergeInto(this.settings, { ...shareable(DEFAULTS), ...imported }); this.settings._t = imported._t || Date.now(); saveSettings(this.settings); this._imported = true;
+    }
     this.remote = new RemoteLog(this);           // journal à distance (feuille Google lue par Claude)
+    this.sync = new SettingsSync(this);          // mêmes réglages sur tous les appareils
     this._catchErrors();
     this.face = new Face($('face'), { style: this.settings.face });
     this.face.setMood('somnolent'); this.face.setBrightness(0.35);
@@ -123,6 +129,7 @@ class App {
       'Quota économique': this.ecoQuotaUntil && now < this.ecoQuotaUntil ? `en pause : ${this.ecoQuotaMsg || ''}` : 'pas de pause',
       'Voix de la tablette': `${s.ecoVoice || 'automatique'} (${this.voice.voices().length} voix françaises)`,
       'Souvenirs': `${this.memory.facts.length}`,
+      'Réglages communs': this.remote.on ? (this.sync.state || 'pas encore vérifiés') : 'pas de script : réglages propres à cet appareil',
       'Phrases échangées dans le journal': s.logContent === false ? 'masquées' : 'envoyées',
       'Écran': `${screen.width}×${screen.height}, densité ${devicePixelRatio}`,
       'Navigateur': navigator.userAgent,
@@ -161,6 +168,8 @@ class App {
     this._loadQuota();
     this.log(`Wilson ${VERSION} démarré${this.remote.on ? ' (journal à distance actif)' : ''}`);
     setTimeout(() => this.remote.flush(), 20000);   // 1er bilan une fois la vision chargée
+    if (this._imported) { this.log('Réglages copiés depuis un autre appareil'); this.badge('Réglages copiés depuis ton autre appareil ✓', 6000); }
+    setTimeout(() => this.sync.pull(), 3000);       // réglages communs : le plus récent gagne
     this.setState('veille');
     this.applySettings();
   }
@@ -206,8 +215,14 @@ class App {
   _hideWake() { $('wake').hidden = true; }
   async _wakeLock() { try { if ('wakeLock' in navigator) { this._wl = await navigator.wakeLock.request('screen'); } } catch (_) {} }
 
-  applySettings(key) {
+  saveSettingsQuiet() { saveSettings(this.settings); }
+
+  applySettings(key, { fromSync = false } = {}) {
     const s = this.settings;
+    if (key && !fromSync) {
+      if (key === 'logUrl') { if (this.remote.on) this.sync.pull({ adopt: true }); }        // appareil qui rejoint : il prend les réglages communs
+      else if (!LOCAL_ONLY.includes(key)) { s._t = Date.now(); saveSettings(s); this.sync.schedulePush(); }
+    }
     if (s.face !== this.face.styleName) this.face.setStyle(s.face);
     this.eco.setSpeed(s.ecoSpeed);
     if (key === 'apiKey' || key === 'model') {          // nouvelle clé : nouveau quota, on repart de zéro

@@ -96,3 +96,6 @@ textarea.field { resize: vertical; }
   .sheet-card { padding: 16px 18px; }
   .grid { gap: 10px; margin-top: 8px; }
 }
+.copybox { margin-top: 12px; text-align: center; }
+.qr { display: block; width: min(300px, 100%); height: auto; margin: 4px auto 8px; border-radius: 12px; background: #fff; image-rendering: pixelated; }
+.copybox .buttons { justify-content: center; }
