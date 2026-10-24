@@ -2,3 +2,4 @@ _test/
 tests/shots/
 tests/fixtures/*.y4m
 __pycache__/
+tests/fixtures/voix/

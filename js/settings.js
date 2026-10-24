@@ -24,6 +24,7 @@ export const DEFAULTS = {
   home: '', city: '', nightStart: 23, nightEnd: 7,
   camera: true, mirror: false, subtitles: false, face: 'lumiere', brainMode: 'auto', ecoVoice: '', ecoSpeed: 'rapide',
   logUrl: '', logContent: true,
+  crm: false, voitureAuto: true, oreilleSens: 'normal',      // CRM à la voix et mode voiture (PLAN 2 quater)
 };
 export const VOICES = [
   ['Puck', 'enjoué'], ['Achird', 'amical'], ['Charon', 'posé'], ['Fenrir', 'énergique'], ['Umbriel', 'décontracté'],
@@ -78,6 +79,14 @@ export class SettingsUI {
     bind('s-timeout', 'convTimeout', Number); bind('s-barge', 'bargeIn');
     bind('s-home', 'home'); bind('s-city', 'city'); bind('s-night1', 'nightStart', Number); bind('s-night2', 'nightEnd', Number);
     bind('s-cam', 'camera', Boolean, 'checked'); bind('s-mirror', 'mirror', Boolean, 'checked'); bind('s-subs', 'subtitles', Boolean, 'checked');
+
+    // CRM et voiture (PLAN 2 quater)
+    bind('s-crm', 'crm', Boolean, 'checked'); bind('s-carauto', 'voitureAuto', Boolean, 'checked'); bind('s-earsens', 'oreilleSens');
+    $('s-crm').addEventListener('change', () => this.crmStatus(true));
+    $('t-crm').onclick = () => this.crmStatus(true);
+    $('t-car').onclick = () => { this.close(); if (app.car) app.exitCar('réglages'); else app.enterCar('réglages'); };
+    $('t-ear').onclick = () => this.apprendreNom();
+    $('t-eartest').onclick = () => this.testerOreille();
 
     // Journal à distance : l'adresse du script Apps Script (collée ou scannée en QR code) reste sur la tablette.
     bind('s-logcontent', 'logContent', Boolean, 'checked');
@@ -203,6 +212,9 @@ export class SettingsUI {
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
     $('s-logurl').value = s.logUrl || ''; $('s-logcontent').checked = s.logContent !== false;
+    $('s-crm').checked = !!s.crm; $('s-carauto').checked = s.voitureAuto !== false; $('s-earsens').value = s.oreilleSens || 'normal';
+    $('t-car').textContent = this.app.car ? 'Quitter le mode voiture' : 'Mode voiture maintenant';
+    this.crmStatus(false); this.oreilleStatus();
     const sy = $('s-sync'), sys = this.app.sync.state;
     sy.className = 'status ' + (!this.app.remote.on ? '' : /^à jour/.test(sys) ? 'ok' : sys ? 'err' : '');
     sy.textContent = !this.app.remote.on ? 'Synchronisation : pas de script sur cet appareil (copie tes réglages depuis le téléphone).'
@@ -235,8 +247,79 @@ export class SettingsUI {
   }
   renderLog() { const el = $('log'); el.textContent = this.app.logs.join('\n'); el.scrollTop = el.scrollHeight; }
   logStatus(msg, cls) { const el = $('s-logstatus'); el.hidden = !msg; el.className = 'status ' + (cls || ''); el.textContent = msg; }
+  // État du CRM : relié (nombre de contacts, brouillons à valider) ou la raison exacte.
+  async crmStatus(force) {
+    const el = $('s-crmstatus'), a = this.app, show = (m, cls) => { el.hidden = !m; el.className = 'status ' + (cls || ''); el.textContent = m; };
+    if (!a.settings.crm) { show(''); return; }
+    if (!a.remote.on) { show('Il faut d\'abord l\'adresse du script de Wilson (rubrique « Journal à distance ») : c\'est lui qui interroge le CRM.', 'err'); return; }
+    if (!force && a.crm.etat) { const e = a.crm.etat; show(e.ok ? `CRM relié ✓ — ${e.contacts} contacts${e.brouillons ? `, ${e.brouillons} brouillon(s) à valider dans Mes tâches` : ''}.` : `CRM : ${e.erreur || 'pas de réponse'}`, e.ok ? 'ok' : 'err'); if (Date.now() - e.at < 60000) return; }
+    show('Je contacte le CRM…');
+    const e = await a.crm.status(true);
+    if (!e) { show(''); return; }
+    show(e.ok ? `CRM relié ✓ — ${e.contacts} contacts${e.brouillons ? `, ${e.brouillons} brouillon(s) à valider dans Mes tâches` : ''}.`
+      : /action inconnue/.test(e.erreur || '') ? 'Le script de Wilson n\'a pas encore la partie CRM : recolle son code et déploie une nouvelle version.'
+      : `CRM : ${e.erreur || 'pas de réponse'}`, e.ok ? 'ok' : 'err');
+  }
+  oreilleStatus(msg) {
+    const o = this.app.oreille, el = $('ear-box');
+    if (msg) { el.hidden = false; el.innerHTML = msg; return; }
+    el.hidden = false;
+    el.innerHTML = o.ready ? `Oreille prête ✓ (${o.templates.length} « Wilson » appris${o.info && o.info.le ? ` le ${new Date(o.info.le).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })}` : ''}).`
+      : 'Oreille pas encore apprise : en voiture, il faudra toucher l\'écran pour parler.';
+  }
+  // Une phrase captée au micro (début et fin détectés) : Int16 16 kHz, ou null après 12 s de silence.
+  _capturer(job) {
+    const A = this.app.audio;
+    return new Promise((res) => {
+      let t0 = 0; const fin = (v) => { clearTimeout(to); A.off('speechstart', on); A.off('speechend', off); res(v); };
+      const on = () => { t0 = performance.now(); };
+      const off = () => { if (!t0) return; fin(A.recent(performance.now() - t0 + 300)); };
+      const to = setTimeout(() => fin(null), 12000);
+      job.stop = () => fin(null);
+      A.on('speechstart', on); A.on('speechend', off);
+    });
+  }
+  // Apprendre mon nom : 5 fois « Wilson », puis une phrase sans le nom (pour placer le seuil).
+  async apprendreNom() {
+    const app = this.app;
+    if (this._ear) { this._ear.abort = true; if (this._ear.stop) this._ear.stop(); return; }
+    if (app.state === 'conversation' || app.state === 'eveil') app.endConversation('apprentissage du nom');
+    await app.audio.resume();
+    const job = this._ear = { abort: false }, noms = [];
+    $('t-ear').textContent = 'Arrêter';
+    try {
+      for (let i = 0, rate = 0; i < 5 && !job.abort; i++) {
+        this.oreilleStatus(`<b>Dis « Wilson »</b>, seul, naturellement (${i + 1}/5)…`);
+        const pcm = await this._capturer(job);
+        if (job.abort) break;
+        if (!pcm || pcm.length < 16000 * 0.4) { i--; if (++rate > 4) throw new Error('je n\'entends rien'); this.oreilleStatus('Je n\'ai rien entendu : recommence…'); await new Promise((r) => setTimeout(r, 900)); continue; }
+        noms.push(pcm);
+      }
+      if (job.abort) { this.oreilleStatus('Apprentissage arrêté.'); return; }
+      this.oreilleStatus('Maintenant <b>une phrase sans mon nom</b>, par exemple : « Je vais chez un client à Cholet. »');
+      const autre = await this._capturer(job);
+      const r = app.oreille.apprendre(noms, autre ? [autre] : []);
+      app.log(r.ok ? `Oreille apprise : ${r.n} « Wilson », seuil ${r.seuil.toFixed(1)} (écarts ${r.pos.map((x) => x.toFixed(1)).join(' ')}, phrase sans le nom ${r.neg == null ? '—' : r.neg.toFixed(1)})` : 'Oreille : ' + r.why);
+      this.oreilleStatus(r.ok ? 'Oreille prête ✓ — dis « Wilson, … » en voiture. Tu peux la tester ci-dessous.' : 'Raté : ' + r.why + '.');
+      if (app.car) app._carHint();
+    } catch (e) { this.oreilleStatus('Raté : ' + e.message + '.'); }
+    finally { this._ear = null; $('t-ear').textContent = 'Apprendre mon nom'; }
+  }
+  // Tester l'oreille : chaque phrase est notée (reconnue ou non), sans réveiller Wilson.
+  testerOreille() {
+    const app = this.app, o = app.oreille;
+    if (app._earTest) { app._earTest = false; o.onSegment = (r) => app._oreilleLog(r); o.onDetect = (d) => app._onName(d); $('t-eartest').textContent = 'Tester l\'oreille'; this.oreilleStatus(); return; }
+    if (!o.ready) { this.oreilleStatus('Apprends-moi d\'abord ton nom.'); return; }
+    o.reset(); app._earTest = true; $('t-eartest').textContent = 'Arrêter le test';
+    this.oreilleStatus('Parle : « Wilson, qui je vois demain ? », puis une phrase sans mon nom…');
+    o.onDetect = () => {};
+    o.onSegment = (r) => this.oreilleStatus(`${r.oui ? '<b>« Wilson » reconnu ✓</b>' : 'Pas reconnu'} — écart ${r.score === Infinity ? '—' : r.score.toFixed(1)} (limite ${o.limite.toFixed(1)}${!r.oui && r.score < o.presque ? ', presque : Gemini donnerait un second avis' : ''})`);
+  }
   open() { this.fill(); $('settings').hidden = false; this.app.settingsOpen = true; }
-  close() { if (this._scan) this._scan.abort(); $('settings').hidden = true; this.app.settingsOpen = false; clearInterval(this._gz); $('gaze-test').hidden = true; $('t-calib').hidden = true; $('t-gaze').textContent = 'Tester le regard'; }
+  close() {
+    if (this._ear) { this._ear.abort = true; if (this._ear.stop) this._ear.stop(); }
+    if (this.app._earTest) this.testerOreille();
+    if (this._scan) this._scan.abort(); $('settings').hidden = true; this.app.settingsOpen = false; clearInterval(this._gz); $('gaze-test').hidden = true; $('t-calib').hidden = true; $('t-gaze').textContent = 'Tester le regard'; }
   showWelcome() { $('w-home').value = this.s.home; $('w-key').value = this.s.apiKey || ''; $('welcome').hidden = false; }
 }
 

@@ -45,13 +45,13 @@ a { color: var(--amber-2); }
 em { color: var(--ink-3); font-style: normal; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 14px; }
-.group { border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: rgba(255,255,255,0.02); }
+.group { border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: rgba(255,255,255,0.02); min-width: 0; overflow-wrap: anywhere; }
 .row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; font-size: 14px; color: var(--ink-2); }
 .row.check { flex-direction: row; align-items: center; gap: 10px; }
 .row.check input { width: 20px; height: 20px; accent-color: var(--amber); }
 .inline { display: flex; align-items: center; gap: 8px; }
 .field { width: 100%; background: rgba(0,0,0,0.45); color: var(--ink); border: 1px solid var(--line); border-radius: 10px;
-  padding: 11px 12px; font: inherit; font-size: 15px; outline: none; }
+  padding: 11px 12px; font: inherit; font-size: 15px; outline: none; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 .field:focus { border-color: var(--amber); }
 .field.small { width: auto; }
 textarea.field { resize: vertical; }
@@ -87,7 +87,7 @@ textarea.field { resize: vertical; }
 @media (orientation: portrait) and (max-width: 700px) {
   .sheet { padding: 0; align-items: stretch; }
   .sheet-card, .sheet-card.wide { width: 100%; max-height: 100%; border-radius: 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); }
-  .grid { grid-template-columns: 1fr; gap: 12px; }
+  .grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .subtitle { max-width: 92vw; font-size: 16px; bottom: 3vh; }
 }
 /* Paysage très bas (téléphone couché) : moins de hauteur perdue. */
@@ -99,3 +99,31 @@ textarea.field { resize: vertical; }
 .copybox { margin-top: 12px; text-align: center; }
 .qr { display: block; width: min(300px, 100%); height: auto; margin: 4px auto 8px; border-radius: 12px; background: #fff; image-rendering: pixelated; }
 .copybox .buttons { justify-content: center; }
+
+/* ---- CRM à la voix et mode voiture (PLAN 2 quater) ---- */
+.cards { position: fixed; left: 50%; bottom: calc(14vh + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(560px, 92vw); z-index: 5; }
+.cards[hidden], .car[hidden], .carbtn[hidden] { display: none; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 18px 16px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.card-t { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--amber-2); font-weight: 600; }
+.card-n { font-size: 26px; font-weight: 650; margin-top: 4px; }
+.card-s, .card-r { color: var(--ink-2); font-size: 16px; margin-top: 4px; line-height: 1.4; }
+.card-r { color: var(--ink); font-size: 18px; }
+.card-b { display: flex; gap: 10px; margin-top: 14px; }
+.card-go, .card-ok { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 64px; border-radius: 14px; border: none;
+  font: inherit; font-size: 22px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.card-go { background: #2fb35a; color: #fff; }
+.card-ok { background: linear-gradient(180deg, var(--amber-2), var(--amber)); color: #2a1404; }
+.card-x { flex: none; min-height: 64px; padding: 0 18px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--ink); font: inherit; font-size: 17px; cursor: pointer; }
+.carbtn { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 12px; width: 44px; height: 44px; border-radius: 12px; z-index: 4;
+  border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--ink-2); display: flex; align-items: center; justify-content: center; }
+.carbtn svg, .car-t svg { width: 24px; height: 24px; }
+.car { position: fixed; top: 0; left: 0; right: 0; z-index: 4; padding: calc(10px + env(safe-area-inset-top)) 14px 0; pointer-events: none; }
+.car-bar { display: flex; align-items: center; justify-content: space-between; }
+.car-t { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; color: var(--amber-2); }
+.car-bar .btn { pointer-events: auto; padding: 10px 16px; font-size: 15px; }
+.car-hint { text-align: center; color: var(--ink-2); font-size: 18px; margin: 14px 0 0; animation: breathe 3.2s ease-in-out infinite; }
+body.car .carbtn { display: none; }
+body.car canvas#face { opacity: .6; }
+body.car .subtitle { bottom: calc(4vh + env(safe-area-inset-bottom)); font-size: 22px; max-width: 94vw; opacity: 1; line-height: 1.35; }
+body.car .badge { top: calc(64px + env(safe-area-inset-top)); right: auto; left: 50%; transform: translateX(-50%); max-width: 92vw; }
+.sheet { z-index: 10; }

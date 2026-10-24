@@ -15,6 +15,14 @@
 
 <div id="subtitle" class="subtitle" hidden></div>
 <div id="badge" class="badge" hidden></div>
+<div id="cards" class="cards" hidden></div>
+
+<!-- Mode voiture (PLAN 2 quater) : caméra coupée, réveil au nom « Wilson » -->
+<button id="car-btn" class="carbtn" type="button" aria-label="Mode voiture" title="Mode voiture" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M5 17v2M19 17v2M4 13l1.6-4.6A2 2 0 0 1 7.5 7h9a2 2 0 0 1 1.9 1.4L20 13v4H4v-4z"/><circle cx="7.5" cy="14.5" r="1"/><circle cx="16.5" cy="14.5" r="1"/></svg></button>
+<div id="car" class="car" hidden>
+  <div class="car-bar"><span class="car-t"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M5 17v2M19 17v2M4 13l1.6-4.6A2 2 0 0 1 7.5 7h9a2 2 0 0 1 1.9 1.4L20 13v4H4v-4z"/><circle cx="7.5" cy="14.5" r="1"/><circle cx="16.5" cy="14.5" r="1"/></svg> Mode voiture</span><button id="car-exit" class="btn" type="button">Quitter</button></div>
+  <p id="car-hint" class="car-hint"></p>
+</div>
 
 <!-- Démarrage : un toucher est nécessaire pour autoriser le son, le micro et la caméra -->
 <div id="wake" class="wake" hidden>
@@ -116,6 +124,23 @@
           </select></label>
         <div class="buttons wrap"><button id="t-gaze" class="btn">Tester le regard</button><button id="t-calib" class="btn" hidden>Je te regarde : calibrer</button></div>
         <div id="gaze-test" class="eartest" hidden></div>
+      </section>
+
+      <section class="group">
+        <h3>CRM et voiture</h3>
+        <label class="row check"><input id="s-crm" type="checkbox"><span>Relier Wilson à mon CRM : questions sur les clients, appels, tâches et brouillons (rien n'est écrit sans ton accord)</span></label>
+        <p id="s-crmstatus" class="status" hidden></p>
+        <div class="buttons wrap"><button id="t-crm" class="btn">Vérifier le CRM</button></div>
+        <label class="row check" style="margin-top:14px"><input id="s-carauto" type="checkbox"><span>Mode voiture tout seul quand je roule (téléphone, GPS)</span></label>
+        <p class="fine" style="margin:0 0 10px">En voiture, la caméra est coupée et Wilson se réveille quand tu dis « Wilson ». Apprends-lui ta voix une fois, de préférence dans la voiture, moteur allumé : 5 fois « Wilson », puis une phrase sans son nom.</p>
+        <div class="buttons wrap"><button id="t-ear" class="btn">Apprendre mon nom</button><button id="t-eartest" class="btn">Tester l'oreille</button><button id="t-car" class="btn">Mode voiture maintenant</button></div>
+        <div id="ear-box" class="eartest" hidden></div>
+        <label class="row"><span>Oreille</span>
+          <select id="s-earsens" class="field">
+            <option value="strict">Stricte : moins de réveils par erreur</option>
+            <option value="normal">Normale</option>
+            <option value="sensible">Sensible : pour une voiture bruyante</option>
+          </select></label>
       </section>
 
       <section class="group">

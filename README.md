@@ -7,6 +7,8 @@ un visage animé qui voit quand on le regarde, écoute, répond et se souvient.
 - **Réglages** : appui long (1,5 s) sur le visage.
 - **Parler** : le regarder et lui parler (inutile de dire son nom) — ou toucher le visage.
 - **Le couper** : toucher l'écran.
+- **En voiture** (téléphone) : bouton voiture en haut à gauche, ou tout seul en roulant ; Wilson se réveille quand on dit « Wilson ».
+- **CRM** (facultatif) : questions sur les clients, appels, tâches et brouillons, par le script du propriétaire (voir PLAN.md, 2 quater).
 
 Fonctionnement et règles : voir [PLAN.md](PLAN.md).
 
@@ -18,6 +20,10 @@ Fonctionnement et règles : voir [PLAN.md](PLAN.md).
 - La clé API, les souvenirs et le journal restent dans le stockage local de la tablette.
 - Réglages communs à tous les appareils : copiés par un lien (partie « # », jamais envoyée au serveur), puis synchronisés
   par le script Apps Script du propriétaire (propriétés du script, dans son compte Google).
+- CRM (facultatif) : les questions passent par le script Apps Script du propriétaire, qui interroge son CRM avec son
+  propre jeton (le CRM reste en accès « Moi uniquement »). Les fiches utiles sont gardées sur l'appareil pour la journée.
+  Rien n'est écrit dans le CRM sans confirmation ; les comptes rendus, rendez-vous et notes y arrivent en brouillon.
+- Mode voiture : l'oreille qui reconnaît « Wilson » tourne sur le téléphone ; ses empreintes de voix restent dessus.
 - Journal à distance (facultatif) : si l'adresse d'un script Apps Script est indiquée, le journal, les délais et l'état
   de la tablette partent dans une feuille Google du propriétaire (les phrases échangées peuvent être exclues dans les réglages).
 

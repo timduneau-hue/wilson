@@ -43,7 +43,8 @@ const ctx = {
   Logger: { log: (x) => logged.push(x) },
   PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (k in props ? props[k] : null), setProperty: (k, v) => { props[k] = String(v); } }) },
   Utilities: { formatDate: () => '23/10/26 15h30:00' },
-  ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' }) },
+  ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' }), getOAuthToken: () => 'JETON-DE-TIMOTHEE' },
+  DriveApp: { getRootFolder: () => ({ getName: () => 'Mon Drive' }) },
   HtmlService: { createHtmlOutput: (h) => ({ html: h, setTitle(t) { this.title = t; return this; } }) },
 };
 vm.createContext(ctx);
@@ -115,5 +116,25 @@ const u = JSON.parse(post({ action: 'truc' }).text);
 check('Action inconnue : erreur lisible', u.ok === false && /action inconnue/.test(u.erreur));
 ctx.essaiRecherche();
 check('Fonction essaiRecherche', logged.length === 1);
+
+// CRM à la voix : relais vers l'application Web du CRM, avec le jeton de Timothée
+fetched.length = 0;
+let c = JSON.parse(post({ action: 'crm_client', client: 'Gaudin' }).text);
+check('CRM : adresse absente → message clair, rien d\'envoyé', c.ok === false && /CRM_URL/.test(c.erreur) && fetched.length === 0);
+vm.runInContext("CRM_URL = 'https://script.google.com/macros/s/AKfycbCRMCRMCRMCRMCRMCRM/exec';", ctx);
+tavily = (url, o) => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ ok: true, texte: 'Client : Menuiserie Gaudin', recu: JSON.parse(o.payload) }) });
+c = JSON.parse(post({ action: 'crm_client', client: 'Gaudin', histo: true }).text);
+const fc = fetched[0] || { o: {} };
+check('CRM : question transmise telle quelle, en POST, avec le jeton', fc.url.endsWith('AKfycbCRMCRMCRMCRMCRMCRM/exec') && fc.o.method === 'post' && fc.o.headers.Authorization === 'Bearer JETON-DE-TIMOTHEE'
+  && c.ok && c.recu.action === 'crm_client' && c.recu.client === 'Gaudin' && fc.o.followRedirects === true, JSON.stringify(fc.o));
+tavily = () => ({ getResponseCode: () => 200, getContentText: () => '<html>Fonction de script introuvable : doPost</html>' });
+c = JSON.parse(post({ action: 'crm_etat' }).text);
+check('CRM pas encore mis à jour : message clair', c.ok === false && /nouvelle version du CRM/.test(c.erreur), c.erreur);
+tavily = () => ({ getResponseCode: () => 401, getContentText: () => 'Unauthorized' });
+c = JSON.parse(post({ action: 'crm_etat' }).text);
+check('Jeton refusé : il faut lancer essaiCRM', c.ok === false && /essaiCRM/.test(c.erreur), c.erreur);
+tavily = () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ ok: true, contacts: 437 }) });
+logged.length = 0; ctx.essaiCRM();
+check('Fonction essaiCRM (demande Drive, état, journée)', logged.length === 2 && /437/.test(logged[0]));
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);
