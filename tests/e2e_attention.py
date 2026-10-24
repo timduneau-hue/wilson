@@ -38,7 +38,7 @@ async def main():
             conn = {'ws': ws, 'audio': 0, 'end': 0}; conns.append(conn)
             def on_msg(m):
                 d = json.loads(m)
-                if 'setup' in d: ws.send(json.dumps({'setupComplete': {}}))
+                if 'setup' in d: conn['setup'] = d['setup']; ws.send(json.dumps({'setupComplete': {}}))
                 elif 'realtimeInput' in d:
                     if 'audio' in d['realtimeInput']: conn['audio'] += 1
                     if d['realtimeInput'].get('audioStreamEnd'): conn['end'] += 1
@@ -97,6 +97,47 @@ async def main():
         t0 = time.time()
         await page.wait_for_function('wilson.state === "veille"', timeout=16000)
         check('Toujours pas regardé : discussion fermée après ~12 s de veille', 11 <= time.time() - t0 <= 14 and any('plus regardé' in l for l in logs), f"{time.time() - t0:.1f} s")
+
+        # 6b. Corrections du 24/10/26 (journal) : réponses tronquées par l'écho, première phrase ignorée, délais faussés.
+        await page.evaluate("window.__look = true")
+        await page.wait_for_function('wilson.state === "conversation"', timeout=8000)
+        conn = conns[-1]; s = conn['setup']
+        sysp = s['systemInstruction']['parts'][0]['text']
+        check("Consigne (écoute au regard) : tout ce qu'il entend est pour lui, y compris la 1re phrase", 'TOUJOURS pour toi' in sysp and 'la toute première' in sysp and 'ne dis rien du tout' not in sysp)
+        check('Coupure prudente : Google ne coupe plus Wilson sur un bruit (NO_INTERRUPTION)', s.get('realtimeInputConfig', {}).get('activityHandling') == 'NO_INTERRUPTION', str(s.get('realtimeInputConfig')))
+        await page.wait_for_timeout(500)
+        def say(sec):
+            for c in audio_chunks(sec):
+                conn['ws'].send(json.dumps({'serverContent': {'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]}}}))
+        # Réponse en deux morceaux avec un trou de 1,5 s entre les deux (réseau) : le micro reste coupé pendant le trou.
+        say(0.6)
+        await page.wait_for_timeout(1000); a0 = conn['audio']
+        await page.wait_for_timeout(1500)
+        gap = conn['audio'] - a0
+        say(0.6)
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': 'Voilà ma réponse.'}, 'turnComplete': True}}))
+        check("Trou dans sa réponse : micro toujours coupé (l'écho de sa voix ne le coupe plus)", gap == 0, f"{gap} bloc(s) envoyés pendant le trou")
+        await page.wait_for_function('!wilson.audio.playing', timeout=5000); a1 = conn['audio']
+        await page.wait_for_timeout(2500)
+        dbg = await page.evaluate("({mt: wilson._modelTalking, pe: performance.now() - wilson.playEndAt, p: wilson.paused, open: wilson.brain.open, ob: wilson.outLen})")
+        check('… et le micro repart après sa réponse', conn['audio'] >= a1 + 10, f"+{conn['audio'] - a1} en 2,5 s {dbg}")
+        # Tour silencieux (« <no speech> ») : pas de ligne « Délais » trompeuse.
+        n_del = len([l for l in logs if 'Délais (direct)' in l])
+        say(0.05)
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': '<no speech>{pause}'}, 'turnComplete': True}}))
+        await page.wait_for_timeout(400)
+        check('Tour silencieux : pas de « Délais » noté', len([l for l in logs if 'Délais (direct)' in l]) == n_del)
+        # Coupure par Google notée.
+        say(1.0)
+        await page.wait_for_timeout(300)
+        conn['ws'].send(json.dumps({'serverContent': {'interrupted': True}}))
+        await page.wait_for_timeout(200)
+        check('Coupure par Google notée dans le journal', any('Coupé par Google après' in l for l in logs))
+        conn['ws'].send(json.dumps({'serverContent': {'turnComplete': True}}))
+        dn = await page.evaluate("import('./js/remote.js').then(m => [m.deviceName('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/155 Mobile Safari/537.36'), m.deviceName('Mozilla/5.0 (Linux; Android 11; SM-T720) AppleWebKit/537.36 Chrome/155 Safari/537.36'), m.deviceName('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/155 Safari/537.36')])")
+        check('Appareil reconnu : téléphone, tablette, PC', dn == ['téléphone', 'tablette', 'PC'], str(dn))
+        await page.evaluate("wilson.endConversation('test')")
+        await page.wait_for_timeout(300)
 
         # 7. Mode économique : en veille, les phrases ne partent plus ; regardé, elles repartent.
         await page.evaluate("wilson.settings.brainMode = 'eco'")

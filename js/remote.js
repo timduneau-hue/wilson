@@ -42,8 +42,9 @@ export class RemoteLog {
     const lignes = this.q.splice(0), mesures = this.mesures.splice(0);
     let bilan = null;
     try { bilan = this.app.bilan(); } catch (e) { bilan = { Bilan: 'erreur : ' + e.message }; }
-    const appareil = /Mobile/.test(navigator.userAgent) ? 'téléphone' : 'tablette';
-    const body = JSON.stringify({ appareil, version: this.app.version, lignes, mesures, bilan });
+    const appareil = deviceName();
+    // L'appareil est ajouté à la version (colonne B du journal) : on sait d'où vient chaque ligne, sans changer le script.
+    const body = JSON.stringify({ appareil, version: `${this.app.version} · ${appareil}`, _v: this.app.version, lignes, mesures, bilan });
     if (beacon && navigator.sendBeacon) {
       try { if (navigator.sendBeacon(this.url, new Blob([body], { type: 'text/plain;charset=utf-8' }))) { this.sentAt = Date.now(); this.sent++; return true; } } catch (_) {}
     }
@@ -70,6 +71,13 @@ RemoteLog.prototype.ask = async function (payload, signal) {
   const txt = await r.text();
   try { return JSON.parse(txt); } catch (_) { throw new Error(/^ok$/i.test(txt.trim()) ? 'le script déployé ne sait pas encore chercher (ancienne version)' : `réponse illisible du script (${r.status})`); }
 };
+
+export function deviceName(ua = navigator.userAgent) {
+  if (/Android/i.test(ua)) return /Mobile/i.test(ua) ? 'téléphone' : 'tablette';
+  if (/iPhone|iPod/i.test(ua)) return 'téléphone';
+  if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) return 'tablette';
+  return 'PC';
+}
 
 // Lecture d'un QR code avec la caméra de Wilson (adresse du script). onFrame(video) sert à afficher l'aperçu.
 export async function scanQR(video, { timeoutMs = 60000, onFrame, signal } = {}) {

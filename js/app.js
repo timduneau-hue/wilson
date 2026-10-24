@@ -13,10 +13,11 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.10.0';
+const VERSION = '1.10.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
-const TAIL_NOAEC_MS = 450;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce dure un peu plus
+const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
+const TURN_GATE_MS = 5000;        // micro coupé pendant tout le tour de parole de Wilson (trous de réseau compris), 5 s max sans son
 const LOOK_GRACE_MS = 3000;       // R3 : on peut détourner les yeux 3 s ; au-delà, il se met en veille (règle de Timothée, 24/10/26)
 const LOOKED_IDLE_MS = 60000;     // tant qu'on le regarde, il reste à l'écoute, 60 s de silence au plus
 const SEARCH_MAX_MS = 30000;      // outil « chercher » : Wilson a dit qu'il cherchait, il répond quand il a l'info (filet : 30 s)
@@ -330,7 +331,7 @@ class App {
     this.discard = false; this.endAfterSpeech = false; this.brain.handle = null;
     this.lastActivity = performance.now();
     try {
-      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system() });
+      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), interrupts: this.settings.bargeIn === 'directe' });
     } catch (e) {
       this.log('Gemini : ' + e.message);
       this.lastError = e.message;
@@ -628,7 +629,7 @@ class App {
     const want = this.settings.brainMode || 'auto', lines = []; let ok = false, auth = false;
     if (want !== 'eco') {
       try {
-        await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system() });
+        await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), interrupts: this.settings.bargeIn === 'directe' });
         const b = this.brain; this.brain.close(); ok = true;
         lines.push(`Direct ✓ (${b.modelUsed}, configuration ${['complète', 'simplifiée', 'minimale'][b.level]})`);
       } catch (e) {
@@ -668,7 +669,7 @@ class App {
     const eco = mode === 'eco' || mode === 'eco-search';
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
     const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
-Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
+Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, la ville où vous habitez, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
 La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
 L'heure et la date : appelle date_et_heure.`;
     return `Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d'une famille. Ton visage animé montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.
@@ -676,9 +677,10 @@ L'heure et la date : appelle date_et_heure.`;
 Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies toujours : « tu », « ton », « peux-tu », jamais « vous » ni « pourriez-vous », même pour être poli. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles.
 
 Quand parler :
-- On ne t'envoie que ce qui a été dit pendant qu'on te regardait : la personne s'adresse à toi, réponds-lui (pas besoin de ton prénom).
+${!eco && (s.listenMode || 'regard') === 'regard' ? `- Tu n'entends que ce qu'on te dit en te regardant : c'est TOUJOURS pour toi. Réponds à chaque phrase, y compris la toute première (« coucou », une question…), sans attendre qu'on répète.
+- Reste silencieux seulement si tu n'entends que du bruit, la télé, ou l'écho de ta propre voix.` : `- On ne t'envoie que ce qui a été dit pendant qu'on te regardait : la personne s'adresse à toi, réponds-lui (pas besoin de ton prénom).
 - Pendant une discussion, réponds quand on te parle, même si on détourne un instant les yeux.
-- Si les gens parlent entre eux, au téléphone, si c'est la télé, ou si la phrase ne t'est pas destinée : ne dis rien du tout.
+- Si les gens parlent entre eux, au téléphone, si c'est la télé, ou si la phrase ne t'est pas destinée : ne dis rien du tout.`}
 - Si on te coupe la parole, arrête-toi et écoute.
 
 Ta vue : si on te montre quelque chose ou si on te demande ce que tu vois, décris et commente l'image la plus récente. Sinon, ne commente pas l'image.
@@ -714,7 +716,8 @@ Nous sommes ${fmtDate()}.${bat}`;
       const now = performance.now();
       if (this.settings.bargeIn === 'prudente') {
         // Il parle : rien n'est envoyé (le micro, sans annulation d'écho, entend sa voix) ; on le coupe en touchant l'écran (R4).
-        if (this.audio.playing) return;
+        // Y compris pendant un petit trou entre deux morceaux de sa réponse : sinon l'écho de sa voix lui coupait la parole (24/10/26).
+        if (this.audio.playing || (this._modelTalking && now - this._modelTalking < TURN_GATE_MS)) return;
         if (now - this.playEndAt < (this.audio.aec ? TAIL_MS : TAIL_NOAEC_MS)) return;
       }
       if (this.paused) return;                                         // plus regardé : rien ne part (R3, R9)
@@ -728,7 +731,10 @@ Nous sommes ${fmtDate()}.${bat}`;
       this.presenceAt = now;                                   // quelqu'un parle dans la pièce
       if (this.state === 'dodo' && !this._isNight()) { this.setState('veille'); this.face.play('tilt'); }
     });
-    this.audio.on('speechend', () => { if (this.state === 'conversation' && this.mode === 'live') this.lastUserSpeech = this.lastActivity = performance.now(); });
+    this.audio.on('speechend', () => {
+      this._speechEndAt = performance.now() - 440;            // la détection attend 22 blocs de 20 ms de silence
+      if (this.state === 'conversation' && this.mode === 'live') this.lastUserSpeech = this.lastActivity = performance.now();
+    });
     this.audio.on('drained', () => {
       this.playEndAt = performance.now(); this.lastActivity = this.playEndAt; this.face.setTalk(0);
       if (this.endAfterSpeech) { this.endAfterSpeech = false; const id = this.convId; setTimeout(() => id === this.convId && this.endConversation('au revoir'), 700); }
@@ -767,30 +773,35 @@ Nous sommes ${fmtDate()}.${bat}`;
     b.on('audio', (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
       if (!this.audio.playing) { this.barge.n = 0; this.barge.echo = Math.max(-60, this.audio.db); }
-      this._modelOut = (this._modelOut || 0) + 1;
+      this._modelOut = (this._modelOut || 0) + 1; this._modelTalking = performance.now();
       if (!this._liveTurn) {
-        // 1er son de la réponse : délai depuis la fin de la phrase de la personne (R8), pour l'onglet « Délais » du journal.
-        // Si Wilson enchaîne (suite de sa réponse, après une recherche…), ce n'est pas une nouvelle attente : pas de mesure.
-        this._liveTurn = { t: performance.now(), sec: 0 };
-        const u = this.lastUserVoice || 0;
-        if (u > (this.playEndAt || 0) && u > (this._lastTurnAt || 0)) {
-          const s = Math.round((performance.now() - u) / 100) / 10;
-          this.log(`Délais (direct) : 1er son ${s} s après la fin de ta phrase (${this.brain.modelUsed}${this._searchMs ? `, dont recherche ${(this._searchMs / 1000).toFixed(1)} s` : ''})`);
-          this.remote.mesure({ google: s, voix: Math.round((s + 0.06 + (this.audio.ctx.outputLatency || 0)) * 10) / 10, modele: this.brain.modelUsed, reflexion: 'direct',
-            recherche: this._searchMs ? Math.round(this._searchMs / 100) / 10 : null });
-        }
+        // 1er son de la réponse : délai depuis la fin de la phrase de la personne (R8). Noté à la fin du tour, s'il a parlé.
+        // Si Wilson enchaîne (suite de sa réponse, après une recherche…), ce n'est pas une nouvelle attente : pas de délai.
+        const now = performance.now(), e = this._speechEndAt || 0;
+        const fresh = e > (this.playEndAt || 0) && e > (this._lastTurnAt || 0) && !this.audio.speaking;
+        this._liveTurn = { t: now, sec: 0, delay: fresh ? Math.round((now - e) / 100) / 10 : null, search: this._searchMs || 0 };
         this._searchMs = 0;
       }
       this._liveTurn.sec += i16.length / (rate || 24000);
       this.audio.play(i16, rate); this.lastActivity = performance.now();
     });
-    b.on('interrupted', () => { this.audio.flush(); this.discard = false; this.face.setTalk(0); this._liveTurn = null; });
+    b.on('interrupted', () => {
+      // Google a coupé Wilson (il a cru entendre quelqu'un parler) : noté, pour repérer les réponses tronquées.
+      if (this._liveTurn && this._liveTurn.sec > 0.3 && !this.discard) this.log(`Coupé par Google après ${this._liveTurn.sec.toFixed(1)} s de réponse (il a cru entendre parler)`);
+      this.audio.flush(); this.discard = false; this.face.setTalk(0); this._liveTurn = null; this._modelTalking = 0;
+    });
     b.on('turn', ({ user, wilson }) => {
-      this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._lastTurnAt = performance.now();
+      this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._lastTurnAt = performance.now(); this._modelTalking = 0;
       wilson = cleanSpeech(wilson);
       if (user) this.log(`Entendu : « ${user.slice(0, 160)} »`, true);
-      const imgs = this._imgN || 0; this._imgN = 0;
-      if (this._liveTurn && wilson) this.log(`Voix du direct : ${this._liveTurn.sec.toFixed(1)} s reçues, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} image(s) de la caméra envoyée(s)${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
+      const imgs = this._imgN || 0, T = this._liveTurn; this._imgN = 0;
+      if (T && wilson) {
+        const s = T.delay;
+        this.log(`Délais (direct) : 1er son ${s != null ? s + ' s' : '?'} après la fin de ta phrase (${this.brain.modelUsed}${T.search ? `, dont recherche ${(T.search / 1000).toFixed(1)} s` : ''})`);
+        this.remote.mesure({ google: s, voix: s != null ? Math.round((s + 0.06 + (this.audio.ctx.outputLatency || 0)) * 10) / 10 : null, modele: this.brain.modelUsed, reflexion: 'direct',
+          recherche: T.search ? Math.round(T.search / 100) / 10 : null });
+        this.log(`Voix du direct : ${T.sec.toFixed(1)} s reçues, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} image(s) de la caméra envoyée(s)${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
+      }
       this._liveTurn = null; this._outPeak = 0;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
@@ -818,7 +829,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     const handle = this.brain.handle;
     this.brain.close(); this.brain.handle = handle;
     try {
-      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), resume: true });
+      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), resume: true, interrupts: this.settings.bargeIn === 'directe' });
     } catch (e) { this.log('Reconnexion impossible : ' + e.message); this.endConversation('coupure'); }
     this._reconnecting = false;
   }

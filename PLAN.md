@@ -125,7 +125,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 24/10/26 : **version 1.10.0** en ligne.
+État au 24/10/26 : **version 1.10.1** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -142,6 +142,8 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
   - `Délais!A1:L100` : une ligne par réponse (envoi, Google, 1re phrase, voix, complet, modèle, réflexion, relance, recherche) ;
   - `État!A1:B40` : dernier bilan (version, état, vision, images/s du visage, retard, batterie, quotas, navigateur) ;
     « Mis à jour » vieux de plus de 10 min = tablette éteinte, appli fermée ou hors ligne.
+  Colonne B du journal = « version · appareil » (téléphone, tablette ou PC) : seuls les appareils où l'adresse du script a été
+  saisie ou scannée envoient leur journal (et peuvent chercher sur Internet par Tavily).
   La tablette envoie toutes les 30 s par le script « Wilson journal » (code : `apps-script/journal.gs`, déployé par
   Timothée en application Web) ; l'adresse du script est saisie ou scannée (QR code) sur la tablette et n'est pas dans le dépôt.
 
@@ -173,6 +175,13 @@ Historique récent :
   le technique (modèle, mode économique, voix de la tablette, son d'essai) replié dans « Réglages avancés ».
 - 1.10.0 (24/10/26) — le regard pilote tout (R1, R3) : 3 s sans regard → veille, regardé de nouveau → reprise
   instantanée (session gardée 12 s) ; portrait et paysage (rotation libre, visage à pleine largeur, réglages sur une colonne).
+  Retour du 24/10/26 (journal) : Tavily ✓, règle du regard ✓.
+- 1.10.1 (24/10/26) — d'après le journal : réponses tronquées puis « de quoi ? » (l'écho de sa voix, envoyé pendant un trou de
+  sa réponse, faisait couper Wilson par Google) → micro coupé pendant tout son tour de parole, garde 700 ms, et Google ne
+  coupe plus Wilson en coupure prudente (NO_INTERRUPTION) ; 1re phrase ignorée à chaque nouvelle discussion → consigne :
+  avec l'écoute au regard, tout ce qu'il entend lui est adressé ; délais faussés (bruit compté comme voix, tours muets)
+  → mesurés depuis la fin de phrase détectée, notés seulement s'il parle ; coupures par Google notées ; appareil
+  (téléphone, tablette, PC) ajouté à chaque ligne du journal ; ville mémorisée quand on la donne.
 
 En attente :
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;

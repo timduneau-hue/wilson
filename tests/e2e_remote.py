@@ -84,7 +84,7 @@ async def main():
         check('Adresse valide : journal activé et envoyé tout de suite', await page.evaluate('wilson.remote.on') and len(st['posts']) >= 1
               and any('Journal à distance activé' in l['m'] for l in st['posts'][-1]['lignes']), f"{len(st['posts'])} envoi(s)")
         p0 = st['posts'][-1]
-        check('Bilan de la tablette joint (version, vision, navigateur…)', p0['version'] == await page.evaluate('wilson.version') and all(k in p0['bilan'] for k in ['Version', 'État', 'Vision', 'Visage', 'Mode économique', 'Navigateur', 'Batterie']), ', '.join(list(p0['bilan'])[:8]))
+        check('Bilan de la tablette joint (version, vision, navigateur…)', p0['version'].startswith(await page.evaluate('wilson.version') + ' · ') and all(k in p0['bilan'] for k in ['Version', 'État', 'Vision', 'Visage', 'Mode économique', 'Navigateur', 'Batterie']), ', '.join(list(p0['bilan'])[:8]))
         await page.evaluate("document.getElementById('s-close').click()")
 
         # 3. Une réponse : la phrase échangée et les délais partent.

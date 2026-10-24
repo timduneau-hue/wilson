@@ -46,7 +46,8 @@ const QUOTA_SKIP_MS = 6 * 3600000;    // un modèle refusé pour quota est essay
 // Niveau 0 = tout ; 1 = sans options avancées ; 2 = le strict minimum pour parler.
 // La recherche Google n'est plus l'outil intégré de Gemini Live (lent, « Let me check » en anglais, et resté bloqué
 // le 23/10/26) : c'est l'outil « chercher », exécuté par l'appli (voir app.js, PLAN 6 bis).
-function buildSetup({ model, voice, system, level, handle, think }) {
+// interrupts : Google coupe Wilson dès qu'il entend parler (coupure « directe ») ; sinon il finit sa phrase (« prudente »).
+function buildSetup({ model, voice, system, level, handle, think, interrupts = false }) {
   const setup = {
     model: `models/${model}`,
     generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
@@ -62,7 +63,7 @@ function buildSetup({ model, voice, system, level, handle, think }) {
   if (think === false && level <= 1) setup.generationConfig.thinkingConfig = { thinkingBudget: 0 };
   if (level === 0) {
     setup.generationConfig.mediaResolution = 'MEDIA_RESOLUTION_LOW';
-    setup.realtimeInputConfig.activityHandling = 'START_OF_ACTIVITY_INTERRUPTS';
+    setup.realtimeInputConfig.activityHandling = interrupts ? 'START_OF_ACTIVITY_INTERRUPTS' : 'NO_INTERRUPTION';
     setup.contextWindowCompression = { slidingWindow: {} };
   }
   return setup;
@@ -185,7 +186,7 @@ export class Brain {
   // Les réponses « silencieuses » aux outils n'existent qu'avec la configuration complète du modèle 3.8.
   get canSchedule() { return this.level === 0 && /3\.8/.test(this.modelUsed || ''); }
 
-  _open(url, { model, voice, system, resume = true, level = 0, think }) {
+  _open(url, { model, voice, system, resume = true, level = 0, think, interrupts }) {
     countSession();
     return new Promise((resolve, reject) => {
       this._closing = false; this.ready = false;
@@ -193,7 +194,7 @@ export class Brain {
       this.ws = ws;
       const timer = setTimeout(() => { reject(new Error('Délai de connexion dépassé (Google ne répond pas)')); try { ws.close(); } catch (_) {} }, 15000);
       ws.onopen = () => {
-        const setup = buildSetup({ model, voice, system, level, think, handle: resume ? this.handle : null });
+        const setup = buildSetup({ model, voice, system, level, think, interrupts, handle: resume ? this.handle : null });
         ws.send(JSON.stringify({ setup }));
       };
       ws.onmessage = async (e) => {
