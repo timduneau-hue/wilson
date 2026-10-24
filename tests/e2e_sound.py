@@ -109,6 +109,32 @@ async def main():
         check('Retour en prudente : sans annulation d\'écho, le micro marche toujours', lv['aec'] is False and lv['lvl'] > -100, str(lv))
         await page.evaluate("document.getElementById('s-close').click()")
 
+        # Journal du direct : ce qui a été entendu, silences volontaires, marques techniques retirées, images comptées.
+        await page.evaluate("wilson.startConversation('toucher')")
+        await page.wait_for_function('wilson.state === "conversation" && wilson.mode === "live"', timeout=10000)
+        conn = conns[-1]; await page.wait_for_timeout(300)
+        await page.evaluate("wilson._sendFrame(true)")
+        conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'On mange quoi ce soir ?'}}}))
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': '<no speech>{pause}'}, 'turnComplete': True}}))
+        await page.wait_for_timeout(300)
+        check('Silence volontaire : noté « se tait », sans « <no speech> » ni fausse ligne de voix', any('Entendu : « On mange quoi ce soir ? »' in l for l in logs)
+              and any('Wilson se tait' in l for l in logs) and not any('<no speech>' in l for l in logs))
+        for c in audio_chunks(0.6):
+            conn['ws'].send(json.dumps({'serverContent': {'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]}}}))
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': 'Des pâtes ! {pause}'}, 'turnComplete': True}}))
+        await page.wait_for_timeout(300)
+        v = [l for l in logs if 'Voix du direct' in l][-1]
+        check('Ligne « Voix du direct » : images de la caméra comptées', 'image(s) de la caméra' in v and any(l.endswith('Wilson : Des pâtes !') for l in logs), v)
+        await page.evaluate("wilson.endConversation('test')")
+
+        # Arrière-plan / écran éteint : pas pris pour de la lenteur (plus de faux « mode allégé »).
+        r = await page.evaluate("""(async () => { const real = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+          Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+          const t = performance.now(); while (performance.now() - t < 1600) {}          // minuteries bloquées 1,6 s
+          await new Promise((r) => setTimeout(r, 1300)); delete document.hidden;
+          return { lag: wilson.lag, light: !!wilson._light }; })()""")
+        check('Appli en arrière-plan : ni retard compté, ni mode allégé', r['lag'] < 50 and not r['light'] and any('arrière-plan ou écran éteint' in l for l in logs), str(r))
+
         # Batterie : signalée une seule fois jusqu'au rebranchement.
         r = await page.evaluate("""(() => { wilson.battery = { charging: false, level: 0.73 }; wilson._batTold = false;
           const a = wilson._system('eco').includes("plus branchée"), b = wilson._system('eco').includes("plus branchée");

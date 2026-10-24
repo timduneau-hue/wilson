@@ -13,7 +13,7 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.9.0';
+const VERSION = '1.9.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 450;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce dure un peu plus
@@ -58,6 +58,11 @@ class App {
     let lastDrawn = 0, slow = 0;
     setInterval(() => {
       const t = performance.now(), late = t - lastBeat - 1000; lastBeat = t;
+      // Appli en arrière-plan ou écran éteint : le navigateur met les minuteries en pause. Ce n'est pas de la lenteur.
+      if (document.hidden || t - (this._shownAt || 0) < 3000 || late > 10000) {
+        if (late > 400) this.log(`Appli en arrière-plan ou écran éteint pendant ${Math.round(late / 1000)} s`);
+        return;
+      }
       this.lag = this.lag * 0.8 + Math.max(0, late) * 0.2;
       if (late > 400) this.log(`Tablette en retard de ${Math.round(late)} ms`);
       if (t - this._t0 > 30000 && this.lag > 150 && !this._light) { this._light = true; this.face.maxFpsLight = true; this.log('Mode allégé : animation à 30 images/s'); }
@@ -144,7 +149,7 @@ class App {
     }
     if (this.settings.camera) await this._startVision();
     this.sensors.startMotion(); this.sensors.startBattery();
-    this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._wakeLock(); this.audio.resume(); } });
+    this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._shownAt = performance.now(); this._wakeLock(); this.audio.resume(); } });
     if (fromGesture && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
     if (!this.audio.running) this._showWake(); else this._hideWake();
     this.voice.warm();
@@ -635,7 +640,7 @@ La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds
 L'heure et la date : appelle date_et_heure.`;
     return `Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d'une famille. Ton visage animé montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.
 
-Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies toujours la famille (jamais « vous »). Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles.
+Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies toujours : « tu », « ton », « peux-tu », jamais « vous » ni « pourriez-vous », même pour être poli. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles.
 
 Quand parler :
 - On ne t'envoie que ce qui a été dit pendant qu'on te regardait : la personne s'adresse à toi, réponds-lui (pas besoin de ton prénom).
@@ -748,13 +753,18 @@ Nous sommes ${fmtDate()}.${bat}`;
     b.on('interrupted', () => { this.audio.flush(); this.discard = false; this.face.setTalk(0); this._liveTurn = null; });
     b.on('turn', ({ user, wilson }) => {
       this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._lastTurnAt = performance.now();
-      if (this._liveTurn) { this.log(`Voix du direct : ${this._liveTurn.sec.toFixed(1)} s reçues, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %`); this._liveTurn = null; this._outPeak = 0; }
+      wilson = cleanSpeech(wilson);
+      if (user) this.log(`Entendu : « ${user.slice(0, 160)} »`, true);
+      const imgs = this._imgN || 0; this._imgN = 0;
+      if (this._liveTurn && wilson) this.log(`Voix du direct : ${this._liveTurn.sec.toFixed(1)} s reçues, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} image(s) de la caméra envoyée(s)${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
+      this._liveTurn = null; this._outPeak = 0;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
+      else this.log('Wilson se tait (il pense que la phrase n\'était pas pour lui)');
       setTimeout(() => { if (!this.audio.playing) $('subtitle').textContent = ''; }, 5000);
     });
     b.on('heard', (t) => { if (this.state === 'conversation') this.lastActivity = performance.now(); });
-    b.on('said', (t) => { if (this.settings.subtitles) $('subtitle').textContent = t.slice(-220); });
+    b.on('said', (t) => { if (this.settings.subtitles) $('subtitle').textContent = cleanSpeech(t).slice(-220); });
     b.on('toolcall', (calls) => this._tools(calls));
     b.on('toolcancel', (ids) => {        // la personne a coupé Wilson pendant une recherche : on l'abandonne
       for (const id of ids) { const c = this._searches && this._searches.get(id); if (c) { this._searches.delete(id); c.abort(); this.log('Recherche annulée'); } }
@@ -885,7 +895,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     if (!this.vision || !this.brain.open) return;
     const now = performance.now();
     if (!force && now - this.lastFrame < 1000) return;
-    const img = this.vision.snapshot(); if (img) { this.brain.sendImage(img); this.lastFrame = now; }
+    const img = this.vision.snapshot(); if (img) { this.brain.sendImage(img); this.lastFrame = now; this._imgN = (this._imgN || 0) + 1; }
   }
 
   // ---------- capteurs ----------
@@ -993,6 +1003,9 @@ function trimSilence(i16, floorDb) {
   const a = Math.max(0, (first - 15) * W), b = Math.min(i16.length, (last + 13) * W);
   return i16.subarray(a, b);
 }
+
+// Retire les marques techniques que Gemini Live met parfois dans sa transcription (« <no speech>{pause} »).
+function cleanSpeech(t) { return String(t || '').replace(/<[^>]{0,40}>|\{[^}]{0,40}\}/g, ' ').replace(/\s*\[…\]\s*$/, '').replace(/\s+/g, ' ').trim(); }
 
 function shorten(m) { m = (m || 'erreur inconnue').replace(/\s+/g, ' ').trim(); return m.length > 140 ? m.slice(0, 137) + '…' : m; }
 

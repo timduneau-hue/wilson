@@ -120,7 +120,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 23/10/26 : **version 1.9.0** en ligne.
+État au 24/10/26 : **version 1.9.1** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -157,11 +157,17 @@ Historique récent :
   (quota) ; réponse sans Internet en dernier recours ; tutoiement imposé. Le direct tourne désormais avec gemini-3.8-live.
 - 1.9.0 (23/10/26) — recherche Internet gratuite par Tavily via le script (voir section 6 bis). Timothée doit créer un compte
   Tavily, coller la clé dans le script, et déployer une nouvelle version (même adresse : rien à refaire sur la tablette).
+- 24/10/26 : script mis à jour par Timothée, mais la recherche échoue (« Tavily injoignable : Failed to fetch », alors que le
+  journal passe) → cause la plus probable : autorisation « service externe » (UrlFetchApp) jamais accordée. Remède : lancer
+  `essaiRecherche` une fois dans l'éditeur et accepter. Le code du dépôt renvoie désormais l'erreur lisible (try/catch).
+- 1.9.1 (24/10/26) — journal du direct : ce qu'il a entendu, « se tait » au lieu de « <no speech>{pause} », images envoyées
+  et lumière ; appli en arrière-plan (téléphone) plus prise pour de la lenteur (faux « mode allégé ») ; tutoiement renforcé.
+  Vu dans le journal : il a dit « je ne vois rien » à une demande sur une résistance (caméra frontale du téléphone ?) — à vérifier.
 
 En attente :
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;
 - son du mode direct confirmé audible en 1.8.1 (36 s jouées, Timothée a répondu) ;
-- vérifier dans le journal que la recherche passe par Tavily (« Recherche Tavily faite ») ; onglet État → « Recherche Internet » ;
+- vérifier dans le journal que la recherche passe par Tavily (« Recherche Tavily faite ») après `essaiRecherche` ; onglet État → « Recherche Internet » ;
 - les yeux sont-ils fluides ? les réponses assez rapides ? (onglets Délais et État de la feuille, plus besoin de capture) ;
 - il a écrit que « ça ne fonctionne pas comme je voudrais » : préciser ce qui ne va pas (réaction au regard, réponses
   intempestives, coupures…).
