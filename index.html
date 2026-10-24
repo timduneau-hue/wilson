@@ -35,6 +35,7 @@
     <label class="row"><span>Qui vit à la maison ? <em>(facultatif)</em></span></label>
     <textarea id="w-home" class="field" rows="2" placeholder="Ex. : Timothée, sa femme, leurs enfants… et le chat."></textarea>
     <button id="w-go" class="btn primary">Réveiller Wilson</button>
+    <p class="fine"><b>Tu as déjà Wilson sur un autre appareil ?</b> Inutile de tout ressaisir : sur cet autre appareil, ouvre les réglages (appui long sur le visage) → « Copier mes réglages sur un autre appareil », puis scanne le code avec l'appareil photo de celui-ci.</p>
     <p class="fine">La clé reste sur cette tablette. Rien n'est envoyé tant qu'on ne le regarde pas en lui parlant.</p>
   </div>
 </section>
@@ -53,6 +54,20 @@
         <label class="row"><span>Sa voix</span><select id="s-voice" class="field"></select></label>
         <div class="buttons wrap"><button id="t-voice" class="btn primary">Écouter cette voix</button></div>
         <p class="fine" style="margin:6px 0 0">Wilson se présente avec la voix choisie ; elle reste ensuite pour toutes les conversations.</p>
+      </section>
+
+      <section class="group">
+        <h3>Mes appareils</h3>
+        <p class="fine" style="margin:0 0 10px">Les réglages sont les mêmes sur le téléphone, la tablette et le PC, et restent synchronisés. Pour installer Wilson avec tes réglages sur un autre appareil :</p>
+        <div class="buttons wrap"><button id="t-copy" class="btn primary">Copier mes réglages sur un autre appareil</button></div>
+        <div id="copy-box" class="copybox" hidden>
+          <canvas id="copy-qr" class="qr" width="300" height="300"></canvas>
+          <p class="fine">Sur l'autre appareil : scanne ce code avec l'<b>appareil photo</b> (ou Google Lens), ou envoie-toi le lien et ouvre-le.</p>
+          <div class="buttons wrap"><button id="t-share" class="btn">Partager le lien</button><button id="t-copylink" class="btn">Copier le lien</button></div>
+          <p class="fine">Le lien contient ta clé Google : ne l'envoie qu'à toi-même.</p>
+          <p id="s-copystatus" class="status" hidden></p>
+        </div>
+        <p id="s-sync" class="status"></p>
       </section>
 
       <section class="group">
@@ -151,6 +166,7 @@
   </div>
 </section>
 
+<script src="vendor/qrcode/qrcode.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

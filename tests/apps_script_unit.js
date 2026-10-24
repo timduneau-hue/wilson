@@ -31,7 +31,7 @@ const sheets = { 'Journal': fakeSheet('Journal'), 'Délais': fakeSheet('Délais'
 sheets['Journal'].data[0] = ['Date', 'Version', 'Message'];
 sheets['Délais'].data[0] = ['Date', 'Envoi'];
 sheets['État'].data[0] = ['Clé', 'Valeur'];
-let opened = null, locked = 0; const fetched = [], logged = [];
+let opened = null, locked = 0; const fetched = [], logged = [], props = {};
 let tavily = () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ answer: 'Demain à Angers : éclaircies, 9 à 17 °C.', response_time: 0.8,
   results: [{ title: 'Météo Angers', url: 'https://meteo.example/angers', content: 'Samedi : éclaircies, minimales 9 °C, maximales 17 °C. '.repeat(20) }] }) });
 const ctx = {
@@ -41,6 +41,7 @@ const ctx = {
   ContentService: { createTextOutput: (t) => ({ text: t, getContent() { return t; }, setMimeType(m) { this.mime = m; return this; } }), MimeType: { JSON: 'json' } },
   UrlFetchApp: { fetch: (url, o) => { fetched.push({ url, o }); return tavily(url, o); } },
   Logger: { log: (x) => logged.push(x) },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (k in props ? props[k] : null), setProperty: (k, v) => { props[k] = String(v); } }) },
   Utilities: { formatDate: () => '23/10/26 15h30:00' },
   ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' }) },
   HtmlService: { createHtmlOutput: (h) => ({ html: h, setTitle(t) { this.title = t; return this; } }) },
@@ -98,6 +99,20 @@ check('Recherche : rien d\'écrit dans le journal, pas de verrou', sheets['Journ
 tavily = () => ({ getResponseCode: () => 432, getContentText: () => JSON.stringify({ detail: { error: 'This request exceeds your plan\'s set usage limit.' } }) });
 s = JSON.parse(post({ action: 'chercher', question: 'x' }).text);
 check('Recherche : quota Tavily épuisé → message clair', s.ok === false && s.code === 432 && /usage limit/.test(s.erreur), s.erreur);
+// Réglages communs à tous les appareils
+let rg = JSON.parse(post({ action: 'reglages_lire' }).text);
+check('Réglages : rien au départ', rg.ok && rg.reglages === null && rg.t === 0);
+let w = JSON.parse(post({ action: 'reglages_ecrire', t: 100, reglages: { voice: 'Charon', city: 'Angers' } }).text);
+rg = JSON.parse(post({ action: 'reglages_lire' }).text);
+check('Réglages : écrits puis relus', w.ok && w.applique && rg.reglages.voice === 'Charon' && rg.t === 100 && locked === 0);
+w = JSON.parse(post({ action: 'reglages_ecrire', t: 50, reglages: { voice: 'Puck' } }).text);
+rg = JSON.parse(post({ action: 'reglages_lire' }).text);
+check('Réglages : un envoi plus ancien ne remplace pas le plus récent', w.ok && !w.applique && rg.reglages.voice === 'Charon');
+w = JSON.parse(post({ action: 'reglages_ecrire', t: 200, reglages: { voice: 'Zephyr' } }).text);
+check('Réglages : le plus récent gagne', JSON.parse(post({ action: 'reglages_lire' }).text).reglages.voice === 'Zephyr');
+check('Réglages : rien dans la feuille (propriétés du script)', sheets['Journal'].data.every((r) => !JSON.stringify(r).includes('Zephyr')));
+const u = JSON.parse(post({ action: 'truc' }).text);
+check('Action inconnue : erreur lisible', u.ok === false && /action inconnue/.test(u.erreur));
 ctx.essaiRecherche();
 check('Fonction essaiRecherche', logged.length === 1);
 console.log(`\n${ok}/${ok + ko} vérifications OK`);

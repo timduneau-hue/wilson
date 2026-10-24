@@ -1,7 +1,8 @@
 // Wilson — script de Timothée (application Web Apps Script, liée à la feuille « Wilson — journal ») :
 //  1. journal à distance : reçoit le journal de la tablette et le range dans la feuille (Claude la lit pour diagnostiquer) ;
 //  2. recherche Internet : Wilson lui envoie une question, le script interroge Tavily (gratuit : 1 000 recherches par mois)
-//     et renvoie la réponse. La clé Tavily reste ici, dans le Drive de Timothée, jamais dans le code publié.
+//     et renvoie la réponse. La clé Tavily reste ici, dans le Drive de Timothée, jamais dans le code publié ;
+//  3. réglages communs à tous les appareils (téléphone, tablette, PC) : rangés dans les propriétés du script, le plus récent gagne.
 // Déploiement : Déployer → Nouveau déploiement → Application Web → Exécuter en tant que « moi », accès « Tout le monde ».
 // Ouvrir ensuite l'adresse du déploiement : la page affiche un QR code que Wilson scanne (Réglages → Journal à distance).
 
@@ -12,9 +13,13 @@ var TAVILY_CLE = 'COLLE_ICI_TA_CLE_TAVILY';      // ta clé Tavily (app.tavily.c
 
 function doPost(e) {
   var d = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-  if (d.action === 'chercher') {
-    try { return chercher_(d); }
-    catch (err) { return json_({ ok: false, erreur: 'script : ' + String(err && err.message || err) }); }   // ex. autorisation manquante
+  if (d.action) {
+    try {
+      if (d.action === 'chercher') return chercher_(d);
+      if (d.action === 'reglages_lire') return json_(lireReglages_());
+      if (d.action === 'reglages_ecrire') return json_(ecrireReglages_(d));
+      return json_({ ok: false, erreur: 'action inconnue : ' + d.action });
+    } catch (err) { return json_({ ok: false, erreur: 'script : ' + String(err && err.message || err) }); }   // ex. autorisation manquante
   }
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -80,6 +85,21 @@ function chercher_(d) {
     ok: true, reponse: j.answer || '', temps: j.response_time || null,
     resultats: (j.results || []).slice(0, 5).map(function (x) { return { titre: x.title || '', url: x.url || '', extrait: String(x.content || '').slice(0, 500) }; }),
   });
+}
+
+// Réglages communs (un seul exemplaire, dans les propriétés du script : invisibles dans la feuille).
+function lireReglages_() {
+  var o = JSON.parse(PropertiesService.getScriptProperties().getProperty('reglages') || 'null');
+  return { ok: true, reglages: o ? o.reglages : null, t: o ? o.t : 0 };
+}
+function ecrireReglages_(d) {
+  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    var p = PropertiesService.getScriptProperties(), cur = JSON.parse(p.getProperty('reglages') || 'null'), t = +d.t || 0;
+    if (cur && cur.t >= t) return { ok: true, applique: false, t: cur.t };            // déjà plus récent : on garde
+    p.setProperty('reglages', JSON.stringify({ t: t, reglages: d.reglages || {} }));
+    return { ok: true, applique: true, t: t };
+  } finally { lock.releaseLock(); }
 }
 
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }

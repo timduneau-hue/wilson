@@ -30,6 +30,19 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 - Portrait et paysage, téléphone et tablette : l'appli suit la rotation de l'appareil (manifeste « any », verrouillage
   levé en plein écran) ; le visage s'agrandit pour occuper la largeur en portrait ; les réglages passent sur une colonne.
 
+## 2 ter. Une seule configuration pour tous les appareils (règle de Timothée, 24/10/26)
+
+Les réglages sont **les mêmes partout** (téléphone, tablette, PC) ; la configuration de référence est celle du téléphone.
+- **Copier sur un nouvel appareil** : Réglages → « Mes appareils » → « Copier mes réglages sur un autre appareil » affiche un
+  QR code et un lien (partage Android, Quick Share, message à soi-même). Sur l'autre appareil, l'appareil photo du système
+  (ou un clic sur le lien) ouvre Wilson qui importe tout (clé, voix, ville, script…). Le lien porte les réglages dans la
+  partie « # » de l'adresse : elle ne quitte jamais l'appareil (GitHub ne la reçoit pas) et elle est effacée après import.
+- **Ensuite, synchronisation automatique** par le script de Timothée (actions `reglages_lire` / `reglages_ecrire`, stockage
+  dans les propriétés du script, pas dans la feuille) : chaque changement est envoyé, chaque appareil relit au démarrage et
+  toutes les 10 min ; le plus récent gagne.
+- **Restent propres à chaque appareil** : calibrage du regard, sens du regard (miroir), voix de la tablette du mode
+  économique (les voix installées diffèrent d'un appareil à l'autre).
+
 ## 3. Les états (machine à états unique, dans `app.js`)
 
 ```
@@ -67,7 +80,8 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 | `js/sensors.js` | Toucher, mouvement de la tablette, batterie, réseau | API du navigateur |
 | `js/settings.js` | Écran de réglages et premier lancement | — |
 | `js/remote.js` | Journal à distance : journal, délais et bilan → feuille Google « Wilson — journal » (lue par Claude) ; lecture du QR code | `apps-script/journal.gs` |
-| `apps-script/journal.gs` | Script Apps Script de Timothée (application Web) : range le journal dans la feuille ; recherche Internet par Tavily (clé dans le script) | Google Sheets, Tavily |
+| `apps-script/journal.gs` | Script Apps Script de Timothée (application Web) : range le journal dans la feuille ; recherche Internet par Tavily (clé dans le script) ; réglages communs (propriétés du script) | Google Sheets, Tavily |
+| `js/sync.js` | Mêmes réglages partout : lien de copie (#reglages=…), synchronisation par le script | `remote.js` |
 
 ## 5. Choix techniques et pourquoi
 
@@ -125,7 +139,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 24/10/26 : **version 1.11.0** en ligne.
+État au 24/10/26 : **version 1.12.0** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -190,6 +204,11 @@ Historique récent :
 - 1.11.0 (24/10/26) — à la demande de Timothée : plus aucune photo envoyée d'office (R6). Photo nette (1 024 px, résolution
   moyenne) seulement quand on demande à Wilson de regarder : outil « regarder » en direct, champ « regarder » + 2e requête
   en économique. Bilan : ligne « Photos » (nombre prises depuis le démarrage).
+- 1.12.0 (24/10/26) — mêmes réglages sur tous les appareils (section 2 ter) : « Copier mes réglages sur un autre appareil »
+  (QR code à scanner avec l'appareil photo, ou lien partagé), puis synchronisation par le script (actions reglages_lire /
+  reglages_ecrire : Timothée doit recoller `apps-script/journal.gs` et déployer une nouvelle version). Timothée n'arrivait
+  pas à scanner le QR code du script avec la tablette (lecteur intégré à Wilson, caméra frontale) : la copie passe
+  désormais par l'appareil photo du système.
 
 En attente :
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;

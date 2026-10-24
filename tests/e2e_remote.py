@@ -53,7 +53,10 @@ async def main():
                 await route.fulfill(status=200, body='ok'); return
             if st['fail']:
                 await route.abort('internetdisconnected'); return
-            st['posts'].append(json.loads(req.post_data))
+            d = json.loads(req.post_data)
+            if 'action' in d:                           # recherche, réglages communs : pas des envois du journal
+                await route.fulfill(status=200, content_type='text/plain', body='ok'); return
+            st['posts'].append(d)
             await route.fulfill(status=200, content_type='text/plain', body='ok')
         await page.route(re.compile(r'https://script\.google\.com/.*'), script)
 
