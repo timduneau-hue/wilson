@@ -41,6 +41,8 @@ async def main():
                 bad = None
                 if empty_obj_params(s):
                     bad = (1007, f"* GenerateContentRequest.tools[0].function_declarations[3].parameters.properties: should be non-empty for OBJECT type")
+                elif pol == 'noproactive' and 'proactivity' in s:
+                    bad = (1007, 'Invalid JSON payload received. Unknown name "proactivity" at \'setup\': Cannot find field.')
                 elif pol == 'noadv' and 'mediaResolution' in s.get('generationConfig', {}):
                     bad = (1007, 'Invalid JSON payload received. Unknown name "media_resolution" at \'setup.generation_config\'')
                 elif pol in ('only25', 'nothink25') and not s['model'].endswith('native-audio-preview-12-2025'):
@@ -80,6 +82,13 @@ async def main():
         check('Outils maison « chercher » et « regarder » (photo à la demande), 7 outils, sans recherche intégrée',
               not any('googleSearch' in t for t in ss[0]['tools']) and len(fd) == 7 and all(any(f['name'] == n and f.get('behavior') == 'BLOCKING' for f in fd) for n in ('chercher', 'regarder'))
               and ss[0]['generationConfig'].get('mediaResolution') == 'MEDIA_RESOLUTION_MEDIUM')
+
+        check('« Réponds à tout » demandé à Gemini (proactivité coupée)', ss[0].get('proactivity') == {'proactiveAudio': False}, str(ss[0].get('proactivity')))
+        # 1b. Modèle qui ne connaît pas ce réglage → même configuration complète, sans lui (on garde le reste)
+        st['policy'] = 'noproactive'; await page.evaluate('wilson.brain.level = null; wilson.brain.modelUsed = null')
+        ok, info, ss = await converse()
+        check('« Réponds à tout » refusé → même configuration sans ce réglage', ok and info['lv'] == 0 and len(ss) == 2 and 'proactivity' not in ss[-1] and await page.evaluate('wilson.brain.proactive === null'), f"{len(ss)} essais")
+        await page.evaluate('wilson.brain.proactive = false'); st['policy'] = 'strict'
 
         # 2. Google refuse une option avancée → configuration simplifiée
         st['policy'] = 'noadv'; await page.evaluate('wilson.brain.level = null; wilson.brain.modelUsed = null')

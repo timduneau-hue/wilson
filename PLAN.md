@@ -139,7 +139,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 24/10/26 : **version 1.12.0** en ligne.
+État au 24/10/26 : **version 1.12.1** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -209,6 +209,12 @@ Historique récent :
   reglages_ecrire : Timothée doit recoller `apps-script/journal.gs` et déployer une nouvelle version). Timothée n'arrivait
   pas à scanner le QR code du script avec la tablette (lecteur intégré à Wilson, caméra frontale) : la copie passe
   désormais par l'appareil photo du système.
+  Retour (journal 11h35–11h42) : copie vers la tablette ✓, script mis à jour ✓ (« Réglages communs : à jour »), photo à la
+  demande ✓ (« tasse » vue, couleur mal jugée : noire au lieu de bleue), recherche Tavily ✓.
+- 1.12.1 (24/10/26) — d'après ce journal : sans photos, Gemini restait muet après presque chaque réponse de Wilson
+  (la relance rattrapait, avec du retard) → proactivité coupée explicitement (`proactivity.proactiveAudio: false` :
+  il répond à tout ce qu'il entend ; repli sans ce réglage si le modèle le refuse) ; « Salut », « Coucou »… seuls
+  méritent une réponse (relance) ; délai mesuré malgré un tour muet (plus de « ? »).
 
 En attente :
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;

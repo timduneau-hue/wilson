@@ -14,7 +14,7 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.12.0';
+const VERSION = '1.12.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -120,6 +120,7 @@ class App {
       'Visage': `${this.drawFps || 0} images/s${this._light ? ', mode allégé' : ''}${this.face.maxDpr ? ', finesse ' + this.face.maxDpr : ''}`,
       'Retard de la tablette': `${Math.round(this.lag || 0)} ms`,
       'Son': this.audio.describe(),
+      'Réponses du direct': this.brain.proactive === false ? 'répond à tout ce qu\'il entend (proactivité coupée)' : 'Gemini choisit à quoi répondre (réglage refusé par le modèle)',
       'Photos': `seulement à la demande — ${this._photos || 0} prise(s) depuis le démarrage`,
       'Batterie': b ? `${Math.round(b.level * 100)} %${b.charging ? ', branchée' : ', NON branchée'}` : '—',
       'Réseau': navigator.onLine ? 'en ligne' : 'hors ligne',
@@ -226,7 +227,7 @@ class App {
     if (s.face !== this.face.styleName) this.face.setStyle(s.face);
     this.eco.setSpeed(s.ecoSpeed);
     if (key === 'apiKey' || key === 'model') {          // nouvelle clé : nouveau quota, on repart de zéro
-      this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.brain.refused = {}; this.brain.think = false; this.brain._save(); this.eco.modelUsed = null; this.log('Clé ou modèle changé');
+      this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.brain.refused = {}; this.brain.think = false; this.brain.proactive = false; this.brain._save(); this.eco.modelUsed = null; this.log('Clé ou modèle changé');
     }
     if (this.vision) this.vision.mirror = !s.mirror;
     if (key === 'bargeIn' && this.started) {
@@ -834,8 +835,9 @@ Nous sommes ${fmtDate()}.${bat}`;
       this.audio.flush(); this.face.setTalk(0); this._liveTurn = null;
     });
     b.on('turn', ({ user, wilson }) => {
-      this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._lastTurnAt = performance.now(); this._modelTalking = 0;
+      this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._modelTalking = 0;
       wilson = cleanSpeech(wilson);
+      if (wilson) this._lastTurnAt = performance.now();   // un tour muet (puis relance) ne compte pas : délai réellement ressenti
       if (user) this.log(`Entendu : « ${user.slice(0, 160)} »`, true);
       const imgs = this._imgN || 0, T = this._liveTurn; this._imgN = 0;
       if (T && wilson) {
@@ -1124,7 +1126,11 @@ function cleanSpeech(t) {
   return /^[\s.…!?,;:-]*$/.test(t) ? '' : t;      // « ... » seul : il n'a rien dit
 }
 // Une vraie phrase (et pas un bruit transcrit au hasard : « Eh », « Aí. ») : au moins 3 mots, ou une question de 2 mots.
-function realPhrase(t) { const w = String(t || '').trim().split(/\s+/).filter((x) => /[a-zà-ÿ]{2,}/i.test(x)); return w.length >= 3 || (w.length >= 2 && /\?/.test(t)); }
+function realPhrase(t) {
+  const w = String(t || '').trim().split(/\s+/).filter((x) => /[a-zà-ÿ]{2,}/i.test(x));
+  if (/\b(salut|coucou|bonjour|bonsoir|hello|wilson|merci|au revoir|bonne nuit)\b/i.test(t)) return true;   // salutations : on y répond
+  return w.length >= 3 || (w.length >= 2 && /\?/.test(t));
+}
 
 function shorten(m) { m = (m || 'erreur inconnue').replace(/\s+/g, ' ').trim(); return m.length > 140 ? m.slice(0, 137) + '…' : m; }
 
