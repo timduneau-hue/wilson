@@ -120,7 +120,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 24/10/26 : **version 1.9.1** en ligne.
+État au 24/10/26 : **version 1.9.2** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -163,6 +163,9 @@ Historique récent :
 - 1.9.1 (24/10/26) — journal du direct : ce qu'il a entendu, « se tait » au lieu de « <no speech>{pause} », images envoyées
   et lumière ; appli en arrière-plan (téléphone) plus prise pour de la lenteur (faux « mode allégé ») ; tutoiement renforcé.
   Vu dans le journal : il a dit « je ne vois rien » à une demande sur une résistance (caméra frontale du téléphone ?) — à vérifier.
+- 1.9.2 (24/10/26) — réglages réorganisés à la demande de Timothée : « Voix de Wilson » en premier (15 voix, bouton
+  « Écouter cette voix »), « Cerveau » qui explique Gemini (parler) et Tavily (chercher) avec l'état de la recherche,
+  le technique (modèle, mode économique, voix de la tablette, son d'essai) replié dans « Réglages avancés ».
 
 En attente :
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;
