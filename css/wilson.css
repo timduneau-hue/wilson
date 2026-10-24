@@ -83,3 +83,16 @@ textarea.field { resize: vertical; }
 .advanced { margin-top: 12px; border-top: 1px solid rgba(255,255,255,.12); padding-top: 8px; }
 .advanced > summary { cursor: pointer; padding: 6px 0; color: inherit; opacity: .8; font-size: .95em; }
 .advanced[open] > summary { margin-bottom: 6px; }
+/* Portrait (téléphone tenu droit) et petits écrans : réglages sur une colonne, plein écran, sans marge perdue. */
+@media (orientation: portrait) and (max-width: 700px) {
+  .sheet { padding: 0; align-items: stretch; }
+  .sheet-card, .sheet-card.wide { width: 100%; max-height: 100%; border-radius: 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); }
+  .grid { grid-template-columns: 1fr; gap: 12px; }
+  .subtitle { max-width: 92vw; font-size: 16px; bottom: 3vh; }
+}
+/* Paysage très bas (téléphone couché) : moins de hauteur perdue. */
+@media (orientation: landscape) and (max-height: 480px) {
+  .sheet { padding: 8px; }
+  .sheet-card { padding: 16px 18px; }
+  .grid { gap: 10px; margin-top: 8px; }
+}
