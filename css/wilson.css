@@ -80,3 +80,6 @@ textarea.field { resize: vertical; }
 .btn:disabled { opacity: .6; }
 .group .buttons + .status { margin-bottom: 12px; }
 .scan { display: block; width: 100%; max-width: 320px; margin: 10px auto 0; border-radius: 10px; background: #000; transform: scaleX(-1); }
+.advanced { margin-top: 12px; border-top: 1px solid rgba(255,255,255,.12); padding-top: 8px; }
+.advanced > summary { cursor: pointer; padding: 6px 0; color: inherit; opacity: .8; font-size: .95em; }
+.advanced[open] > summary { margin-bottom: 6px; }

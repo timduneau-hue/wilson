@@ -13,7 +13,7 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.9.1';
+const VERSION = '1.9.2';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 450;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce dure un peu plus

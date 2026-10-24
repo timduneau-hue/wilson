@@ -49,25 +49,36 @@
 
     <div class="grid">
       <section class="group">
-        <h3>Cerveau et voix</h3>
-        <label class="row"><span>Clé API Gemini</span><input id="s-key" class="field" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <h3>Voix de Wilson</h3>
+        <label class="row"><span>Sa voix</span><select id="s-voice" class="field"></select></label>
+        <div class="buttons wrap"><button id="t-voice" class="btn primary">Écouter cette voix</button></div>
+        <p class="fine" style="margin:6px 0 0">Wilson se présente avec la voix choisie ; elle reste ensuite pour toutes les conversations.</p>
+      </section>
+
+      <section class="group">
+        <h3>Cerveau</h3>
+        <p class="fine" style="margin:0 0 10px">Wilson réfléchit et parle avec <b>Gemini</b> (Google, gratuit). Pour chercher sur Internet (météo, actualité…), il utilise <b>Tavily</b> par ton script.</p>
+        <p id="s-search" class="status"></p>
+        <label class="row"><span>Clé Google (Gemini)</span><input id="s-key" class="field" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
         <div class="buttons"><button id="t-key" class="btn">Vérifier la clé et la connexion</button></div>
         <p id="s-keystatus" class="status" hidden></p>
-        <label class="row"><span>Modèle</span><input id="s-model" class="field" type="text"></label>
-        <label class="row"><span>Cerveau</span>
-          <select id="s-brain" class="field">
-            <option value="auto">Automatique : direct si possible, sinon économique</option>
-            <option value="live">Direct uniquement (Gemini Live)</option>
-            <option value="eco">Économique uniquement (Gemini Flash + voix de la tablette)</option>
-          </select></label>
-        <label class="row"><span>Mode économique</span>
-          <select id="s-ecospeed" class="field">
-            <option value="rapide">Rapide (Gemini Flash-Lite)</option>
-            <option value="reflechi">Plus réfléchi, un peu plus lent (Gemini Flash)</option>
-          </select></label>
-        <label class="row"><span>Voix en direct</span><select id="s-voice" class="field"></select></label>
-        <label class="row"><span>Voix en mode économique</span><select id="s-ecovoice" class="field"></select></label>
-        <div class="buttons wrap"><button id="t-ecovoice" class="btn">Écouter cette voix</button><button id="t-voice" class="btn">Faire parler Wilson</button><button id="t-chime" class="btn">Son d'essai (mode direct)</button></div>
+        <details class="advanced">
+          <summary>Réglages avancés</summary>
+          <label class="row"><span>Modèle vocal</span><input id="s-model" class="field" type="text"></label>
+          <label class="row"><span>Façon de parler</span>
+            <select id="s-brain" class="field">
+              <option value="auto">Automatique : voix naturelle si possible, sinon voix de la tablette</option>
+              <option value="live">Voix naturelle uniquement (Gemini en direct)</option>
+              <option value="eco">Voix de la tablette uniquement (mode économique)</option>
+            </select></label>
+          <label class="row"><span>Mode économique</span>
+            <select id="s-ecospeed" class="field">
+              <option value="rapide">Rapide</option>
+              <option value="reflechi">Plus réfléchi, un peu plus lent</option>
+            </select></label>
+          <label class="row"><span>Voix de la tablette (mode économique)</span><select id="s-ecovoice" class="field"></select></label>
+          <div class="buttons wrap"><button id="t-ecovoice" class="btn">Écouter la voix de la tablette</button><button id="t-chime" class="btn">Son d'essai</button></div>
+        </details>
       </section>
 
       <section class="group">

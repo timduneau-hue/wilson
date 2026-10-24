@@ -112,7 +112,13 @@ export class SettingsUI {
 
     $('s-close').onclick = () => this.close();
     $('s-reload').onclick = () => location.reload();
-    $('t-voice').onclick = () => { this.close(); app.startConversation('test'); };
+    // Écouter la voix choisie : Wilson se présente avec elle (une conversation en cours est fermée d'abord).
+    $('t-voice').onclick = () => {
+      this.close();
+      if (app.state === 'conversation' || app.state === 'eveil') app.endConversation('essai de voix');
+      app.log(`Essai de la voix ${this.s.voice}`);
+      setTimeout(() => app.startConversation('test'), 400);
+    };
     $('t-chime').onclick = () => { app.audio.resume(); app.audio.chime(); app.log(`Son d'essai joué — son : ${app.audio.describe()}`); };
     $('t-ecovoice').onclick = () => { app.voice.voiceName = this.s.ecoVoice; app.voice.speak("Bonjour ! Je suis Wilson. Voilà ma voix quand je suis en mode économique.").catch(() => {}); };
     if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', () => { if (app.settingsOpen) this.fillVoices(); });
@@ -178,6 +184,10 @@ export class SettingsUI {
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
     $('s-logurl').value = s.logUrl || ''; $('s-logcontent').checked = s.logContent !== false;
+    const ss = this.app._searchState || '', sr = $('s-search');
+    sr.className = 'status ' + (!this.app.remote.on ? 'err' : /✓/.test(ss) ? 'ok' : ss ? 'err' : '');
+    sr.textContent = !this.app.remote.on ? 'Recherche Internet : pas de script configuré (rubrique « Journal à distance »).'
+      : ss ? `Recherche Internet : ${ss}` : 'Recherche Internet : Tavily par ton script (pas encore utilisée depuis le démarrage).';
     const r = this.app.remote;
     if (r.on) this.logStatus(r.sentAt ? `Actif ✓ — dernier envoi à ${new Date(r.sentAt).getHours()}h${String(new Date(r.sentAt).getMinutes()).padStart(2, '0')}${r.fails ? ` (${r.fails} échec(s) depuis, réseau ?)` : ''}.` : 'Actif ✓ — premier envoi dans quelques secondes.', r.fails ? 'err' : 'ok');
     else $('s-logstatus').hidden = true;

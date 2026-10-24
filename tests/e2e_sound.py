@@ -48,7 +48,7 @@ async def main():
             conn = {'ws': ws, 'audio': 0}; conns.append(conn)
             def on_msg(m):
                 d = json.loads(m)
-                if 'setup' in d: ws.send(json.dumps({'setupComplete': {}}))
+                if 'setup' in d: conn['setup'] = d['setup']; ws.send(json.dumps({'setupComplete': {}}))
                 elif 'realtimeInput' in d and 'audio' in d['realtimeInput']: conn['audio'] += 1
             ws.on_message(on_msg)
         await page.route_web_socket(re.compile(r'.*generativelanguage\.googleapis\.com.*'), handler)
@@ -95,10 +95,21 @@ async def main():
 
         # Son d'essai.
         await page.evaluate("wilson.endConversation('test'); wilson.ui.open()")
-        await page.click('#t-chime'); await page.wait_for_timeout(300)
+        await page.click('.advanced > summary'); await page.click('#t-chime'); await page.wait_for_timeout(300)
         check('Bouton « Son d\'essai »', any("Son d'essai joué" in l for l in logs))
 
         # Coupure « directe » : le micro est rouvert AVEC annulation d'écho, l'ancien fermé d'abord.
+        # Réglages lisibles : la voix en premier, Gemini et Tavily expliqués, le technique replié.
+        r = await page.evaluate("""({first: document.querySelector('#settings .group h3').textContent, adv: !document.querySelector('.advanced').contains(document.getElementById('s-voice')),
+          tech: document.querySelector('.advanced').contains(document.getElementById('s-model')), search: document.getElementById('s-search').textContent,
+          voices: document.querySelectorAll('#s-voice option').length})""")
+        check('Réglages : « Voix de Wilson » en premier (15 voix), Recherche Internet indiquée, technique replié', r['first'] == 'Voix de Wilson' and r['adv'] and r['tech'] and r['voices'] == 15 and 'Recherche Internet' in r['search'], str(r))
+        await page.select_option('#s-voice', 'Charon')
+        await page.click('#t-voice'); await page.wait_for_function('wilson.state === "conversation"', timeout=10000)
+        s_last = conns[-1].get('setup') if conns else None
+        vn = ((s_last or {}).get('generationConfig', {}).get('speechConfig', {}).get('voiceConfig', {}).get('prebuiltVoiceConfig', {}) or {}).get('voiceName')
+        check('« Écouter cette voix » : Wilson se présente avec la voix choisie', vn == 'Charon' and any('Essai de la voix Charon' in l for l in logs) and await page.evaluate("wilson.settings.voice === 'Charon' && JSON.parse(localStorage.getItem('wilson.settings')).voice === 'Charon'"))
+        await page.evaluate("wilson.endConversation('test'); wilson.ui.open()")
         await page.select_option('#s-barge', 'directe')
         await page.wait_for_function('window.__gum.length >= 2', timeout=5000); await page.wait_for_timeout(300)
         ev = await page.evaluate('window.__ev')
