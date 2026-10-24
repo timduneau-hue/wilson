@@ -13,7 +13,7 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.10.1';
+const VERSION = '1.10.2';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -777,18 +777,26 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (!this._liveTurn) {
         // 1er son de la réponse : délai depuis la fin de la phrase de la personne (R8). Noté à la fin du tour, s'il a parlé.
         // Si Wilson enchaîne (suite de sa réponse, après une recherche…), ce n'est pas une nouvelle attente : pas de délai.
-        const now = performance.now(), e = this._speechEndAt || 0;
-        const fresh = e > (this.playEndAt || 0) && e > (this._lastTurnAt || 0) && !this.audio.speaking;
-        this._liveTurn = { t: now, sec: 0, delay: fresh ? Math.round((now - e) / 100) / 10 : null, search: this._searchMs || 0 };
+        const now = performance.now(), e = this._speechEndAt || 0, h = this._heardAt || 0, after = Math.max(this.playEndAt || 0, this._lastTurnAt || 0);
+        // Fin de phrase détectée sur la tablette ; à défaut (bruit continu, dehors…), dernier mot transcrit par Google.
+        const end = e > after && !this.audio.speaking ? e : h > after ? h : 0;
+        this._liveTurn = { t: now, sec: 0, delay: end ? Math.round((now - end) / 100) / 10 : null, search: this._searchMs || 0 };
         this._searchMs = 0;
       }
       this._liveTurn.sec += i16.length / (rate || 24000);
       this.audio.play(i16, rate); this.lastActivity = performance.now();
     });
     b.on('interrupted', () => {
-      // Google a coupé Wilson (il a cru entendre quelqu'un parler) : noté, pour repérer les réponses tronquées.
-      if (this._liveTurn && this._liveTurn.sec > 0.3 && !this.discard) this.log(`Coupé par Google après ${this._liveTurn.sec.toFixed(1)} s de réponse (il a cru entendre parler)`);
-      this.audio.flush(); this.discard = false; this.face.setTalk(0); this._liveTurn = null; this._modelTalking = 0;
+      const ours = this.discard;                         // c'est nous qui l'avons coupé (toucher) : déjà silencieux
+      this.discard = false; this._modelTalking = 0;
+      if (!ours && this.settings.bargeIn !== 'directe') {
+        // Coupure prudente : Google signale parfois une interruption (outil de recherche, relance…) alors que personne ne
+        // parle. Ce qui est déjà reçu est joué jusqu'au bout : plus de phrases tronquées (journal du 24/10/26).
+        if (this._liveTurn && this._liveTurn.sec > 0.3) this.log(`Google a interrompu sa réponse après ${this._liveTurn.sec.toFixed(1)} s : la fin déjà reçue est jouée`);
+        return;
+      }
+      if (this._liveTurn && this._liveTurn.sec > 0.3 && !ours) this.log(`Coupé par Google après ${this._liveTurn.sec.toFixed(1)} s de réponse (il a cru entendre parler)`);
+      this.audio.flush(); this.face.setTalk(0); this._liveTurn = null;
     });
     b.on('turn', ({ user, wilson }) => {
       this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._lastTurnAt = performance.now(); this._modelTalking = 0;
@@ -805,10 +813,16 @@ Nous sommes ${fmtDate()}.${bat}`;
       this._liveTurn = null; this._outPeak = 0;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
-      else this.log('Wilson se tait (il pense que la phrase n\'était pas pour lui)');
+      else if (user && realPhrase(user) && this._gazeMode && this.brain.open && !this.paused && this._nudgedFor !== user) {
+        // Écoute au regard : tout ce qu'il entend lui est adressé. Une vraie phrase restée sans réponse (souvent la 1re
+        // d'une discussion, journal du 24/10/26) → on lui demande de répondre, une seule fois.
+        this._nudgedFor = user;
+        this.log('Wilson s\'est tu alors qu\'on lui parlait en le regardant : relance');
+        this.brain.sendText('[On te parlait en te regardant : réponds maintenant, à voix haute, à ce qui vient d\'être dit.]');
+      } else this.log('Wilson se tait (il pense que la phrase n\'était pas pour lui)');
       setTimeout(() => { if (!this.audio.playing) $('subtitle').textContent = ''; }, 5000);
     });
-    b.on('heard', (t) => { if (this.state === 'conversation') this.lastActivity = performance.now(); });
+    b.on('heard', (t) => { if (this.state === 'conversation') this.lastActivity = this._heardAt = performance.now(); });
     b.on('said', (t) => { if (this.settings.subtitles) $('subtitle').textContent = cleanSpeech(t).slice(-220); });
     b.on('toolcall', (calls) => this._tools(calls));
     b.on('toolcancel', (ids) => {        // la personne a coupé Wilson pendant une recherche : on l'abandonne
@@ -927,13 +941,13 @@ Nous sommes ${fmtDate()}.${bat}`;
     this._searchMs = performance.now() - t0;
     this.face.clearEmotion();
     this.brain.respond([{ id: call.id, name: call.name, response: { result } }]);
-    // Filet de sécurité : si Gemini ne dit rien 10 s après le résultat, on lui demande de répondre.
+    // Filet de sécurité : si Gemini ne dit rien 6 s après le résultat, on lui demande de répondre.
     const n = this._modelOut;
     setTimeout(() => {
       if (conv !== this.convId || this._modelOut !== n || !this.brain.open || this.audio.playing) return;
-      this.log('Pas de réponse 10 s après la recherche : relance');
+      this.log('Pas de réponse 6 s après la recherche : relance');
       this.brain.sendText('[Donne maintenant ta réponse à voix haute, en français, à partir du résultat de la recherche.]');
-    }, 10000);
+    }, 6000);
   }
 
   _sendFrame(force) {
@@ -1000,7 +1014,9 @@ Nous sommes ${fmtDate()}.${bat}`;
     if (this.state === 'conversation') {
       const E = this.ecoState, thinking = E && (E.busy || E.cap);
       const searching = !!(this._searches && this._searches.size);
-      if (this.mode === 'live' && !this.paused && (this.audio.speaking || now - this.lastUserSpeech < 1500)) this._sendFrame(false);
+      // Images : 1 par seconde pendant que la personne parle (et juste après), jamais pendant que Wilson parle.
+      const wilsonTalks = this.audio.playing || (this._modelTalking && now - this._modelTalking < TURN_GATE_MS);
+      if (this.mode === 'live' && !this.paused && !wilsonTalks && (this.audio.speaking || now - this.lastUserSpeech < 1500)) this._sendFrame(false);
       const keep = this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
       if (this._gazeMode && !this.continuous) {
@@ -1063,7 +1079,12 @@ function trimSilence(i16, floorDb) {
 }
 
 // Retire les marques techniques que Gemini Live met parfois dans sa transcription (« <no speech>{pause} »).
-function cleanSpeech(t) { return String(t || '').replace(/<[^>]{0,40}>|\{[^}]{0,40}\}/g, ' ').replace(/\s*\[…\]\s*$/, '').replace(/\s+/g, ' ').trim(); }
+function cleanSpeech(t) {
+  t = String(t || '').replace(/<[^>]{0,40}>|\{[^}]{0,40}\}/g, ' ').replace(/\s*\[…\]\s*$/, '').replace(/\s+/g, ' ').trim();
+  return /^[\s.…!?,;:-]*$/.test(t) ? '' : t;      // « ... » seul : il n'a rien dit
+}
+// Une vraie phrase (et pas un bruit transcrit au hasard : « Eh », « Aí. ») : au moins 3 mots, ou une question de 2 mots.
+function realPhrase(t) { const w = String(t || '').trim().split(/\s+/).filter((x) => /[a-zà-ÿ]{2,}/i.test(x)); return w.length >= 3 || (w.length >= 2 && /\?/.test(t)); }
 
 function shorten(m) { m = (m || 'erreur inconnue').replace(/\s+/g, ' ').trim(); return m.length > 140 ? m.slice(0, 137) + '…' : m; }
 

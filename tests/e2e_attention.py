@@ -35,13 +35,15 @@ async def main():
         page.on('console', lambda m: logs.append(m.text)); page.on('pageerror', lambda e: logs.append('PAGEERROR ' + str(e)))
 
         def handler(ws):
-            conn = {'ws': ws, 'audio': 0, 'end': 0}; conns.append(conn)
+            conn = {'ws': ws, 'audio': 0, 'end': 0, 'texts': [], 'images': 0}; conns.append(conn)
             def on_msg(m):
                 d = json.loads(m)
                 if 'setup' in d: conn['setup'] = d['setup']; ws.send(json.dumps({'setupComplete': {}}))
                 elif 'realtimeInput' in d:
                     if 'audio' in d['realtimeInput']: conn['audio'] += 1
                     if d['realtimeInput'].get('audioStreamEnd'): conn['end'] += 1
+                    if 'text' in d['realtimeInput']: conn['texts'].append(d['realtimeInput']['text'])
+                    if 'video' in d['realtimeInput']: conn['images'] += 1
             ws.on_message(on_msg)
         await page.route_web_socket(re.compile(r'.*generativelanguage\.googleapis\.com.*'), handler)
 
@@ -132,8 +134,49 @@ async def main():
         await page.wait_for_timeout(300)
         conn['ws'].send(json.dumps({'serverContent': {'interrupted': True}}))
         await page.wait_for_timeout(200)
-        check('Coupure par Google notée dans le journal', any('Coupé par Google après' in l for l in logs))
+        check('Interruption par Google notée dans le journal', any('Google a interrompu sa réponse' in l or 'Coupé par Google après' in l for l in logs))
         conn['ws'].send(json.dumps({'serverContent': {'turnComplete': True}}))
+        # 6c. Journal du 24/10/26 10h32 : 1re phrase sans réponse, « ... », coupures de Google, images pendant qu'il parle.
+        # Une vraie phrase restée sans réponse → relance (une seule fois) ; un bruit (« Eh ») → rien.
+        conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Salut Wilson, comment ça va ?'}}}))
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': '...'}, 'turnComplete': True}}))
+        await page.wait_for_timeout(300)
+        check('1re phrase sans réponse : Wilson est relancé pour répondre', any('réponds maintenant' in x for x in conn['texts']) and any("Wilson s'est tu alors qu'on lui parlait" in l for l in logs), str(conn['texts'][-1:]))
+        nt = len(conn['texts'])
+        conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Eh'}}}))
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': '<no speech>'}, 'turnComplete': True}}))
+        await page.wait_for_timeout(300)
+        check('Simple bruit (« Eh ») : pas de relance, « ... » compté comme silence', len(conn['texts']) == nt and not any(l.endswith('Wilson : ...') for l in logs))
+        # Google signale une interruption sans que personne ne parle : la fin déjà reçue est jouée (pas de phrase coupée).
+        say(2.0)
+        await page.wait_for_timeout(300)
+        conn['ws'].send(json.dumps({'serverContent': {'interrupted': True}}))
+        await page.wait_for_timeout(300)
+        check('Interruption venue de Google (coupure prudente) : sa phrase continue jusqu\'au bout', await page.evaluate('wilson.audio.playing') and any('la fin déjà reçue est jouée' in l for l in logs))
+        # Pendant qu'il parle, aucune image n'est envoyée (même si le micro croit entendre parler).
+        i0 = conn['images']
+        await page.evaluate("wilson.audio.speaking = true; wilson.lastUserSpeech = performance.now()")
+        await page.wait_for_timeout(1200)
+        check("Pendant qu'il parle : aucune image envoyée", conn['images'] == i0, f"+{conn['images'] - i0}")
+        await page.wait_for_function('!wilson.audio.playing', timeout=5000)
+        conn['ws'].send(json.dumps({'serverContent': {'turnComplete': True}}))
+        await page.wait_for_timeout(300)
+        await page.evaluate("wilson.audio.speaking = true; wilson.lastUserSpeech = performance.now()")
+        await page.wait_for_timeout(2300)
+        await page.evaluate("wilson.audio.speaking = false")
+        check('Quand on lui parle : environ 1 image par seconde', 1 <= conn['images'] - i0 <= 3, f"+{conn['images'] - i0} en 2,3 s")
+        # Délai : à défaut de fin de phrase détectée (bruit continu dehors), dernier mot transcrit par Google.
+        await page.evaluate("wilson.audio.speaking = true")
+        conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Quelle heure est-il ?'}}}))
+        await page.wait_for_timeout(900)
+        say(0.5)
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': 'Il est dix heures.'}, 'turnComplete': True}}))
+        await page.wait_for_timeout(300)
+        await page.evaluate("wilson.audio.speaking = false")
+        d = [l for l in logs if 'Délais (direct)' in l][-1]
+        m = re.search(r'1er son ([\d.]+) s', d)
+        check('Délai mesuré même avec du bruit continu (dernier mot transcrit)', m and 0.7 <= float(m.group(1)) <= 1.7, d)
+
         dn = await page.evaluate("import('./js/remote.js').then(m => [m.deviceName('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/155 Mobile Safari/537.36'), m.deviceName('Mozilla/5.0 (Linux; Android 11; SM-T720) AppleWebKit/537.36 Chrome/155 Safari/537.36'), m.deviceName('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/155 Safari/537.36')])")
         check('Appareil reconnu : téléphone, tablette, PC', dn == ['téléphone', 'tablette', 'PC'], str(dn))
         await page.evaluate("wilson.endConversation('test')")

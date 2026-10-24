@@ -109,9 +109,9 @@ async def main():
         check('Recherche lente : la vraie réponse arrive quand elle est prête (pas d\'abandon)', r.get('id') == 's2' and '2 à 1' in r.get('response', {}).get('result', '') and 11 <= dt <= 15, f"{dt:.1f} s")
         eco['delay'] = 0
 
-        # 3. Gemini reste muet après le résultat : relance au bout de 10 s.
-        await page.wait_for_timeout(10500)
-        check('Gemini muet 10 s après le résultat → relance', any('Donne maintenant ta réponse' in x for x in conn['texts']) and any('relance' in l for l in logs), str(conn['texts'][-1:]))
+        # 3. Gemini reste muet après le résultat : relance au bout de 6 s.
+        await page.wait_for_timeout(6500)
+        check('Gemini muet 6 s après le résultat → relance', any('Donne maintenant ta réponse' in x for x in conn['texts']) and any('relance' in l for l in logs), str(conn['texts'][-1:]))
 
         # 3b. Google refuse la recherche (quota) : même question sans Internet, réponse prudente plutôt que rien.
         eco['quota_web'] = True; eco['reply'] = 'Je ne peux pas vérifier en ligne pour l\'instant, mais en octobre il fait souvent doux.'
