@@ -147,6 +147,21 @@ async def main():
         conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': '<no speech>'}, 'turnComplete': True}}))
         await page.wait_for_timeout(300)
         check('Simple bruit (« Eh ») : pas de relance, « ... » compté comme silence', len(conn['texts']) == nt and not any(l.endswith('Wilson : ...') for l in logs))
+        # « Salut » tout seul mérite une réponse ; le délai compte le tour muet + la relance (délai réellement ressenti).
+        await page.wait_for_function('!wilson.audio.playing', timeout=5000); await page.wait_for_timeout(1000)
+        await page.evaluate("wilson.audio.speaking = false; wilson._speechEndAt = performance.now() - 300")
+        conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Salut'}}}))
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': '<no speech>'}, 'turnComplete': True}}))
+        await page.wait_for_timeout(600)
+        check('« Salut » sans réponse : relance', len(conn['texts']) == nt + 1, str(conn['texts'][-1:]))
+        say(0.5)
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': 'Salut toi !'}, 'turnComplete': True}}))
+        await page.wait_for_timeout(300)
+        d = [l for l in logs if 'Délais (direct)' in l][-1]
+        m = re.search(r'1er son ([\d.]+) s', d)
+        check('Délai après relance : mesuré depuis ta phrase (plus de « ? »)', m and float(m.group(1)) >= 0.8, d)
+        await page.wait_for_function('!wilson.audio.playing', timeout=5000); await page.wait_for_timeout(800)
+        nt = len(conn['texts'])
         # Google signale une interruption sans que personne ne parle : la fin déjà reçue est jouée (pas de phrase coupée).
         say(2.0)
         await page.wait_for_timeout(300)

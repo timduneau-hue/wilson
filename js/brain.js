@@ -47,7 +47,9 @@ const QUOTA_SKIP_MS = 6 * 3600000;    // un modèle refusé pour quota est essay
 // La recherche Google n'est plus l'outil intégré de Gemini Live (lent, « Let me check » en anglais, et resté bloqué
 // le 23/10/26) : c'est l'outil « chercher », exécuté par l'appli (voir app.js, PLAN 6 bis).
 // interrupts : Google coupe Wilson dès qu'il entend parler (coupure « directe ») ; sinon il finit sa phrase (« prudente »).
-function buildSetup({ model, voice, system, level, handle, think, interrupts = false }) {
+// proactive : false = Gemini répond à TOUT ce qu'il entend (il n'entend que ce qu'on lui dit en le regardant) ; sans ce réglage
+// explicite, il jugeait souvent que la phrase n'était pas pour lui et restait muet (journal du 24/10/26, sans photo).
+function buildSetup({ model, voice, system, level, handle, think, interrupts = false, proactive }) {
   const setup = {
     model: `models/${model}`,
     generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
@@ -65,6 +67,7 @@ function buildSetup({ model, voice, system, level, handle, think, interrupts = f
     setup.generationConfig.mediaResolution = 'MEDIA_RESOLUTION_MEDIUM';   // photos rares (à la demande) : plus nettes
     setup.realtimeInputConfig.activityHandling = interrupts ? 'START_OF_ACTIVITY_INTERRUPTS' : 'NO_INTERRUPTION';
     setup.contextWindowCompression = { slidingWindow: {} };
+    if (proactive === false) setup.proactivity = { proactiveAudio: false };
   }
   return setup;
 }
@@ -124,6 +127,7 @@ export class Brain {
     this.inText = ''; this.outText = ''; this._closing = false;
     this.authMode = null;          // 'key' ou 'token' : la méthode qui a marché, retenue pour la suite
     this.think = false;            // false : réflexion coupée (thinkingBudget 0) ; null : réglage refusé par le modèle
+    this.proactive = false;        // false : « réponds à tout » demandé explicitement ; null : réglage refusé par le modèle
     this.refused = {};             // modèle → heure jusqu'à laquelle il passe en dernier (refusé pour quota)
     this._restore();
   }
@@ -131,11 +135,11 @@ export class Brain {
   _restore() {
     try {
       const o = JSON.parse(localStorage.getItem('wilson.live') || 'null');
-      if (o) { this.modelUsed = o.model || null; this.level = o.level ?? null; this.authMode = o.auth || null; this.think = o.think === null ? null : false; this.refused = o.refused || {}; }
+      if (o) { this.modelUsed = o.model || null; this.level = o.level ?? null; this.authMode = o.auth || null; this.think = o.think === null ? null : false; this.proactive = o.proactive === null ? null : false; this.refused = o.refused || {}; }
     } catch (_) {}
   }
   _save() {
-    try { localStorage.setItem('wilson.live', JSON.stringify({ model: this.modelUsed, level: this.level, auth: this.authMode, think: this.think, refused: this.refused })); } catch (_) {}
+    try { localStorage.setItem('wilson.live', JSON.stringify({ model: this.modelUsed, level: this.level, auth: this.authMode, think: this.think, proactive: this.proactive, refused: this.refused })); } catch (_) {}
   }
   on(ev, fn) { this.handlers[ev] = fn; }
   _emit(ev, ...a) { const f = this.handlers[ev]; if (f) try { f(...a); } catch (e) { console.error(ev, e); } }
@@ -165,7 +169,7 @@ export class Brain {
               ? `${WS_ROOT}BidiGenerateContent?key=${encodeURIComponent(key)}`
               : `${WS_ROOT}BidiGenerateContentConstrained?access_token=${encodeURIComponent(await ephemeralToken(key))}`;
             const think = /2\.5/.test(model) ? this.think : undefined;
-            await this._open(url, { ...opts, model, level, think });
+            await this._open(url, { ...opts, model, level, think, proactive: this.proactive });
             const changed = mode !== this.authMode || model !== this.modelUsed || level !== this.level;
             this.authMode = mode; this.modelUsed = model; this.level = level; delete this.refused[model]; this._save();
             if (changed) this._emit('log', `Gemini connecté : ${mode === 'key' ? 'clé' : 'jeton'}, ${model}, configuration ${['complète', 'simplifiée', 'minimale'][level]}${think === false ? ', sans réflexion préalable' : ''}`);
@@ -176,6 +180,7 @@ export class Brain {
             if (kind === 'auth') { authErr = e; continue auth; }      // la clé ne passe pas ainsi : autre méthode
             if (kind === 'quota') { e.quota = true; e.model = model; quotaErr = quotaErr || e; this.refused[model] = Date.now() + QUOTA_SKIP_MS; this._save(); break; }   // quota du modèle : modèle de secours, rien d'autre
             if (kind === 'config' && /think/i.test(e.message) && this.think === false) { this.think = null; this._save(); li--; continue; }   // réglage de réflexion refusé : même niveau, sans lui
+            if (kind === 'config' && /proactiv/i.test(e.message) && this.proactive === false) { this.proactive = null; this._save(); li--; continue; }   // idem pour « réponds à tout »
             if (kind === 'config') continue;                         // un réglage refusé : configuration plus simple
             if (kind === 'model') break;                             // modèle indisponible : modèle de secours
             break auth;                                              // réseau, délai… : inutile d'insister
@@ -189,7 +194,7 @@ export class Brain {
   // Les réponses « silencieuses » aux outils n'existent qu'avec la configuration complète du modèle 3.8.
   get canSchedule() { return this.level === 0 && /3\.8/.test(this.modelUsed || ''); }
 
-  _open(url, { model, voice, system, resume = true, level = 0, think, interrupts }) {
+  _open(url, { model, voice, system, resume = true, level = 0, think, interrupts, proactive }) {
     countSession();
     return new Promise((resolve, reject) => {
       this._closing = false; this.ready = false;
@@ -197,7 +202,7 @@ export class Brain {
       this.ws = ws;
       const timer = setTimeout(() => { reject(new Error('Délai de connexion dépassé (Google ne répond pas)')); try { ws.close(); } catch (_) {} }, 15000);
       ws.onopen = () => {
-        const setup = buildSetup({ model, voice, system, level, think, interrupts, handle: resume ? this.handle : null });
+        const setup = buildSetup({ model, voice, system, level, think, interrupts, proactive, handle: resume ? this.handle : null });
         ws.send(JSON.stringify({ setup }));
       };
       ws.onmessage = async (e) => {
