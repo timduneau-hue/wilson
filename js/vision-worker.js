@@ -13,6 +13,11 @@ const BS = ['eyeLookOutLeft', 'eyeLookInRight', 'eyeLookInLeft', 'eyeLookOutRigh
 
 let fd = null, fdRes = null, landmarker = null, prev = null, V = null, fileset = null;
 const info = { mode: 'mouvement', delegate: '', errors: [] };
+// Appareil où la carte graphique a déjà lâché (« ?cpu=1 ») : processeur seulement, sans essai.
+const CPU_ONLY = /[?&]cpu=1/.test(self.location.search);
+// Santé : la carte graphique de la tablette peut lâcher en cours de route (le 24/10/26, plus aucun regard détecté :
+// Wilson restait figé). Échecs à la suite → retour au processeur ; sur le processeur, repères recréés.
+const health = { lmBad: 0, fixing: false, lastErr: '', debug: {} };
 const LM_OPTS = { runningMode: 'IMAGE', numFaces: 1, outputFacialTransformationMatrixes: true, outputFaceBlendshapes: true,
   minFaceDetectionConfidence: 0.3, minFacePresenceConfidence: 0.3 };
 const makeLandmarker = (delegate) => V.FaceLandmarker.createFromOptions(fileset, {
@@ -29,7 +34,7 @@ async function init() {
     V = self.Vision;
     fileset = await V.FilesetResolver.forVisionTasks(ROOT + 'vendor/mediapipe/wasm');
     for (const delegate of ['CPU', 'GPU']) {
-      try { landmarker = await makeLandmarker(delegate); info.delegate = delegate; tune.lm.cur = delegate; tune.lm.done = delegate === 'GPU'; break; }
+      try { landmarker = await makeLandmarker(delegate); info.delegate = delegate; tune.lm.cur = delegate; tune.lm.done = delegate === 'GPU' || CPU_ONLY; break; }
       catch (e) { info.errors.push(`repères (${delegate}) : ` + (e && e.message || e)); }
     }
   } catch (e) { info.errors.push('MediaPipe : ' + (e && e.message || e)); }
@@ -40,6 +45,7 @@ async function init() {
     importScripts(FD_DIR + 'face_detection.js');
     const f = new self.FaceDetection({ locateFile: (file) => FD_DIR + file });
     f.setOptions({ model: 'full', minDetectionConfidence: 0.5, useCpuInference: true });
+    if (CPU_ONLY) tune.fd.done = true;
     f.onResults((r) => { if (r.image && r.image.close) r.image.close(); fdRes = r; });
     await f.initialize();
     fd = f; info.mode = 'visages';
@@ -82,6 +88,24 @@ function finish(kind, keep) {
   }
   t.cur = keep;
   postMessage({ type: 'tuned', kind, keep, cpu: Math.round(median(t.CPU.slice(WARM))), gpu: t.GPU.length > WARM ? Math.round(median(t.GPU.slice(WARM))) : null, delegate: info.delegate });
+}
+
+// Repères du visage en échec à répétition : on repart sur le processeur (nouvelle instance).
+function lmFailed(kind, err) {
+  if (err) health.lastErr = String(err && err.message || err).slice(0, 200);
+  if (kind === 'empty' && tune.lm.cur !== 'GPU') return;          // sur le processeur, « aucun repère » peut être normal
+  health.lmBad++;
+  const limit = tune.lm.cur === 'GPU' ? 40 : 25;
+  if (health.lmBad < limit || health.fixing) return;
+  health.fixing = true; health.lmBad = 0;
+  const was = tune.lm.cur;
+  makeLandmarker('CPU').then((l) => {
+    const old = landmarker, alt = tune.lm.alt; landmarker = l;
+    for (const x of [old, alt]) if (x && x !== l) { try { x.close(); } catch (_) {} }
+    tune.lm.alt = null; tune.lm.cur = 'CPU'; tune.lm.done = true; info.delegate = 'CPU';
+    postMessage({ type: 'health', kind: 'lm', from: was, delegate: 'CPU', reason: health.lastErr || 'aucun repère alors qu\'un visage est là' });
+  }).catch((e) => postMessage({ type: 'health', kind: 'lm', from: was, error: String(e && e.message || e) }))
+    .finally(() => { health.fixing = false; });
 }
 
 function pageShim() {
@@ -132,8 +156,12 @@ async function analyse(bmp, maxFaces) {
         cg.fillStyle = '#000'; cg.fillRect(0, 0, 256, 256);
         cg.drawImage(bmp, b.cx * W - s / 2, b.cy * H - s / 2, s, s, 0, 0, 256, 256);
         const img = crop.transferToImageBitmap();
-        let r = null; try { r = landmarker.detect(img); } catch (_) {}
+        let r = null, err = null;
+        try { if (health.debug.failLm > 0) { health.debug.failLm--; throw new Error('échec simulé (test)'); } r = landmarker.detect(img); } catch (e) { err = e; }
         img.close();
+        if (err) lmFailed('throw', err);
+        else if (!r || !r.facialTransformationMatrixes || !r.facialTransformationMatrixes.length) { if (b.w > 0.06) lmFailed('empty'); }
+        else health.lmBad = 0;
         if (!r || !r.facialTransformationMatrixes || !r.facialTransformationMatrixes.length) { out.faces.push(null); continue; }
         const bs = {};
         if (r.faceBlendshapes && r.faceBlendshapes[0]) for (const c of r.faceBlendshapes[0].categories) if (BS.includes(c.categoryName)) bs[c.categoryName] = c.score;
@@ -152,11 +180,19 @@ const ready = init();
 let busy = Promise.resolve();
 onmessage = (e) => {
   const d = e.data;
+  if (d.type === 'debug') { Object.assign(health.debug, d); return; }      // tests : pannes simulées
   if (d.type !== 'frame') return;
+  if (health.debug.stall) { try { d.bmp.close(); } catch (_) {} return; }   // test : analyse bloquée
   // Une image à la fois, dans l'ordre ; pendant le chargement des modèles, seulement lumière et mouvement.
   busy = busy.then(async () => {
     try { postMessage(await analyse(d.bmp, d.maxFaces || 2)); }
-    catch (err) { try { d.bmp.close(); } catch (_) {} postMessage({ type: 'result', error: String(err && err.message || err), boxes: null, faces: [], ms: 0, light: 0.5, mn: 0 }); }
+    catch (err) {
+      try { d.bmp.close(); } catch (_) {}
+      // Détecteur de visages sur la carte graphique en panne : retour au processeur.
+      if (fd && tune.fd.cur === 'GPU') { try { fd.setOptions({ useCpuInference: true }); } catch (_) {} tune.fd.cur = 'CPU'; tune.fd.done = true;
+        postMessage({ type: 'health', kind: 'fd', from: 'GPU', delegate: 'CPU', reason: String(err && err.message || err).slice(0, 200) }); }
+      postMessage({ type: 'result', error: String(err && err.message || err), boxes: null, faces: [], ms: 0, light: 0.5, mn: 0 });
+    }
   });
 };
 ready.catch(() => {});

@@ -139,7 +139,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 24/10/26 : **version 1.12.1** en ligne.
+État au 24/10/26 : **version 1.12.2** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -215,6 +215,11 @@ Historique récent :
   (la relance rattrapait, avec du retard) → proactivité coupée explicitement (`proactivity.proactiveAudio: false` :
   il répond à tout ce qu'il entend ; repli sans ce réglage si le modèle le refuse) ; « Salut », « Coucou »… seuls
   méritent une réponse (relance) ; délai mesuré malgré un tour muet (plus de « ? »).
+- 1.12.2 (24/10/26) — tablette « figée, seuls les yeux clignotent » (11h50) : après le passage des repères du regard sur la
+  carte graphique, plus aucun regard détecté (« regard 13 ms », « on le regarde : non »), donc plus d'éveil. La vision se
+  répare seule : repères en échec à répétition → repris sur le processeur (retenu pour l'appareil : `wilson.vision.cpu`) ;
+  détection des visages en panne sur la carte graphique → processeur ; analyse muette 8 s → relancée. Noté dans le
+  journal et le bilan (« relancée n fois, n réparation(s) »).
 
 En attente :
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;

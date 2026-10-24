@@ -20,19 +20,38 @@ export class Vision {
     this.looking = false; this.lookAt = 0; this.faceAt = 0; this.gaze = null; this.faces = 0;
     this._facingN = 0; this._awayN = 0; this.onLook = null; this.forceLook = false; this.calib = { yaw: 0, pitch: 0, down: 0 };
     this.stats = { ms: 0, last: 0, trip: 0, n: 0 };
+    this._lastResult = 0; this.restarts = 0; this.fixes = [];
   }
 
   async start() {
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15, max: 20 } }, audio: false });
     this.video.srcObject = this.stream; await this.video.play();
+    this._startWorker();
+    // Écran éteint / appli en arrière-plan : l'analyse est en pause, ce n'est pas une panne.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this._lastResult = performance.now(); });
+    this._loop();
+  }
+
+  // Analyse en arrière-plan. Si la carte graphique a déjà lâché sur cet appareil, processeur seulement (« ?cpu=1 »).
+  _startWorker() {
     try {
       if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') throw new Error('navigateur trop ancien');
-      this.worker = new Worker(new URL('./vision-worker.js', import.meta.url));
+      let cpu = false; try { cpu = localStorage.getItem('wilson.vision.cpu') === '1'; } catch (_) {}
+      const url = new URL('./vision-worker.js', import.meta.url); if (cpu) url.search = '?cpu=1';
+      this.worker = new Worker(url);
       this.worker.onmessage = (e) => this._onMessage(e.data);
       this.worker.onerror = (e) => { this.errors.push('worker : ' + (e.message || 'erreur')); this._stopWorker(); };
+      this._busy = false; this._lastResult = performance.now();
     } catch (e) { this.errors.push(e.message); this._stopWorker(); }
-    this._loop();
+  }
+  // L'analyse ne répond plus (8 s) : on la relance (Wilson ne doit jamais rester figé).
+  _restartWorker(why) {
+    this.restarts++;
+    this.onInfo && this.onInfo(`Vision : ${why} → analyse relancée`);
+    try { this.worker && this.worker.terminate(); } catch (_) {}
+    this.worker = null; this.gazeReady = false; this.modelsDone = false; this.looking = false;
+    this._startWorker();
   }
 
   stop() { clearTimeout(this._timer); this._stopWorker(); if (this.stream) this.stream.getTracks().forEach((t) => t.stop()); }
@@ -48,6 +67,7 @@ export class Vision {
     this._timer = setTimeout(() => this._loop(), Math.max(1000 / this.fps, (this.stats.last || 0) * 1.5));   // ≤ 2/3 d'un cœur
     if (this.video.readyState < 2 || !this.worker) return;
     const now = performance.now();
+    if (this.modelsDone && !document.hidden && now - this._lastResult > 8000 && this.restarts < 20) return this._restartWorker('plus de réponse de l\'analyse depuis 8 s');
     if (this._busy && now - this._sentAt < 4000) return;          // une image à la fois : jamais de file d'attente
     this._busy = true; this._sentAt = now;
     const maxFaces = this.fps >= 8 && this.stats.n % 2 === 0 ? 2 : 1;   // 2e visage une fois sur deux
@@ -63,6 +83,14 @@ export class Vision {
       if (d.errors && d.errors.length) console.warn('Vision :', d.errors.join(' · '));
       return;
     }
+    if (d.type === 'health') {
+      // La carte graphique a lâché (ou les repères échouaient) : retour au processeur, retenu pour cet appareil.
+      this.delegate = d.delegate || this.delegate;
+      if (d.from === 'GPU') { try { localStorage.setItem('wilson.vision.cpu', '1'); } catch (_) {} }
+      const m = d.error ? `Vision : réparation impossible (${d.error})` : `Vision : ${d.kind === 'fd' ? 'détection des visages' : 'repères du regard'} en échec sur ${d.from === 'GPU' ? 'la carte graphique' : 'le processeur'} (${d.reason}) → repris sur le processeur`;
+      this.fixes.push(m); this.onInfo && this.onInfo(m);
+      return;
+    }
     if (d.type === 'tuned') {
       if (d.kind === 'lm') this.delegate = d.delegate;
       this.tuned = this.tuned || {}; this.tuned[d.kind] = d;
@@ -70,7 +98,7 @@ export class Vision {
       return;
     }
     if (d.type !== 'result') return;
-    const now = performance.now();
+    const now = performance.now(); this._lastResult = now;
     this._busy = false;
     this.stats.trip = now - this._sentAt; this.stats.last = d.ms; this.stats.ms = this.stats.ms ? this.stats.ms * 0.6 + d.ms * 0.4 : d.ms; this.stats.n++;
     this.stats.fd = d.fdMs || 0; this.stats.lm = d.lmMs || 0;
