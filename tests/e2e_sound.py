@@ -125,7 +125,6 @@ async def main():
         await page.evaluate("wilson.startConversation('toucher')")
         await page.wait_for_function('wilson.state === "conversation" && wilson.mode === "live"', timeout=10000)
         conn = conns[-1]; await page.wait_for_timeout(300)
-        await page.evaluate("wilson._sendFrame(true)")
         conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'On mange quoi ce soir ?'}}}))
         conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': '<no speech>{pause}'}, 'turnComplete': True}}))
         await page.wait_for_timeout(300)
@@ -136,7 +135,7 @@ async def main():
         conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': 'Des pâtes ! {pause}'}, 'turnComplete': True}}))
         await page.wait_for_timeout(300)
         v = [l for l in logs if 'Voix du direct' in l][-1]
-        check('Ligne « Voix du direct » : images de la caméra comptées', 'image(s) de la caméra' in v and any(l.endswith('Wilson : Des pâtes !') for l in logs), v)
+        check('Ligne « Voix du direct » : photos à la demande comptées', 'photo(s) prise(s) à la demande' in v and any(l.endswith('Wilson : Des pâtes !') for l in logs), v)
         await page.evaluate("wilson.endConversation('test')")
 
         # Arrière-plan / écran éteint : pas pris pour de la lenteur (plus de faux « mode allégé »).

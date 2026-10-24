@@ -13,7 +13,7 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.10.2';
+const VERSION = '1.11.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -114,6 +114,7 @@ class App {
       'Visage': `${this.drawFps || 0} images/s${this._light ? ', mode allégé' : ''}${this.face.maxDpr ? ', finesse ' + this.face.maxDpr : ''}`,
       'Retard de la tablette': `${Math.round(this.lag || 0)} ms`,
       'Son': this.audio.describe(),
+      'Photos': `seulement à la demande — ${this._photos || 0} prise(s) depuis le démarrage`,
       'Batterie': b ? `${Math.round(b.level * 100)} %${b.charging ? ', branchée' : ', NON branchée'}` : '—',
       'Réseau': navigator.onLine ? 'en ligne' : 'hors ligne',
       'Recherche Internet': this.remote.on ? `Tavily par le script${this._searchState ? ' — dernière : ' + this._searchState : ''}` : 'Gemini seulement (pas de script)',
@@ -353,7 +354,6 @@ class App {
     const all = this.pending; this.pending = null;
     const flat = concat(all);
     for (let i = 0; i < flat.length; i += 3200) this.brain.sendAudio(flat.subarray(i, i + 3200));
-    this._sendFrame(true);
     if (reason === 'test') this.brain.sendText('Présente-toi en une phrase, avec chaleur.');
     if (reason === 'toucher') this.brain.sendText("[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
     this.lastActivity = performance.now();
@@ -477,14 +477,14 @@ class App {
     }
     const ms = (t) => ((t - (req.endAt || tSend)) / 1000).toFixed(1);
     try {
-      const image = this.vision ? this.vision.snapshot(0.7, 384) : null;
-      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, image, text: req.text, hint: req.hint, onPartial, signal: req.ctl.signal });
+      // R6 : aucune photo d'office ; si Wilson doit regarder, il le dit (« regarder ») et une 2e requête part avec la photo.
+      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, text: req.text, hint: req.hint, onPartial, signal: req.ctl.signal });
       if (gate) await gate;                                  // envoi anticipé : fin de phrase confirmée (sinon : annulé)
       if (conv !== this.convId) return;
       this.eco.commit(out, req.text);
       out.reponse = sayable(out.reponse);
       let said = out.reponse, last = out, tSearch = 0;
-      if (!out.pourMoi || notForMe || repeated || (!out.reponse && !out.chercher)) {
+      if (!out.pourMoi || notForMe || repeated || (!out.reponse && !out.chercher && !out.regarder)) {
         if (!emoSet) this.face.clearEmotion();
         E.ignored++;
         this.log(`Pas pour moi (${E.ignored}) : « ${out.entendu.slice(0, 80)} » (${ms(performance.now())} s, ${out.model})`, true);
@@ -495,6 +495,26 @@ class App {
         E.ignored = 0; answered = true; this.lastAnswerAt = performance.now();
         if (!sess && out.reponse) speakChunk(out.reponse);          // réponse hors format : on la dit d'un bloc
         this._applyEco(out, emoSet);
+        // 2e temps (vue) : on lui demande de regarder → photo nette, puis la vraie réponse.
+        const photo = out.regarder ? this._photo() : null;
+        if (out.regarder && conv === this.convId) {
+          emoSet = false;
+          if (!photo) speakChunk("Ma caméra est coupée, je ne peux pas regarder.");
+          else {
+            this.log('Photo prise à la demande (mode économique)', true); this.face.play('tilt');
+            const st3 = { spoken: 0 };
+            try {
+              const out3 = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), image: photo, signal: req.ctl.signal, onPartial: reader(st3),
+                text: `[Photo prise à l'instant, comme demandé. Question : « ${out.entendu || '(voir plus haut)'} ». Regarde la photo et réponds au format JSON demandé ; regarder doit être false.]` });
+              if (conv !== this.convId) return;
+              this.eco.commit(out3, '[Photo prise à la demande]');
+              out3.reponse = sayable(out3.reponse);
+              if (!st3.spoken) speakChunk(out3.reponse || "Je ne vois pas bien, désolé.");
+              this._applyEco(out3, emoSet);
+              said = [said, out3.reponse].filter(Boolean).join(' '); last = out3; out.fin = out.fin || out3.fin;
+            } catch (e) { if (e.name === 'AbortError') throw e; this.log('Photo : ' + e.message); speakChunk("Je n'arrive pas à regarder pour le moment."); }
+          }
+        }
         // 2e temps : une info récente est nécessaire → recherche Google pendant que Wilson dit sa phrase d'attente.
         if (out.chercher && (this.remote.on || !this.eco.noSearch) && conv === this.convId) {
           this.log(`Recherche : « ${out.chercher} »`, true);
@@ -683,7 +703,7 @@ ${!eco && (s.listenMode || 'regard') === 'regard' ? `- Tu n'entends que ce qu'on
 - Si les gens parlent entre eux, au téléphone, si c'est la télé, ou si la phrase ne t'est pas destinée : ne dis rien du tout.`}
 - Si on te coupe la parole, arrête-toi et écoute.
 
-Ta vue : si on te montre quelque chose ou si on te demande ce que tu vois, décris et commente l'image la plus récente. Sinon, ne commente pas l'image.
+Ta vue : tu ne vois rien tant que tu n'as pas pris de photo. ${eco ? 'Si une photo est jointe, sers-t\'en pour répondre ; sinon, quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), mets "regarder" à true et dis seulement une très courte phrase d\'attente.' : 'Quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), dis une très courte phrase (« Je regarde… ») puis appelle regarder.'} Ne prétends jamais voir quelque chose sans photo.
 ${tools}
 ${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (météo, actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
 Langue : parle toujours en français, y compris pour une phrase d'attente.`}
@@ -808,7 +828,7 @@ Nous sommes ${fmtDate()}.${bat}`;
         this.log(`Délais (direct) : 1er son ${s != null ? s + ' s' : '?'} après la fin de ta phrase (${this.brain.modelUsed}${T.search ? `, dont recherche ${(T.search / 1000).toFixed(1)} s` : ''})`);
         this.remote.mesure({ google: s, voix: s != null ? Math.round((s + 0.06 + (this.audio.ctx.outputLatency || 0)) * 10) / 10 : null, modele: this.brain.modelUsed, reflexion: 'direct',
           recherche: T.search ? Math.round(T.search / 100) / 10 : null });
-        this.log(`Voix du direct : ${T.sec.toFixed(1)} s reçues, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} image(s) de la caméra envoyée(s)${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
+        this.log(`Voix du direct : ${T.sec.toFixed(1)} s reçues, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} photo(s) prise(s) à la demande${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
       }
       this._liveTurn = null; this._outPeak = 0;
       if (user || wilson) this.memory.addExchange(user, wilson);
@@ -865,6 +885,12 @@ Nous sommes ${fmtDate()}.${bat}`;
         case 'date_et_heure': out = { result: fmtDate() }; silent = false; break;
         case 'terminer_conversation': { this.endAfterSpeech = true; const id = this.convId; setTimeout(() => { if (id === this.convId && this.endAfterSpeech && !this.audio.playing) this.endConversation('au revoir'); }, 4000); break; }
         case 'chercher': this._search(c, a.question || ''); continue;      // réponse envoyée à la fin de la recherche
+        case 'regarder': {                                                  // R6 : photo seulement quand on la demande
+          const img = this._photo();
+          if (img) { this.brain.sendImage(img); this.log(`Photo prise à la demande${a.quoi ? ` (« ${String(a.quoi).slice(0, 80)} »)` : ''}`, true); this.face.play('tilt'); }
+          out = { result: img ? "Photo prise : décris maintenant ce que tu vois sur l'image que tu viens de recevoir, en répondant à la question." : "La caméra est coupée : dis-le simplement." };
+          silent = false; break;
+        }
         default: out = { error: 'outil inconnu' }; silent = false;
       }
       const r = { id: c.id, name: c.name, response: out }; if (silent && this.brain.canSchedule) r.scheduling = 'SILENT';
@@ -950,11 +976,12 @@ Nous sommes ${fmtDate()}.${bat}`;
     }, 6000);
   }
 
-  _sendFrame(force) {
-    if (!this.vision || !this.brain.open) return;
-    const now = performance.now();
-    if (!force && now - this.lastFrame < 1000) return;
-    const img = this.vision.snapshot(); if (img) { this.brain.sendImage(img); this.lastFrame = now; this._imgN = (this._imgN || 0) + 1; }
+  // Photo nette, prise à la demande (R6) : plus grande et plus nette que les anciennes images automatiques.
+  _photo() {
+    if (!this.vision) return null;
+    const img = this.vision.snapshot(0.85, 1024);
+    if (img) { this._imgN = (this._imgN || 0) + 1; this._photos = (this._photos || 0) + 1; }
+    return img;
   }
 
   // ---------- capteurs ----------
@@ -1014,9 +1041,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     if (this.state === 'conversation') {
       const E = this.ecoState, thinking = E && (E.busy || E.cap);
       const searching = !!(this._searches && this._searches.size);
-      // Images : 1 par seconde pendant que la personne parle (et juste après), jamais pendant que Wilson parle.
-      const wilsonTalks = this.audio.playing || (this._modelTalking && now - this._modelTalking < TURN_GATE_MS);
-      if (this.mode === 'live' && !this.paused && !wilsonTalks && (this.audio.speaking || now - this.lastUserSpeech < 1500)) this._sendFrame(false);
+      // Images : aucune envoyée d'office (R6) ; seulement à la demande (outil « regarder »).
       const keep = this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
       if (this._gazeMode && !this.continuous) {

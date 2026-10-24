@@ -23,7 +23,7 @@ const FMT = 2;                         // version des réglages retenus (1.7.0 :
 
 const EMOTIONS = ['neutre', 'joie', 'rire', 'triste', 'surprise', 'colere', 'curieux', 'reflexion', 'tendresse', 'gene', 'confus', 'peur', 'fier', 'ennui', 'somnolent'];
 const GESTES = ['aucun', 'oui', 'non', 'clin_oeil', 'sautiller', 'pencher_la_tete'];
-const ORDER = ['pour_moi', 'chercher', 'emotion', 'reponse', 'geste', 'memoriser', 'oublier', 'fin', 'entendu'];
+const ORDER = ['pour_moi', 'chercher', 'regarder', 'emotion', 'reponse', 'geste', 'memoriser', 'oublier', 'fin', 'entendu'];
 
 // L'ordre des champs compte : la réponse arrive tôt pour que Wilson commence à parler avant la fin de l'écriture
 // (« chercher » juste avant, la transcription à la fin).
@@ -32,6 +32,7 @@ export const ECO_SCHEMA = {
   properties: {
     pour_moi: { type: 'BOOLEAN' },
     chercher: { type: 'STRING' },
+    regarder: { type: 'BOOLEAN' },
     emotion: { type: 'STRING', enum: EMOTIONS },
     reponse: { type: 'STRING' },
     geste: { type: 'STRING', enum: GESTES },
@@ -59,7 +60,7 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs
       + (canSearch ? ' ; si chercher n\'est pas vide : SEULEMENT une courte phrase d\'attente naturelle (par exemple « Attends, je regarde. »), sans inventer la réponse' : '');
   return `${head}
 {"pour_moi": ${search ? 'true' : 'true si la phrase s\'adresse à toi (on te regardait en la disant : c\'est en général le cas, ou la suite évidente de votre conversation), false si c\'est la télé, un bruit, une phrase coupée ou visiblement adressée à quelqu\'un d\'autre'},
-${chercher} "emotion": "une émotion parmi ${EMOTIONS.join(', ')}",
+${chercher}${search ? '' : ` "regarder": true SEULEMENT si on te demande de regarder ou de décrire quelque chose (ce que tu vois, une couleur, lire, un objet montré, une tenue…) et qu'aucune photo n'est jointe ; alors "reponse" = une très courte phrase d'attente (« Je regarde… »). Sinon false,\n`} "emotion": "une émotion parmi ${EMOTIONS.join(', ')}",
  "reponse": "${reponse}",
  "geste": "${GESTES.join(', ')}",
  "memoriser": ["informations durables à retenir, phrases courtes et autonomes avec les prénoms"],
@@ -320,6 +321,7 @@ export function parseReply(j) {
     entendu: String(o.entendu || '').trim(),
     pourMoi: o.pour_moi !== false && o.pour_moi !== 'false',
     chercher: String(o.chercher || '').trim(),
+    regarder: o.regarder === true || o.regarder === 'true',
     reponse: String(o.reponse || '').trim(),
     emotion: String(o.emotion || 'neutre'),
     geste: String(o.geste || 'aucun'),

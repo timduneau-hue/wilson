@@ -23,7 +23,7 @@ FAKE_TTS = """
 """
 
 async def main():
-    st = {'reqs': [], 'reply': None, 'eco': 'ok', 'think_reject': False}
+    st = {'reqs': [], 'reply': None, 'eco': 'ok', 'think_reject': False, 'replies_seq': []}
     async with async_playwright() as p:
         b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
             f'--use-file-for-fake-audio-capture={S}/fixtures/quiet.wav', '--autoplay-policy=no-user-gesture-required'])
@@ -50,8 +50,8 @@ async def main():
                 await route.fulfill(status=400, content_type='application/json', headers=H, body=json.dumps({'error': {'code': 400, 'message': 'Thinking level "minimal" is not supported for this model.'}})); return
             if st['eco'] == 'quota':
                 await route.fulfill(status=429, content_type='application/json', headers=H, body=json.dumps({'error': {'code': 429, 'message': 'You exceeded your current quota. Please retry later.', 'status': 'RESOURCE_EXHAUSTED'}})); return
-            reply = st['reply'] or {'entendu': 'Test', 'pour_moi': True, 'reponse': 'OK', 'emotion': 'neutre'}
-            order = ['pour_moi', 'emotion', 'reponse', 'geste', 'memoriser', 'oublier', 'fin', 'entendu']
+            reply = (st['replies_seq'].pop(0) if st.get('replies_seq') else None) or st['reply'] or {'entendu': 'Test', 'pour_moi': True, 'reponse': 'OK', 'emotion': 'neutre'}
+            order = ['pour_moi', 'chercher', 'regarder', 'emotion', 'reponse', 'geste', 'memoriser', 'oublier', 'fin', 'entendu']
             reply = {k: reply[k] for k in order if k in reply}
             text = '```json\n' + json.dumps(reply, ensure_ascii=False) + '\n```'
             st['stream_used'] = 'stream' in req.url
@@ -89,10 +89,10 @@ async def main():
         raw = base64.b64decode(wav['data']) if wav else b''
         rate = struct.unpack('<I', raw[24:28])[0] if len(raw) > 44 else 0
         check('Phrase envoyée en WAV 16 kHz (silences retirés)', raw[:4] == b'RIFF' and rate == 16000 and (len(raw) - 44) / 32000 >= 1, f"{(len(raw)-44)/32000:.1f} s")
-        check('Photo de la caméra jointe', any(p_.get('inlineData', {}).get('mimeType') == 'image/jpeg' for p_ in parts))
+        check('Aucune photo jointe d\'office (R6)', not any(p_.get('inlineData', {}).get('mimeType') == 'image/jpeg' for p_ in parts))
         gc = body['generationConfig']
         check('1re requête sans outil (pas de recherche « au cas où »), JSON imposé par schéma, réflexion minimale',
-              'tools' not in body and gc.get('responseMimeType') == 'application/json' and (gc.get('responseSchema') or {}).get('propertyOrdering', [])[:4] == ['pour_moi', 'chercher', 'emotion', 'reponse']
+              'tools' not in body and gc.get('responseMimeType') == 'application/json' and (gc.get('responseSchema') or {}).get('propertyOrdering', [])[:5] == ['pour_moi', 'chercher', 'regarder', 'emotion', 'reponse']
               and 'MODE ÉCONOMIQUE' in body['systemInstruction']['parts'][0]['text'] and gc['thinkingConfig']['thinkingLevel'] == 'minimal', r0['model'])
         lst = await page.evaluate("wilson.face.listenShown")
         check("Plus de halo d'écoute en bas de l'écran", lst < 0.02, f"{lst:.3f}")
@@ -122,6 +122,22 @@ async def main():
         check('Suite de la conversation sans redire « Wilson »', len(st['reqs']) == n + 1, f"{len(st['reqs']) - n} requête")
         check('Historique de la conversation transmis', len(hist) == 3 and 'Moustache' in json.dumps(hist[0], ensure_ascii=False), f"{len(hist)} messages")
         await page.wait_for_function('!wilson.voice.speaking', timeout=5000)
+
+        # 2b. Photo à la demande (R6) : « regarder » → phrase d'attente, puis 2e requête avec une photo nette.
+        n = len(st['reqs'])
+        st['replies_seq'] = [{'pour_moi': True, 'regarder': True, 'emotion': 'curieux', 'reponse': 'Je regarde…', 'entendu': 'De quelle couleur est mon pull ?'},
+                             {'pour_moi': True, 'regarder': False, 'emotion': 'joie', 'reponse': 'Ton pull est bleu marine.', 'entendu': ''}]
+        await page.wait_for_timeout(1200)
+        await page.evaluate("window.__voice()")
+        await page.wait_for_function("window.__spoken.includes('Ton pull est bleu marine.')", timeout=10000)
+        r1, r2 = st['reqs'][n]['body'], st['reqs'][n + 1]['body']
+        img2 = next((p_['inlineData'] for p_ in r2['contents'][-1]['parts'] if p_.get('inlineData', {}).get('mimeType') == 'image/jpeg'), None)
+        check('Regarder (économique) : 1re requête sans photo, 2e avec une photo nette', not any(p_.get('inlineData', {}).get('mimeType') == 'image/jpeg' for p_ in r1['contents'][-1]['parts'])
+              and img2 is not None and len(img2['data']) > 1000 and 'Photo prise' in json.dumps(r2['contents'][-1], ensure_ascii=False), f"{len(st['reqs']) - n} requêtes")
+        check('… phrase d\'attente puis réponse', (await page.evaluate('window.__spoken'))[-2:] == ['Je regarde…', 'Ton pull est bleu marine.'])
+        st['replies_seq'] = []
+        # (la fausse voix de ce test ne met pas les phrases en file : la 1re ne finit qu'au filet de sécurité, d'où l'attente)
+        await page.wait_for_function('!wilson.voice.speaking', timeout=15000)
 
         # 3. Les gens parlent entre eux → silence
         st['reply'] = {'entendu': 'On mange à quelle heure ?', 'pour_moi': False, 'reponse': '', 'emotion': 'neutre'}

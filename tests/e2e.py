@@ -82,7 +82,13 @@ async def main():
         check('Consigne système contient les règles et la date', ('TOUJOURS pour toi' in s['systemInstruction']['parts'][0]['text'] or 'ne dis rien du tout' in s['systemInstruction']['parts'][0]['text']) and 'Nous sommes' in s['systemInstruction']['parts'][0]['text'])
         await page.wait_for_timeout(1200)
         check('Tampon envoyé (≥ 3 s d\'audio avant/pendant le prénom)', conn['audio_bytes'] >= 16000 * 3, f"{conn['audio_bytes'] / 16000:.1f}s, 1er bloc {conn['first_audio_len']} éch.")
-        check('Image caméra envoyée au réveil', conn['images'] >= 1, f"{conn['images']} image(s)")
+        check('Aucune image envoyée au réveil (photo seulement à la demande)', conn['images'] == 0, f"{conn['images']} image(s)")
+        # Photo à la demande : l'outil « regarder » envoie une seule photo nette, puis répond.
+        send(conn, {'toolCall': {'functionCalls': [{'id': 'r1', 'name': 'regarder', 'args': {'quoi': 'la couleur de mon pull'}}]}})
+        await page.wait_for_timeout(500)
+        tr = {x['id']: x for x in conn['tool_responses']}
+        check('« Regarder » : une photo envoyée, puis la réponse à l\'outil', conn['images'] == 1 and 'Photo prise' in tr.get('r1', {}).get('response', {}).get('result', '')
+              and 'scheduling' not in tr.get('r1', {}), f"{conn['images']} image(s), {json.dumps(tr.get('r1'), ensure_ascii=False)[:120]}")
 
         # --- Réponse de Wilson : émotion + mémoire + voix ---
         send(conn, {'toolCall': {'functionCalls': [

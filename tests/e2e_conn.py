@@ -77,14 +77,15 @@ async def main():
         ok, info, ss = await converse()
         check('Config complète acceptée du 1er coup (plus de paramètres vides)', ok and len(ss) == 1 and info['lv'] == 0 and not empty_obj_params(ss[0]), f"{len(ss)} essai(s), {info}")
         fd = ss[0]['tools'][0]['functionDeclarations']
-        check('Recherche par l\'outil maison « chercher » (plus la recherche intégrée, restée bloquée) + 6 outils',
-              not any('googleSearch' in t for t in ss[0]['tools']) and len(fd) == 6 and any(f['name'] == 'chercher' and f.get('behavior') == 'BLOCKING' for f in fd))
+        check('Outils maison « chercher » et « regarder » (photo à la demande), 7 outils, sans recherche intégrée',
+              not any('googleSearch' in t for t in ss[0]['tools']) and len(fd) == 7 and all(any(f['name'] == n and f.get('behavior') == 'BLOCKING' for f in fd) for n in ('chercher', 'regarder'))
+              and ss[0]['generationConfig'].get('mediaResolution') == 'MEDIA_RESOLUTION_MEDIUM')
 
         # 2. Google refuse une option avancée → configuration simplifiée
         st['policy'] = 'noadv'; await page.evaluate('wilson.brain.level = null; wilson.brain.modelUsed = null')
         ok, info, ss = await converse()
         check('Réglage refusé → repli sur config simplifiée', ok and info['lv'] == 1 and len(ss) == 2, f"{len(ss)} essais, niveau {info['lv']}")
-        check('… outils (mémoire, émotions, chercher) conservés', ok and len(ss[-1].get('tools', [{}])[0].get('functionDeclarations', [])) == 6)
+        check('… outils (mémoire, émotions, chercher, regarder) conservés', ok and len(ss[-1].get('tools', [{}])[0].get('functionDeclarations', [])) == 7)
         ok2, info2, ss2 = await converse()
         check('… niveau retenu : 1 seul essai la fois suivante', ok2 and len(ss2) == 1, f"{len(ss2)} essai(s)")
 
