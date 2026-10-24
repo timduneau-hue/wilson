@@ -12,7 +12,10 @@ var TAVILY_CLE = 'COLLE_ICI_TA_CLE_TAVILY';      // ta clé Tavily (app.tavily.c
 
 function doPost(e) {
   var d = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-  if (d.action === 'chercher') return chercher_(d);
+  if (d.action === 'chercher') {
+    try { return chercher_(d); }
+    catch (err) { return json_({ ok: false, erreur: 'script : ' + String(err && err.message || err) }); }   // ex. autorisation manquante
+  }
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
