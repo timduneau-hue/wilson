@@ -135,7 +135,8 @@ export class Face {
     const W = Math.max(2, Math.round(w * dpr)), H = Math.max(2, Math.round(h * dpr));
     if (W === this.W && H === this.H) return;
     this.dpr = dpr; this.cv.width = this.W = W; this.cv.height = this.H = H;
-    this.S = Math.min(W / 1000, H / 740);           // repère virtuel 1000 × 740
+    // Repère virtuel 1000 × 740. En portrait, le visage occupe toute la largeur (marges latérales réduites).
+    this.S = H > W * 1.1 ? Math.min(W / 640, H / 740) : Math.min(W / 1000, H / 740);
     if (this.style.resize) this.style.resize();
   }
 

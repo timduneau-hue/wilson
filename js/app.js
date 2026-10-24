@@ -13,10 +13,12 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog } from './remote.js';
 
-const VERSION = '1.9.2';
+const VERSION = '1.10.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 450;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce dure un peu plus
+const LOOK_GRACE_MS = 3000;       // R3 : on peut détourner les yeux 3 s ; au-delà, il se met en veille (règle de Timothée, 24/10/26)
+const LOOKED_IDLE_MS = 60000;     // tant qu'on le regarde, il reste à l'écoute, 60 s de silence au plus
 const SEARCH_MAX_MS = 30000;      // outil « chercher » : Wilson a dit qu'il cherchait, il répond quand il a l'info (filet : 30 s)
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
 const ECO_SPEC_MS = 250;          // envoi anticipé : la phrase part dès ce silence, Wilson ne parle qu'à la fin confirmée (PLAN 6 bis)
@@ -106,7 +108,7 @@ class App {
     const d = (t) => { const x = new Date(t); return `${pad(x.getDate())}/${pad(x.getMonth() + 1)}/${String(x.getFullYear()).slice(2)} ${pad(x.getHours())}h${pad(x.getMinutes())}`; };
     return {
       'Version': VERSION, 'Démarré le': d(this.bootAt), 'État': this.state, 'Cerveau en cours': this.mode || '—', 'Réglage cerveau': s.brainMode,
-      'Écoute': s.listenMode, 'Coupure': s.bargeIn, 'Fin de conversation': `${s.convTimeout} s`,
+      'Écoute': `${s.listenMode}${this._gazeMode ? ' (regard actif : veille après 3 s sans regard)' : ''}${this.paused ? ', EN VEILLE (plus regardé)' : ''}`, 'Coupure': s.bargeIn, 'Fin de conversation': `${s.convTimeout} s`,
       'Vision': v ? `${v.mode}, regard ${v.gazeReady ? 'prêt' : v.modelsDone ? 'indisponible' : 'en chargement'} (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}), analyse ${Math.round(v.stats.ms || 0)} ms (visages ${Math.round(v.stats.fd || 0)}, regard ${Math.round(v.stats.lm || 0)}), ${v.faces || 0} visage(s), on le regarde : ${v.looking ? 'oui' : 'non'}${v.errors.length ? ' — ' + v.errors.join(' · ') : ''}` : 'caméra coupée',
       'Visage': `${this.drawFps || 0} images/s${this._light ? ', mode allégé' : ''}${this.face.maxDpr ? ', finesse ' + this.face.maxDpr : ''}`,
       'Retard de la tablette': `${Math.round(this.lag || 0)} ms`,
@@ -150,7 +152,8 @@ class App {
     if (this.settings.camera) await this._startVision();
     this.sensors.startMotion(); this.sensors.startBattery();
     this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._shownAt = performance.now(); this._wakeLock(); this.audio.resume(); } });
-    if (fromGesture && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+    if (fromGesture && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => this._freeRotation()).catch(() => {});
+    this._freeRotation();
     if (!this.audio.running) this._showWake(); else this._hideWake();
     this.voice.warm();
     this._loadQuota();
@@ -190,6 +193,11 @@ class App {
       this.log('Mise à jour : rechargement'); this.remote.flush({ beacon: true }); location.reload();
     };
     go();
+  }
+
+  // Portrait et paysage : l'appli installée était verrouillée en paysage ; on laisse l'appareil tourner.
+  _freeRotation() {
+    try { if (screen.orientation && screen.orientation.lock && (document.fullscreenElement || matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches)) screen.orientation.lock('any').catch(() => {}); } catch (_) {}
   }
 
   _showWake() { $('wake').hidden = false; }
@@ -232,6 +240,7 @@ class App {
         f.setMood('attentif'); f.setBrightness(1); f.setFps(60);
         this.vision && this.vision.setRate(10); break;
       case 'conversation':
+        this.paused = false; this._convAt = performance.now();
         f.setMood('ecoute'); f.setBrightness(1); f.setFps(60); this.vision && this.vision.setRate(10); break;
     }
   }
@@ -252,9 +261,32 @@ class App {
     if (pol === 'toucher') return false;
     if (pol === 'toujours') return true;
     if (!v || !v.gazeReady) return false;                               // sans détection du regard : toucher pour parler
-    if (v.looking || now - v.lookAt < 1500) return true;
-    // Pendant une discussion, on peut détourner les yeux un instant (visage toujours là, réponse récente).
-    return this.state === 'conversation' && now - (this.lastAnswerAt || 0) < 8000 && now - v.faceAt < 1500;
+    if (this.paused) return false;                                      // en veille faute de regard : il n'écoute plus
+    if (v.looking) return true;
+    // R3 : pendant une discussion, on peut détourner les yeux 3 s ; sinon il faut le regarder (1,5 s de marge de détection).
+    return now - v.lookAt < (this.state === 'conversation' ? LOOK_GRACE_MS : 1500);
+  }
+
+  // Le regard pilote la discussion (R3) : actif seulement avec la détection du regard.
+  get _gazeMode() { const v = this.vision; return (this.settings.listenMode || 'regard') === 'regard' && !!(v && v.gazeReady); }
+
+  // Plus regardé depuis 3 s : veille visuelle, micro coupé vers Gemini ; la session est gardée pour reprendre aussitôt.
+  _pause() {
+    if (this.paused) return;
+    this.paused = true; this._pausedAt = performance.now();
+    this.log(`Plus regardé depuis ${LOOK_GRACE_MS / 1000} s : veille (discussion gardée ${this.settings.convTimeout} s)`);
+    const f = this.face; f.clearEmotion(); f.setMood('neutre'); f.setBrightness(0.45); f.setFps(40); f.setListen(-1);
+    if (this.mode === 'live') { this.outBuf = []; this.outLen = 0; if (this.brain.open) this.brain.audioStreamEnd(); }
+    if (this.ecoState) this.ecoState.cap = null;
+  }
+  // Regardé de nouveau : il se réactive tout de suite, et le début de la phrase n'est pas perdu (R2).
+  _resume() {
+    if (!this.paused) return;
+    this.paused = false; const now = this._resumedAt = performance.now();
+    this.log(`Regardé de nouveau après ${((now - this._pausedAt) / 1000).toFixed(1)} s : je t'écoute`);
+    const f = this.face; f.setMood('ecoute'); f.setBrightness(1); f.setFps(60); f.play('wake');
+    this.lastActivity = now;
+    if (this.mode === 'live' && this.brain.open && this.audio.speaking) this.brain.sendAudio(this.audio.recent(800));
   }
 
   // On le regarde vraiment (pas seulement « discussion en cours ») : la phrase lui est destinée à coup sûr.
@@ -349,6 +381,7 @@ class App {
     if (!E) return;
     if (this.voice.speaking) return;                       // il parle : seule la détection de coupure écoute (voir _wireAudio)
     if (now - this.playEndAt < ECO_TAIL_MS) return;        // fin de sa propre voix (écho)
+    if (this.paused && !E.cap) return;                     // plus regardé : il n'écoute plus (R3)
     if (E.cap) {
       const C = E.cap, db = this.audio.db;
       C.chunks.push(i16); C.len += i16.length;
@@ -618,7 +651,7 @@ class App {
 
   endConversation(why) {
     if (this.state !== 'conversation' && this.state !== 'eveil') return;
-    this.log(`Fin de conversation (${why})`); this.convId++; this.endAfterSpeech = false; this._liveTurn = null;
+    this.log(`Fin de conversation (${why})`); this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false;
     if (this._searches) { for (const c of this._searches.values()) c.abort(); this._searches.clear(); }
     this.brain.close(); this.audio.flush(); this.voice.cancel(); this.outBuf = []; this.outLen = 0;
     if (this.ecoState) this.ecoState.queue = []; this.ecoState = null; this.mode = null;
@@ -684,6 +717,7 @@ Nous sommes ${fmtDate()}.${bat}`;
         if (this.audio.playing) return;
         if (now - this.playEndAt < (this.audio.aec ? TAIL_MS : TAIL_NOAEC_MS)) return;
       }
+      if (this.paused) return;                                         // plus regardé : rien ne part (R3, R9)
       if (now - this.audio.lastVoicedAt < 60 && !this.audio.playing) this.lastUserVoice = now;   // la personne parle (base du délai)
       this.outBuf.push(i16); this.outLen += i16.length;
       if (this.outLen >= 1600) { this.brain.sendAudio(concat(this.outBuf)); this.outBuf = []; this.outLen = 0; }
@@ -954,12 +988,25 @@ Nous sommes ${fmtDate()}.${bat}`;
     else if (this.voice.speaking) f.setTalk(this.voice.mouth(now), 0.25);
     if (this.state === 'conversation') {
       const E = this.ecoState, thinking = E && (E.busy || E.cap);
-      if (this.mode === 'live' && (this.audio.speaking || now - this.lastUserSpeech < 1500)) this._sendFrame(false);
-      // R3 : la conversation se ferme d'elle-même après un silence.
+      const searching = !!(this._searches && this._searches.size);
+      if (this.mode === 'live' && !this.paused && (this.audio.speaking || now - this.lastUserSpeech < 1500)) this._sendFrame(false);
+      const keep = this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
-      // Mode éco : seule une vraie réponse prolonge la conversation (un bruit de fond continu ne la garde plus ouverte).
-      const busyEar = this.mode === 'eco' ? false : this.audio.speaking;
-      if (!this.continuous && !this.speaking && !busyEar && !thinking && idle > this.settings.convTimeout * 1000) this.endConversation('silence');
+      if (this._gazeMode && !this.continuous) {
+        // R3 : le regard pilote la discussion. 3 s sans regard (sauf s'il parle ou cherche) → veille ; regardé → reprise.
+        const lastSeen = Math.max(v.lookAt || 0, this.playEndAt || 0, this._resumedAt || 0, this._convAt || 0);
+        if (this.paused) {
+          if (v.looking) this._resume();
+          else if (now - this._pausedAt > keep) this.endConversation('plus regardé');
+        } else if (!this.speaking && !thinking && !searching && now - lastSeen > LOOK_GRACE_MS) this._pause();
+        else if (v.looking && !this.speaking && !thinking && !searching && idle > LOOKED_IDLE_MS) this.endConversation('silence');
+      } else {
+        if (this.paused) this._resume();
+        // Sans détection du regard : la conversation se ferme d'elle-même après un silence.
+        // Mode éco : seule une vraie réponse prolonge la conversation (un bruit de fond continu ne la garde plus ouverte).
+        const busyEar = this.mode === 'eco' ? false : this.audio.speaking;
+        if (!this.continuous && !this.speaking && !busyEar && !thinking && !searching && idle > keep) this.endConversation('silence');
+      }
       if (this.continuous && idle > 30000 && f.p.bright.t > 0.5) { f.setBrightness(0.3); f.setMood('somnolent'); }
       if (this.continuous && idle < 1000 && f.p.bright.t < 0.5) { f.setBrightness(1); f.setMood('ecoute'); }
     }
