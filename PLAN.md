@@ -17,10 +17,10 @@ Un visage original (grands yeux expressifs sur fond noir) qui vit, écoute, rega
 | R3 | Pendant une discussion, on peut détourner les yeux **3 s** ; au-delà, il se met en veille ; dès qu'on le regarde de nouveau, il se réactive. | Règle de Timothée (24/10/26). Plus de 3 s sans regard (hors moments où il parle ou cherche) → veille : yeux mi-clos, écran tamisé, micro coupé vers Gemini. Regardé de nouveau dans les 12 s (« Fin de conversation après ») → reprise **instantanée** de la discussion (la session Gemini est gardée, le début de la phrase est transmis). Au-delà, la discussion est fermée ; regarder + parler la rouvre. Tant qu'on le regarde, il reste à l'écoute (60 s de silence au plus). |
 | R4 | Il se tait si on lui coupe la parole. | Toucher l'écran (fiable). Coupure « prudente » (défaut) : micro sans annulation d'écho, Wilson n'écoute pas pendant qu'il parle. Coupure à la voix (« directe ») en option : annulation d'écho, mais sur Android le son passe alors en « mode appel » (plus faible, écouteur sur un téléphone). |
 | R5 | Il se tait si les gens parlent entre eux. | Pas de regard = pas d'écoute ; Gemini filtre en plus (« pour_moi ») ; 2 refus d'affilée → veille. |
-| R6 | Il voit ce qu'on lui montre. | Direct : 1 image par seconde pendant que la personne parle (et 1,5 s après), une à l'ouverture, jamais pendant que Wilson parle ; 640 px, résolution « basse » côté Google (assez pour les couleurs, pas pour lire un texte). Économique : une photo jointe à chaque phrase. |
+| R6 | Il voit ce qu'on lui montre, **seulement quand on le lui demande**. | Règle de Timothée (24/10/26) : aucune photo envoyée d'office. Quand on lui demande de regarder (une couleur, un objet, lire, « regarde ça »…), il dit « Je regarde… » et prend **une photo nette** (1 024 px, qualité moyenne côté Google) : outil « regarder » en direct, champ « regarder » + 2e requête avec la photo en économique. La caméra reste allumée pour le regard, analysé sur l'appareil. |
 | R7 | Il retient ce qu'on lui dit. | Souvenirs stockés sur la tablette, rappelés à chaque requête. |
 | R8 | **Fluide** : visage sans à-coups, réponse ~1 à 2 s après la fin de la phrase. | Analyse de la caméra en arrière-plan (Web Worker, autre cœur) : l'animation ne se fige jamais ; processeur ou carte graphique choisi en mesurant sur la tablette ; fin de phrase détectée même avec la télé ; réponse lue dès la 1re phrase ; mode le plus rapide par défaut ; délais détaillés dans le journal. Budget de latence détaillé en section 6 bis. |
-| R9 | Rien d'inutile ne quitte la maison. | Seules les phrases dites en le regardant partent vers Gemini. Le journal à distance va dans la feuille Google de Timothée (son compte), phrases échangées désactivables. |
+| R9 | Rien d'inutile ne quitte la maison. | Seules les phrases dites en le regardant partent vers Gemini ; aucune image sauf demande (R6). Le journal à distance va dans la feuille Google de Timothée (son compte), phrases échangées désactivables. |
 | R10 | L'écran ne s'abîme pas et ne s'éteint pas. | Anti-veille, veille sombre, visage qui dérive. |
 
 Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'éclaire → on sait qu'il écoute.
@@ -61,7 +61,7 @@ Retour visuel : quand on le regarde, ses yeux s'ouvrent grand et l'écran s'écl
 | `js/eco.js` | Cerveau « économique » : phrase enregistrée + photo → Gemini Flash → réponse JSON (schéma imposé, recherche en deux temps, relance) | clé API Gemini |
 | `js/voice.js` | Voix de la tablette (synthèse vocale) pour le mode économique | navigateur |
 | `js/faces/*.js` | Styles de visage : Lumière, Bouille, Rétro, Miel | `face.js` |
-| `js/vision.js` | Caméra, **regard** (tête + yeux → « on me regarde »), images pour Gemini | `vision-worker.js` |
+| `js/vision.js` | Caméra, **regard** (tête + yeux → « on me regarde »), photo à la demande pour Gemini | `vision-worker.js` |
 | `js/vision-worker.js` | En arrière-plan : visages jusqu'à ~4 m, repères fins, lumière, mouvement | MediaPipe Face Detection (longue portée) + Face Landmarker (repli : mouvement) |
 | `js/memory.js` | Souvenirs et petit journal des échanges | localStorage |
 | `js/sensors.js` | Toucher, mouvement de la tablette, batterie, réseau | API du navigateur |
@@ -125,7 +125,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 24/10/26 : **version 1.10.2** en ligne.
+État au 24/10/26 : **version 1.11.0** en ligne.
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -187,6 +187,9 @@ Historique récent :
   (autour des recherches) → en coupure prudente, la fin déjà reçue est jouée ; plus d'images envoyées pendant qu'il parle ;
   délai mesuré aussi dehors (dernier mot transcrit) ; relance après recherche à 6 s ; « ... » compté comme silence.
   Idée proposée à Timothée : photo nette « à la demande » (outil regarder) pour lire un texte ou voir un détail.
+- 1.11.0 (24/10/26) — à la demande de Timothée : plus aucune photo envoyée d'office (R6). Photo nette (1 024 px, résolution
+  moyenne) seulement quand on demande à Wilson de regarder : outil « regarder » en direct, champ « regarder » + 2e requête
+  en économique. Bilan : ligne « Photos » (nombre prises depuis le démarrage).
 
 En attente :
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;

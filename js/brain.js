@@ -62,7 +62,7 @@ function buildSetup({ model, voice, system, level, handle, think, interrupts = f
   // Gemini 2.5 « native audio » réfléchit par défaut avant de parler : plusieurs secondes de silence. On coupe la réflexion.
   if (think === false && level <= 1) setup.generationConfig.thinkingConfig = { thinkingBudget: 0 };
   if (level === 0) {
-    setup.generationConfig.mediaResolution = 'MEDIA_RESOLUTION_LOW';
+    setup.generationConfig.mediaResolution = 'MEDIA_RESOLUTION_MEDIUM';   // photos rares (à la demande) : plus nettes
     setup.realtimeInputConfig.activityHandling = interrupts ? 'START_OF_ACTIVITY_INTERRUPTS' : 'NO_INTERRUPTION';
     setup.contextWindowCompression = { slidingWindow: {} };
   }
@@ -109,6 +109,9 @@ export const TOOLS = [{
       description: 'Donne la date et l\'heure exactes maintenant.' },
     { name: 'terminer_conversation', behavior: 'NON_BLOCKING',
       description: 'À appeler quand on te dit au revoir, bonne nuit, ou « merci, c\'est tout » : tu retournes en veille après ta réponse.' },
+    { name: 'regarder', behavior: 'BLOCKING',
+      description: "Prend une photo nette avec la caméra quand on te demande de regarder : ce que tu vois, une couleur, lire un texte, un objet qu'on te montre, une tenue… Avant de l'appeler, dis « Je regarde… ». Tu ne vois RIEN sans cet outil.",
+      parameters: { type: 'OBJECT', properties: { quoi: { type: 'STRING', description: 'ce qu\'on te demande de regarder' } } } },
     { name: 'chercher', behavior: 'BLOCKING',
       description: "Recherche sur Internet (Google) pour une information récente ou qui change : météo, actualité, sport, horaires, prix, programme télé, commerces, événements. Avant de l'appeler, dis en français une très courte phrase d'attente.",
       parameters: { type: 'OBJECT', properties: { question: { type: 'STRING', description: 'la question complète, avec le lieu et la date si utile' } }, required: ['question'] } },

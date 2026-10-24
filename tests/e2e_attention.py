@@ -164,7 +164,7 @@ async def main():
         await page.evaluate("wilson.audio.speaking = true; wilson.lastUserSpeech = performance.now()")
         await page.wait_for_timeout(2300)
         await page.evaluate("wilson.audio.speaking = false")
-        check('Quand on lui parle : environ 1 image par seconde', 1 <= conn['images'] - i0 <= 3, f"+{conn['images'] - i0} en 2,3 s")
+        check('Quand on lui parle : aucune image envoyée sans demande (R6)', conn['images'] == i0, f"+{conn['images'] - i0} en 2,3 s")
         # Délai : à défaut de fin de phrase détectée (bruit continu dehors), dernier mot transcrit par Google.
         await page.evaluate("wilson.audio.speaking = true")
         conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Quelle heure est-il ?'}}}))
