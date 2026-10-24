@@ -63,8 +63,8 @@ async def main():
         await page.evaluate("wilson.startConversation('toucher')")
         await page.wait_for_function('wilson.state === "conversation" && wilson.mode === "live"', timeout=10000)
         conn = conns[-1]
-        # La personne parle 0,4 s (voix simulée), puis se tait : c'est la base du délai mesuré.
-        await page.evaluate("(() => { const iv = setInterval(() => { wilson.audio.lastVoicedAt = performance.now(); }, 20); setTimeout(() => clearInterval(iv), 400); })()")
+        # La personne parle puis se tait (fin de phrase détectée) : c'est la base du délai mesuré.
+        await page.evaluate("(() => { const A = wilson.audio; A._saved = A._onCapture; A._onCapture = () => {}; A.speaking = true; setTimeout(() => { A.speaking = false; A._emit('speechend'); }, 400); })()")
         await page.wait_for_timeout(1000)
         for c in audio_chunks(3.0):
             conn['ws'].send(json.dumps({'serverContent': {'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]}}}))
@@ -80,6 +80,7 @@ async def main():
         d = next((l for l in logs if 'Délais (direct)' in l), '')
         m0 = re.search(r'1er son ([\d.]+) s après la fin de ta phrase', d)
         check('Délai du mode direct mesuré depuis la fin de ta phrase (pas depuis l\'écho de Wilson)', m0 and 0.4 <= float(m0.group(1)) <= 1.2, d)
+        await page.evaluate("wilson.audio._onCapture = wilson.audio._saved; 0")
         v = next((l for l in logs if 'Voix du direct' in l), '')
         m = re.search(r'niveau de sortie max (\d+) %', v)
         check('Voix du direct : son réellement produit (niveau mesuré)', m and int(m.group(1)) > 5, v)
@@ -90,7 +91,7 @@ async def main():
         await page.evaluate('wilson.remote.flush()'); await page.wait_for_timeout(400)
         last = posts[-1] if posts else {}
         mes = [m_ for p_ in posts for m_ in p_.get('mesures', [])]
-        check('Bilan « Son » et appareil envoyés', 'haut-parleur normal' in last.get('bilan', {}).get('Son', '') and last.get('appareil') in ('tablette', 'téléphone'), str(last.get('bilan', {}).get('Son')))
+        check('Bilan « Son » et appareil envoyés', 'haut-parleur normal' in last.get('bilan', {}).get('Son', '') and last.get('appareil') in ('tablette', 'téléphone', 'PC') and last.get('version', '').endswith(' · ' + last.get('appareil')), str(last.get('bilan', {}).get('Son')))
         check('Mesure du direct dans l\'onglet Délais', any(m_.get('reflexion') == 'direct' and isinstance(m_.get('google'), (int, float)) for m_ in mes), json.dumps(mes)[:160])
 
         # Son d'essai.
