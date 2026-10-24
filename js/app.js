@@ -12,9 +12,11 @@ import { loadSettings, saveSettings, SettingsUI, DEFAULTS } from './settings.js'
 import { SettingsSync, LOCAL_ONLY, takeSettingsFromHash, mergeInto, shareable } from './sync.js';
 import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
-import { RemoteLog } from './remote.js';
+import { RemoteLog, deviceName } from './remote.js';
+import { Oreille, nomDit } from './oreille.js';
+import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 
-const VERSION = '1.12.2';
+const VERSION = '1.13.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -22,6 +24,9 @@ const TURN_GATE_MS = 5000;        // micro coupé pendant tout le tour de parole
 const LOOK_GRACE_MS = 3000;       // R3 : on peut détourner les yeux 3 s ; au-delà, il se met en veille (règle de Timothée, 24/10/26)
 const LOOKED_IDLE_MS = 60000;     // tant qu'on le regarde, il reste à l'écoute, 60 s de silence au plus
 const SEARCH_MAX_MS = 30000;      // outil « chercher » : Wilson a dit qu'il cherchait, il répond quand il a l'info (filet : 30 s)
+const CRM_MAX_MS = 40000;         // question au CRM (script → CRM) : filet de sécurité
+const CAR_IDLE_MS = 60000;        // mode voiture : il se rendort après 1 min de silence (PLAN 2 quater, C5)
+const NAME_GATE_MS = 7000;        // mode voiture : la 1re phrase doit contenir « Wilson » (vérifié sur la transcription, C6)
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
 const ECO_SPEC_MS = 250;          // envoi anticipé : la phrase part dès ce silence, Wilson ne parle qu'à la fin confirmée (PLAN 6 bis)
 const ECO_TAIL_MS = 1000;         // après avoir parlé : le son de la tablette finit de sortir après l'annonce « fini »
@@ -29,6 +34,8 @@ const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 's
 const pad = (n) => String(n).padStart(2, '0');
 const fmtDate = (d = new Date()) => `${JOURS[d.getDay()]} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)}, ${d.getHours()}h${pad(d.getMinutes())}`;
 const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 class App {
   constructor() {
@@ -39,6 +46,14 @@ class App {
       mergeInto(this.settings, { ...shareable(DEFAULTS), ...imported }); this.settings._t = imported._t || Date.now(); saveSettings(this.settings); this._imported = true;
     }
     this.remote = new RemoteLog(this);           // journal à distance (feuille Google lue par Claude)
+    this.crm = new Crm(this);                    // CRM à la voix (PLAN 2 quater)
+    this._heard = []; this._turnN = 0;           // ce que Timothée a dit, horodaté (verrou des écritures dans le CRM)
+    this.car = null;                             // mode voiture (PLAN 2 quater, C5)
+    this.oreille = new Oreille();                // reconnaît « Wilson » en voiture (empreintes de la voix de Timothée)
+    this.oreille.sens = this.settings.oreilleSens || 'normal';
+    this.oreille.onDetect = (d) => this._onName(d);
+    this.oreille.onPresque = (d) => this._secondAvis(d);
+    this.oreille.onSegment = (r) => this._oreilleLog(r);
     this.sync = new SettingsSync(this);          // mêmes réglages sur tous les appareils
     this._catchErrors();
     this.face = new Face($('face'), { style: this.settings.face });
@@ -130,6 +145,9 @@ class App {
       'Quota économique': this.ecoQuotaUntil && now < this.ecoQuotaUntil ? `en pause : ${this.ecoQuotaMsg || ''}` : 'pas de pause',
       'Voix de la tablette': `${s.ecoVoice || 'automatique'} (${this.voice.voices().length} voix françaises)`,
       'Souvenirs': `${this.memory.facts.length}`,
+      'CRM': this.crm.on ? `relié — ${this.crm.state || 'pas encore interrogé'}${this.crm.cache.size ? `, ${this.crm.cache.size} fiche(s) gardée(s)` : ''}${this.crm.pending ? ', une écriture attend sa confirmation' : ''}` : (this.settings.crm ? 'activé, mais pas de script sur cet appareil' : 'non relié'),
+      'Mode voiture': `${this.car ? `oui (${this.car.why})` : 'non'}${this.settings.voitureAuto && deviceName() === 'téléphone' ? `, automatique en roulant${this._geoErr ? ' (GPS : ' + this._geoErr + ')' : this.speed != null ? `, vitesse ${Math.round(this.speed * 3.6)} km/h` : ''}` : ''}`,
+      'Oreille (voiture)': this.oreille.ready ? `apprise, ${this.oreille.templates.length} empreintes, limite ${this.oreille.limite.toFixed(1)} (${this.oreille.sens})${this.oreille.last.length ? ' — dernières phrases : ' + this.oreille.last.slice(-8).map((x) => x.s + (x.oui ? '✓' : '')).join(' ') : ''}` : 'pas apprise',
       'Réglages communs': this.remote.on ? (this.sync.state || 'pas encore vérifiés') : 'pas de script : réglages propres à cet appareil',
       'Phrases échangées dans le journal': s.logContent === false ? 'masquées' : 'envoyées',
       'Écran': `${screen.width}×${screen.height}, densité ${devicePixelRatio}`,
@@ -161,7 +179,8 @@ class App {
     }
     if (this.settings.camera) await this._startVision();
     this.sensors.startMotion(); this.sensors.startBattery();
-    this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._shownAt = performance.now(); this._wakeLock(); this.audio.resume(); } });
+    this._watchSpeed();
+    this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._shownAt = performance.now(); this._wakeLock(); this.audio.resume(); this._backFromCall(); } });
     if (fromGesture && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => this._freeRotation()).catch(() => {});
     this._freeRotation();
     if (!this.audio.running) this._showWake(); else this._hideWake();
@@ -235,8 +254,11 @@ class App {
         .catch((e) => this.log('Micro : ' + e.message));
     }
     if (key === 'logUrl' && this.remote.on) { this.log('Journal à distance activé'); this.remote.flush(); }
-    if (key === 'camera') { if (s.camera && !this.vision && this.started) this._startVision(); if (!s.camera && this.vision) { this.vision.stop(); this.vision = null; } }
-    $('subtitle').hidden = !s.subtitles;
+    if (key === 'camera' && !this.car) { if (s.camera && !this.vision && this.started) this._startVision(); if (!s.camera && this.vision) { this.vision.stop(); this.vision = null; } }
+    if (key === 'voitureAuto' && this.started) this._watchSpeed();
+    this.oreille.sens = s.oreilleSens || 'normal';
+    if (key === 'crm') { this.log(s.crm ? 'CRM relié à Wilson' : 'CRM détaché de Wilson'); if (s.crm) this.crm.status(true); }
+    $('subtitle').hidden = !(s.subtitles || this.car);
     this.continuous = false;
   }
 
@@ -275,6 +297,7 @@ class App {
   // ---------- écoute au regard ----------
   // La phrase est-elle pour Wilson ? On le regarde (ou on vient de le regarder), ou bien la discussion est en cours.
   _addressed(now = performance.now()) {
+    if (this.car) return this.state === 'conversation' || this.state === 'eveil';   // voiture : réveillé par son nom, seul avec lui
     const pol = this.settings.listenMode || 'regard', v = this.vision;
     if (pol === 'toucher') return false;
     if (pol === 'toujours') return true;
@@ -341,14 +364,17 @@ class App {
     }
     this.setState('eveil'); this.convId = (this.convId || 0) + 1;
     if (mode === 'eco') warmUp(this.settings.apiKey);
-    const preroll = reason === 'prenom' ? [this.audio.recent(4000)] : reason === 'regard' ? [this.audio.recent(PREROLL_MS)] : [];
+    const preroll = this._wakePcm ? [this._wakePcm] : reason === 'prenom' ? [this.audio.recent(4000)] : reason === 'regard' ? [this.audio.recent(PREROLL_MS)] : [];
+    this._wakePcm = null;
+    // Mode voiture : la 1re phrase doit contenir « Wilson » (transcription de Gemini) ; sinon il se tait et se rendort (C6).
+    this._gate = this.car && reason === 'prenom' ? { ok: false, buf: [], until: performance.now() + NAME_GATE_MS } : null;
     if (mode === 'eco') return this._startEco(reason, preroll);
     this.mode = 'live';
     this.pending = preroll;
     this.discard = false; this.endAfterSpeech = false; this.brain.handle = null;
     this.lastActivity = performance.now();
     try {
-      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), interrupts: this.settings.bargeIn === 'directe' });
+      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), interrupts: this.settings.bargeIn === 'directe', extra: this._extraTools() });
     } catch (e) {
       this.log('Gemini : ' + e.message);
       this.lastError = e.message;
@@ -371,7 +397,8 @@ class App {
     const flat = concat(all);
     for (let i = 0; i < flat.length; i += 3200) this.brain.sendAudio(flat.subarray(i, i + 3200));
     if (reason === 'test') this.brain.sendText('Présente-toi en une phrase, avec chaleur.');
-    if (reason === 'toucher') this.brain.sendText("[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
+    if (reason === 'toucher') this.brain.sendText(this.car ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
+    if (reason === 'apres_appel') this.brain.sendText(this._apresAppelTexte());
     this.lastActivity = performance.now();
   }
 
@@ -391,6 +418,7 @@ class App {
       this.ecoState.cap = { chunks: chunks.slice(), len, lastVoice: now, wake: reason === 'prenom', voiced: 3, looked: 1, gazed: reason === 'regard' ? 1 : 0, peak: this.audio.db };
     } else if (reason === 'test') this._ecoSend({ text: '[Présente-toi en une phrase, avec chaleur.]' });
     else if (reason === 'toucher') this._say(['Oui ?', "Je t'écoute.", 'Oui, dis-moi ?'][Math.floor(Math.random() * 3)]);
+    else if (reason === 'apres_appel') this._ecoSend({ text: this._apresAppelTexte() });
   }
 
   _ecoFrame(i16) {
@@ -441,7 +469,7 @@ class App {
     const pol = this.settings.listenMode || 'regard';
     const hint = pol !== 'regard' || cap.wake ? '' : cap.gazed ? 'La personne te regardait en disant cela : elle te parle, réponds-lui (pour_moi true) sauf si on n\'entend que ta propre voix ou rien d\'intelligible.'
       : 'Phrase dite juste après ta réponse, sans te regarder : réponds seulement si c\'est clairement la suite de votre échange.';
-    return { audio, endAt: cap.lastVoice, hint, spec, ctl: new AbortController() };
+    return { audio, endAt: cap.lastVoice, hint, spec, wake: !!cap.wake, ctl: new AbortController() };
   }
 
   // Envoi anticipé : la personne a repris → la requête est annulée (rien n'a été dit, rien n'est retenu).
@@ -469,7 +497,8 @@ class App {
       sess.push(chunk);
     };
     // Envoi anticipé : la réponse se prépare pendant qu'on vérifie que la phrase est finie ; Wilson ne parle qu'après.
-    const live = () => !req.spec || req.confirmed;
+    // Voiture, phrase qui a réveillé Wilson : rien n'est dit avant d'avoir vérifié que le nom y est (C6).
+    const live = () => (!req.spec || req.confirmed) && !(req.wake && this.car);
     // Lecture en flux : Wilson commence à parler dès la première phrase écrite.
     const reader = (st) => (pr) => {
       if (!tNet) tNet = performance.now();
@@ -480,7 +509,7 @@ class App {
       const txt = pr.reponse || '';
       const cut = pr.closed ? txt.length : sentenceCut(txt, st.spoken);
       if (cut > st.spoken) { speakChunk(txt.slice(st.spoken, cut).trim()); st.spoken = cut; }
-      if (this.settings.subtitles && txt) $('subtitle').textContent = txt.slice(0, 220);
+      if ((this.settings.subtitles || this.car) && txt) $('subtitle').textContent = txt.slice(0, 220);
     };
     const st1 = { spoken: 0 }, onPartial = reader(st1);
     let gate = null;
@@ -494,13 +523,18 @@ class App {
     const ms = (t) => ((t - (req.endAt || tSend)) / 1000).toFixed(1);
     try {
       // R6 : aucune photo d'office ; si Wilson doit regarder, il le dit (« regarder ») et une 2e requête part avec la photo.
-      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, text: req.text, hint: req.hint, onPartial, signal: req.ctl.signal });
+      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, text: req.text, hint: req.hint, onPartial, signal: req.ctl.signal, crm: this.crm.on });
       if (gate) await gate;                                  // envoi anticipé : fin de phrase confirmée (sinon : annulé)
       if (conv !== this.convId) return;
       this.eco.commit(out, req.text);
       out.reponse = sayable(out.reponse);
       let said = out.reponse, last = out, tSearch = 0;
-      if (!out.pourMoi || notForMe || repeated || (!out.reponse && !out.chercher && !out.regarder)) {
+      if (req.wake && this.car && out.entendu && !nomDit(out.entendu)) {
+        this.log(`Pas mon nom dans « ${out.entendu.slice(0, 100)} » : je me tais et je me rendors`, true);
+        out.pourMoi = false; setTimeout(() => conv === this.convId && this.endConversation('pas mon nom'), 200);
+      }
+      if (out.pourMoi && out.entendu) this._noteHeard(out.entendu, true);
+      if (!out.pourMoi || notForMe || repeated || (!out.reponse && !out.chercher && !out.regarder && !out.crm)) {
         if (!emoSet) this.face.clearEmotion();
         E.ignored++;
         this.log(`Pas pour moi (${E.ignored}) : « ${out.entendu.slice(0, 80)} » (${ms(performance.now())} s, ${out.model})`, true);
@@ -560,6 +594,33 @@ class App {
             catch (e2) { if (e2.name === 'AbortError') throw e2; speakChunk("Je n'arrive pas à trouver l'information pour le moment."); }
           }
         }
+        // 2e temps : le CRM (PLAN 2 quater). Wilson a dit sa phrase d'attente ; l'appli interroge le CRM.
+        if (out.crm && conv === this.convId) {
+          const nom = { client: 'crm_client', agenda: 'crm_agenda', bilan: 'crm_bilan', produit: 'crm_produit', appeler: 'appeler', noter: 'crm_noter', confirmer: 'crm_confirmer' }[out.crm.outil];
+          if (nom) {
+            tSearch = tSearch || performance.now(); emoSet = false;
+            if (!sess && !['crm_noter', 'crm_confirmer', 'appeler'].includes(nom)) this.face.setEmotion('reflexion', 30000, 0.6);
+            this.log(`CRM (économique) : ${out.crm.outil} ${JSON.stringify(out.crm).slice(0, 160)}`, true);
+            let res;
+            try { res = await this._crmRun(nom, out.crm, req.ctl.signal, { heard: [{ t: performance.now(), text: out.entendu }] }); }
+            catch (e) { if (e.name === 'AbortError') throw e; res = { dire: "Je n'arrive pas à joindre le CRM pour le moment." }; }
+            if (conv !== this.convId) return;
+            if (res.dire) {
+              speakChunk(res.dire); said = [said, res.dire].filter(Boolean).join(' ');
+              this.eco.commit({ raw: { reponse: res.dire }, entendu: '' }, `[CRM : ${out.crm.outil}]`);
+            } else {
+              const st4 = { spoken: 0 };
+              const out4 = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), signal: req.ctl.signal, onPartial: reader(st4),
+                text: `[Question : « ${out.entendu || '(voir plus haut)'} ». Réponse du CRM :\n${res.info}\nRéponds au format JSON demandé.]` });
+              if (conv !== this.convId) return;
+              this.eco.commit(out4, `[CRM : ${out.crm.outil}]`);
+              out4.reponse = sayable(out4.reponse);
+              if (!st4.spoken) speakChunk(out4.reponse || "Le CRM ne m'a rien donné de clair.");
+              this._applyEco(out4, emoSet);
+              said = [said, out4.reponse].filter(Boolean).join(' '); last = out4; out.fin = out.fin || out4.fin;
+            }
+          }
+        }
         this.log(`« ${out.entendu.slice(0, 90)} » → ${said.slice(0, 110)}`, true);
         // Délais mesurés depuis la fin de la phrase (dernier son de voix) : où part le temps.
         const tAll = performance.now();
@@ -572,7 +633,7 @@ class App {
         const mesure = timing; timing = () => { logTiming(); mesure(); };
         this.memory.addExchange(out.entendu, said);
         this._lastReply = said;
-        if (this.settings.subtitles) $('subtitle').textContent = said.slice(0, 220);
+        if (this.settings.subtitles || this.car) $('subtitle').textContent = said.slice(0, 220);
       }
       if (sess) { sess.end(); await this._endSpeech(sess, said); }
       if (timing) timing();
@@ -704,16 +765,28 @@ class App {
     if (bat) this._batTold = true;
     const eco = mode === 'eco' || mode === 'eco-search';
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
-    const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
+    const crm = this.crm.on, car = !!this.car;
+    const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch, crm }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
 Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, la ville où vous habitez, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
 La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
 L'heure et la date : appelle date_et_heure.`;
-    return `Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d'une famille. Ton visage animé montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.
+    // CRM à la voix et mode voiture (PLAN 2 quater)
+    const travail = !crm ? '' : `
+Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
+- Dès qu'il parle d'un client, d'un rendez-vous, d'une tâche, d'un devis, d'un chiffre ou d'un article, ${eco ? 'remplis le champ "crm"' : 'dis « Je regarde dans le CRM… » puis appelle l\'outil (crm_client, crm_agenda, crm_bilan, crm_produit)'}. Ne devine jamais un nom, un chiffre ou une date : dis seulement ce que le CRM répond. Pour « lui », « ce client », c'est le dernier client dont vous avez parlé.
+- « Appelle X » : ${eco ? 'outil "appeler"' : 'outil appeler'} (un bouton vert s'affiche, il appuie dessus).
+- Écrire dans le CRM (tâche, compte rendu, rendez-vous, note) : JAMAIS sans son accord. ${eco ? 'Mets l\'outil "noter"' : 'Appelle crm_noter'}, relis-lui exactement la phrase préparée, demande « Je l'enregistre ? », et ${eco ? 'mets l\'outil "confirmer"' : 'appelle crm_confirmer'} seulement après son « oui ». S'il corrige, prépare de nouveau. Les comptes rendus, rendez-vous et notes arrivent en brouillon dans son CRM : il les valide lui-même.
+`;
+    const voiture = !car ? '' : `
+En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (caméra coupée en voiture).
+`;
+    return `${car ? 'Tu es Wilson, un compagnon qui vit dans le téléphone de Timothée. En ce moment vous êtes dans sa voiture.' : 'Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d\'une famille. Ton visage animé montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.'}
 
 Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies toujours : « tu », « ton », « peux-tu », jamais « vous » ni « pourriez-vous », même pour être poli. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles.
 
 Quand parler :
-${!eco && (s.listenMode || 'regard') === 'regard' ? `- Tu n'entends que ce qu'on te dit en te regardant : c'est TOUJOURS pour toi. Réponds à chaque phrase, y compris la toute première (« coucou », une question…), sans attendre qu'on répète.
+${car ? `- Timothée t'a appelé par ton prénom : ce que tu entends maintenant t'est adressé. Réponds à chaque phrase.
+- Si tu n'entends que la radio, de la musique, ou quelqu'un qui parle à une autre personne, ne dis rien.` : !eco && (s.listenMode || 'regard') === 'regard' ? `- Tu n'entends que ce qu'on te dit en te regardant : c'est TOUJOURS pour toi. Réponds à chaque phrase, y compris la toute première (« coucou », une question…), sans attendre qu'on répète.
 - Reste silencieux seulement si tu n'entends que du bruit, la télé, ou l'écho de ta propre voix.` : `- On ne t'envoie que ce qui a été dit pendant qu'on te regardait : la personne s'adresse à toi, réponds-lui (pas besoin de ton prénom).
 - Pendant une discussion, réponds quand on te parle, même si on détourne un instant les yeux.
 - Si les gens parlent entre eux, au téléphone, si c'est la télé, ou si la phrase ne t'est pas destinée : ne dis rien du tout.`}
@@ -721,7 +794,7 @@ ${!eco && (s.listenMode || 'regard') === 'regard' ? `- Tu n'entends que ce qu'on
 
 Ta vue : tu ne vois rien tant que tu n'as pas pris de photo. ${eco ? 'Si une photo est jointe, sers-t\'en pour répondre ; sinon, quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), mets "regarder" à true et dis seulement une très courte phrase d\'attente.' : 'Quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), dis une très courte phrase (« Je regarde… ») puis appelle regarder.'} Ne prétends jamais voir quelque chose sans photo.
 ${tools}
-${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (météo, actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
+${travail}${voiture}${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (météo, actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
 Langue : parle toujours en français, y compris pour une phrase d'attente.`}
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
@@ -739,7 +812,14 @@ Nous sommes ${fmtDate()}.${bat}`;
   // ---------- son ----------
   _wireAudio() {
     this.audio.on('frame', (f32, i16, db) => {
-      if (this.state === 'veille' || this.state === 'dodo') { this._watchFrame(); return; }
+      if (this._earTest) this.oreille.feed(f32, this.audio.speaking);              // réglages : « Tester l'oreille »
+      if (this.state === 'veille' || this.state === 'dodo') {
+        if (this.car) {                                                         // voiture : réveil au nom, pas au regard
+          if (!this.settingsOpen && !this.speaking && performance.now() - this.playEndAt > 800) this.oreille.feed(f32, this.audio.speaking);
+          return;
+        }
+        this._watchFrame(); return;
+      }
       if (this.state === 'eveil') { if (this.pending) this.pending.push(i16); return; }
       if (this.state === 'conversation' && this.mode === 'eco') {
         // Pendant qu'il parle, le micro entend sa propre voix : on n'enregistre rien, on guette seulement
@@ -806,8 +886,14 @@ Nous sommes ${fmtDate()}.${bat}`;
   // ---------- cerveau ----------
   _wireBrain() {
     const b = this.brain;
-    b.on('audio', (i16, rate) => {
+    b.on('audio', (i16, rate) => this._liveAudio(i16, rate));
+    this._liveAudio = (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
+      const G = this._gate;
+      if (G && !G.ok) {
+        if (performance.now() < G.until) { G.buf.push([i16, rate]); return; }   // réponse retenue : le nom n'est pas encore vérifié
+        this._gateOpen('pas de transcription à temps');
+      }
       if (!this.audio.playing) { this.barge.n = 0; this.barge.echo = Math.max(-60, this.audio.db); }
       this._modelOut = (this._modelOut || 0) + 1; this._modelTalking = performance.now();
       if (!this._liveTurn) {
@@ -821,7 +907,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       }
       this._liveTurn.sec += i16.length / (rate || 24000);
       this.audio.play(i16, rate); this.lastActivity = performance.now();
-    });
+    };
     b.on('interrupted', () => {
       const ours = this.discard;                         // c'est nous qui l'avons coupé (toucher) : déjà silencieux
       this.discard = false; this._modelTalking = 0;
@@ -835,6 +921,11 @@ Nous sommes ${fmtDate()}.${bat}`;
       this.audio.flush(); this.face.setTalk(0); this._liveTurn = null;
     });
     b.on('turn', ({ user, wilson }) => {
+      this._turnN++;                                     // ce qui sera entendu ensuite appartient au tour suivant
+      if (this._gate && !this._gate.ok) {
+        if (!user || nomDit(user)) this._gateOpen(user ? 'nom dans la transcription' : 'pas de transcription');
+        else { this.log(`Pas mon nom dans « ${user.slice(0, 100)} » : je me tais et je me rendors`, true); this._gate = null; this.endConversation('pas mon nom'); return; }
+      }
       this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._modelTalking = 0;
       wilson = cleanSpeech(wilson);
       if (wilson) this._lastTurnAt = performance.now();   // un tour muet (puis relance) ne compte pas : délai réellement ressenti
@@ -859,8 +950,12 @@ Nous sommes ${fmtDate()}.${bat}`;
       } else this.log('Wilson se tait (il pense que la phrase n\'était pas pour lui)');
       setTimeout(() => { if (!this.audio.playing) $('subtitle').textContent = ''; }, 5000);
     });
-    b.on('heard', (t) => { if (this.state === 'conversation') this.lastActivity = this._heardAt = performance.now(); });
-    b.on('said', (t) => { if (this.settings.subtitles) $('subtitle').textContent = cleanSpeech(t).slice(-220); });
+    b.on('heard', (t) => {
+      if (this.state !== 'conversation') return;
+      this.lastActivity = this._heardAt = performance.now(); this._noteHeard(t);
+      if (this._gate && !this._gate.ok && nomDit(t)) this._gateOpen('nom entendu');
+    });
+    b.on('said', (t) => { if (this.settings.subtitles || this.car) $('subtitle').textContent = cleanSpeech(t).slice(-220); });
     b.on('toolcall', (calls) => this._tools(calls));
     b.on('toolcancel', (ids) => {        // la personne a coupé Wilson pendant une recherche : on l'abandonne
       for (const id of ids) { const c = this._searches && this._searches.get(id); if (c) { this._searches.delete(id); c.abort(); this.log('Recherche annulée'); } }
@@ -880,7 +975,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     const handle = this.brain.handle;
     this.brain.close(); this.brain.handle = handle;
     try {
-      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), resume: true, interrupts: this.settings.bargeIn === 'directe' });
+      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), resume: true, interrupts: this.settings.bargeIn === 'directe', extra: this._extraTools() });
     } catch (e) { this.log('Reconnexion impossible : ' + e.message); this.endConversation('coupure'); }
     this._reconnecting = false;
   }
@@ -889,6 +984,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     const res = [];
     for (const c of calls) {
       const a = c.args || {};
+      if (CRM_TOOL_NAMES.includes(c.name)) { this._crmTool(c); continue; }     // réponse envoyée quand le CRM a répondu
       let out = { result: 'ok' }, silent = true;
       switch (c.name) {
         case 'exprimer_emotion': {
@@ -993,6 +1089,218 @@ Nous sommes ${fmtDate()}.${bat}`;
     }, 6000);
   }
 
+  // ---------- mode voiture (PLAN 2 quater, C5) ----------
+  enterCar(why) {
+    if (this.car) return;
+    this.car = { why, at: Date.now() };
+    this.log(`Mode voiture (${why}) : caméra coupée, réveil quand on dit « Wilson »${this.oreille.ready ? ` (oreille prête, limite ${this.oreille.limite.toFixed(1)})` : ' — oreille pas encore apprise : toucher l\'écran pour parler'}`);
+    if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('mode voiture');
+    if (this.vision) { this.vision.stop(); this.vision = null; }
+    document.body.classList.add('car'); $('car').hidden = false; $('subtitle').hidden = false; $('subtitle').textContent = ''; $('badge').hidden = true;
+    this._carHint(); this.oreille.reset();
+    if (this.state === 'dodo') this.setState('veille');
+    this.face.setMood('neutre'); this.face.setBrightness(0.45);
+    this.crm.prefetch();
+  }
+  exitCar(why) {
+    if (!this.car) return;
+    this.log(`Fin du mode voiture (${why})`); this.car = null; this._gate = null;
+    if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('fin du mode voiture');
+    document.body.classList.remove('car'); $('car').hidden = true; $('subtitle').hidden = !this.settings.subtitles;
+    if (this.settings.camera && !this.vision && this.started) this._startVision();
+  }
+  _carHint() { $('car-hint').textContent = this.oreille.ready ? 'Dis « Wilson » pour me parler' : 'Touche l\'écran pour me parler — apprends-moi ton nom : Réglages → CRM et voiture'; }
+
+  // L'oreille a reconnu « Wilson » : réveil, avec le début de la phrase.
+  _onName(d) {
+    if (!this.car || this.state !== 'veille' || this.settingsOpen) return;
+    this.log(`Entendu « Wilson » (oreille : écart ${d.score.toFixed(1)}, limite ${d.limite.toFixed(1)})`);
+    this.face.play('wake');
+    this.startConversation('prenom');
+  }
+  // Chaque phrase entendue en voiture : son écart avec les empreintes (pour régler l'oreille d'après le journal).
+  _oreilleLog(r) {
+    if (!this.car || r.score === Infinity) return;
+    this.log(`Oreille : phrase de ${r.duree.toFixed(1)} s, écart ${r.score.toFixed(1)} (limite ${this.oreille.limite.toFixed(1)})${r.oui ? ' → réveil' : r.score < this.oreille.presque ? ' → presque' : ''}`);
+  }
+  // Presque reconnu (bruit, voix fatiguée…) : second avis de Gemini Flash-Lite sur la phrase, 20 fois par heure au plus.
+  async _secondAvis(d) {
+    if (!this.car || this.state !== 'veille' || !navigator.onLine || !this.settings.apiKey) return;
+    const now = Date.now(); this._avis = (this._avis || []).filter((t) => now - t < 3600000);
+    if (this._avis.length >= 20) return;
+    this._avis.push(now);
+    const pcm = this.audio.recent(Math.min(5000, (d.duree + 1.2) * 1000));
+    try {
+      const oui = await this.eco.nomDit({ key: this.settings.apiKey, audio: pcm });
+      this.log(`Oreille : presque (écart ${d.score.toFixed(1)}, limite ${d.limite.toFixed(1)}) → avis de Gemini : ${oui ? 'oui, mon nom' : 'non'}`);
+      if (oui && this.car && this.state === 'veille') { this._wakePcm = pcm; this.face.play('wake'); this.startConversation('prenom'); }
+    } catch (e) { this.log('Second avis impossible : ' + e.message); }
+  }
+  // Le nom est vérifié : la réponse retenue est jouée.
+  _gateOpen(why) {
+    const G = this._gate; if (!G || G.ok) return;
+    G.ok = true; this.log(`Nom vérifié (${why})`);
+    const buf = G.buf; G.buf = []; this._gate = null;
+    for (const [i16, rate] of buf) this._liveAudio(i16, rate);
+  }
+  // En roulant (téléphone, GPS) : mode voiture tout seul ; garé depuis 4 min : fin (C5).
+  _watchSpeed() {
+    const want = !!this.settings.voitureAuto && deviceName() === 'téléphone' && !!navigator.geolocation;
+    if (!want) { if (this._geo != null) { navigator.geolocation.clearWatch(this._geo); this._geo = null; } return; }
+    if (this._geo != null) return;
+    let fast = 0, slowSince = 0, prev = null;
+    const dist = (a, b) => { const R = 6371000, r = Math.PI / 180, x = (b.lon - a.lon) * r * Math.cos(((a.lat + b.lat) / 2) * r), y = (b.lat - a.lat) * r; return Math.hypot(x, y) * R; };
+    this._geo = navigator.geolocation.watchPosition((p) => {
+      const c = p.coords, here = { t: p.timestamp, lat: c.latitude, lon: c.longitude };
+      let v = c.speed;
+      if ((v == null || isNaN(v)) && prev && here.t > prev.t) v = dist(prev, here) / ((here.t - prev.t) / 1000);
+      prev = here; this.speed = v;
+      if (v != null && v >= 6) { fast++; slowSince = 0; if (fast >= 2 && !this.car) this.enterCar('en roulant'); }
+      else {
+        fast = 0;
+        if (v != null && v < 1.5) {
+          slowSince = slowSince || Date.now();
+          if (this.car && this.car.why === 'en roulant' && Date.now() - slowSince > 4 * 60000 && this.state !== 'conversation') this.exitCar('garé depuis 4 min');
+        } else slowSince = 0;
+      }
+    }, (e) => { if (!this._geoErr) this.log('GPS (mode voiture automatique) : ' + e.message); this._geoErr = e.message; },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+  }
+
+  // ---------- CRM à la voix (PLAN 2 quater) ----------
+  _extraTools() { return this.crm.on ? CRM_TOOLS : []; }
+
+  // Ce que Timothée dit, horodaté, avec le numéro du tour : le verrou n'accepte qu'un « oui » d'un tour APRÈS la relecture (C2).
+  _noteHeard(text, whole = false) {
+    const now = performance.now(), h = this._heard, last = h[h.length - 1];
+    if (!whole && last && last.n === this._turnN) { last.text = text; last.t = now; }
+    else h.push({ t: now, text: String(text || ''), n: whole ? -1 : this._turnN });
+    if (h.length > 30) h.splice(0, h.length - 30);
+  }
+
+  // Résultat d'un outil du CRM : info (texte pour Gemini) et, pour le mode économique, dire (phrase toute prête).
+  async _crmRun(name, a, signal, { heard } = {}) {
+    const C = this.crm, car = !!this.car;
+    if (!C.on) return { info: "Le CRM n'est pas relié à Wilson sur cet appareil (Réglages → CRM). Dis-le simplement.", dire: "Le CRM n'est pas relié sur cet appareil." };
+    const lu = (r) => (r.ok ? { info: pourGemini(r.texte, car) } : { info: `Le CRM ne répond pas : ${r.erreur || 'erreur'}. Dis-le simplement.`, dire: 'Le CRM ne répond pas pour le moment.' });
+    switch (name) {
+      case 'crm_client': {
+        const r = await C.client({ client: a.client || '' }, signal);
+        if (!r.ok) return lu(r);
+        return r.e ? { info: pourGemini(r.e.texte, car) } : { info: r.texte };        // inconnu, ou plusieurs clients possibles
+      }
+      case 'crm_agenda': return lu(await C.agenda(a.jour, signal));
+      case 'crm_bilan': return lu(await C.bilan(signal));
+      case 'crm_produit': return lu(await C.produit(a.produit || '', a.question, signal));
+      case 'appeler': {
+        const r = await C.callTarget(a, signal);
+        if (r.ok) this.showCall(r.target);
+        return { info: r.dire, dire: r.ok ? `J'affiche le numéro de ${r.target.nom} : appuie sur le bouton vert.` : null };
+      }
+      case 'crm_noter': {
+        const r = await C.prepare(a, signal);
+        return { info: r.dire, dire: r.ok ? `${r.pending.relu} Je l'enregistre ?` : null };
+      }
+      case 'crm_confirmer': {
+        let g = C.gate(heard || this._heard, { turn: this._turnN });
+        // transcription de son « oui » encore en route : on l'attend un peu (2 s au plus)
+        for (let i = 0; !g.ok && !heard && /pas de réponse/.test(g.why) && i < 8; i++) { await sleep(250); g = C.gate(this._heard); }
+        if (!g.ok) {
+          this.log(`Écriture REFUSÉE par le verrou : ${g.why}`);
+          const p = C.pending;
+          return { info: `NON ENREGISTRÉ (${g.why}). ${p ? 'Relis-lui la phrase préparée et attends son « oui ».' : 'Rappelle crm_noter.'}`, dire: p ? `${p.relu} Je l'enregistre ?` : "Il n'y a rien à enregistrer." };
+        }
+        const r = await C.commit(signal);
+        return { info: r.dire, dire: r.phrase || null };
+      }
+    }
+    return { info: 'outil inconnu' };
+  }
+
+  // Outil du CRM en mode direct : Wilson a dit « je regarde dans le CRM », il répond quand le CRM a répondu (filet : 40 s).
+  async _crmTool(call) {
+    const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
+    this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
+    if (['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit'].includes(call.name)) this.face.setEmotion('reflexion', CRM_MAX_MS + 2000, 0.6);
+    this.log(`CRM (direct) : ${call.name} ${JSON.stringify(call.args || {}).slice(0, 160)}`, true);
+    const timer = setTimeout(() => ctl.abort(), CRM_MAX_MS);
+    let res;
+    try { res = await this._crmRun(call.name, call.args || {}, ctl.signal); }
+    catch (e) {
+      if (!this._searches.has(call.id)) return;                                  // annulé (on l'a coupé)
+      res = { info: e.name === 'AbortError' ? 'Le CRM a mis trop de temps à répondre. Dis-le simplement et propose de réessayer.' : `Le CRM ne répond pas (${e.message}). Dis-le simplement.` };
+      this.log(`CRM impossible (${((performance.now() - t0) / 1000).toFixed(1)} s) : ${e.name === 'AbortError' ? 'trop long' : e.message}`);
+    } finally { clearTimeout(timer); }
+    if (conv !== this.convId || !this._searches.has(call.id)) return;
+    this._searches.delete(call.id); this._searchMs = performance.now() - t0;
+    this.face.clearEmotion();
+    this.brain.respond([{ id: call.id, name: call.name, response: { result: res.info } }]);
+    const n = this._modelOut;
+    setTimeout(() => {
+      if (conv !== this.convId || this._modelOut !== n || !this.brain.open || this.audio.playing) return;
+      this.log('Pas de réponse 6 s après le CRM : relance');
+      this.brain.sendText('[Réponds maintenant à voix haute, en français, à partir de la réponse du CRM.]');
+    }, 6000);
+  }
+
+  // Cartes à l'écran : bouton d'appel (C4), confirmation d'une écriture (C2).
+  showCall(t) {
+    const el = $('cards');
+    el.innerHTML = `<div class="card call" data-kind="call"><div class="card-t">Appeler</div><div class="card-n">${esc(t.nom)}</div><div class="card-s">${esc(t.societe)} · ${esc(t.aff)}</div>`
+      + `<div class="card-b"><a class="card-go" href="tel:${esc(t.tel)}">Appeler</a><button class="card-x" type="button">Fermer</button></div></div>`;
+    el.hidden = false;
+    el.querySelector('.card-go').addEventListener('click', () => this._calling(t));
+    el.querySelector('.card-x').addEventListener('click', () => this.hideCard());
+    clearTimeout(this._cardT); this._cardT = setTimeout(() => this.hideCard('call'), 120000);
+    this.log(`Bouton d'appel affiché : ${t.nom} (${t.societe})`, true);
+  }
+  showConfirm(p) {
+    const el = $('cards');
+    el.innerHTML = `<div class="card confirm" data-kind="confirm"><div class="card-t">À enregistrer dans le CRM ?</div><div class="card-r">${esc(p.relu)}</div>`
+      + `<div class="card-b"><button class="card-ok" type="button">Oui, enregistre</button><button class="card-x" type="button">Non</button></div></div>`;
+    el.hidden = false;
+    el.querySelector('.card-ok').addEventListener('click', () => this._confirmTap());
+    el.querySelector('.card-x').addEventListener('click', () => this._refuseTap());
+    clearTimeout(this._cardT); this._cardT = setTimeout(() => this.hideCard('confirm'), 5 * 60000);
+  }
+  hideCard(kind) {
+    const el = $('cards'), c = el.firstElementChild;
+    if (!c || (kind && c.dataset.kind !== kind)) return;
+    el.innerHTML = ''; el.hidden = true;
+  }
+  async _confirmTap() {
+    if (!this.crm.gate(null, { tapped: true }).ok) { this.hideCard('confirm'); return; }
+    this.log('Écriture confirmée en touchant « Oui » à l\'écran');
+    const r = await this.crm.commit();
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Timothée a confirmé en touchant « Oui » sur l'écran. ${r.dire}]`);
+    else if (r.phrase) this._say(r.phrase);
+  }
+  _refuseTap() {
+    this.crm.pending = null; this.hideCard('confirm'); this.log('Écriture annulée à l\'écran');
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText('[Timothée a touché « Non » : rien n\'est enregistré. Demande-lui en une phrase ce qu\'il faut changer.]');
+  }
+  // Appel lancé : Wilson se tait ; au retour, il propose le compte rendu de l'appel.
+  _calling(t) {
+    this.log(`Appel lancé vers ${t.nom} (${t.societe})`, true);
+    this._callAfter = { ...t, at: Date.now() };
+    this.hideCard('call');
+    setTimeout(() => { if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('appel'); }, 400);
+  }
+  _backFromCall() {
+    const c = this._callAfter; if (!c) return;
+    const dt = Date.now() - c.at;
+    if (dt < 8000) return;                       // l'appel n'est pas encore parti (ou annulé tout de suite)
+    this._callAfter = null;
+    if (dt > 2 * 3600000 || !this.crm.on) return;
+    this._lastCall = c;
+    this.log(`Retour d'appel après ${Math.round(dt / 1000)} s : je propose le compte rendu`);
+    setTimeout(() => { if (this.state === 'veille' || this.state === 'dodo') this.startConversation('apres_appel'); }, 1200);
+  }
+  _apresAppelTexte() {
+    const c = this._lastCall || {};
+    return `[Timothée vient de raccrocher avec ${c.nom || 'un client'}${c.societe ? ' (' + c.societe + ')' : ''}. Demande-lui en une phrase s'il veut te dicter le compte rendu de l'appel ; s'il le fait, prépare-le comme compte rendu d'appel.]`;
+  }
+
   // Photo nette, prise à la demande (R6) : plus grande et plus nette que les anciennes images automatiques.
   _photo() {
     if (!this.vision) return null;
@@ -1005,6 +1313,9 @@ Nous sommes ${fmtDate()}.${bat}`;
   _wireSensors() {
     const s = this.sensors;
     $('wake').addEventListener('pointerup', () => this.start(true));
+    $('car-btn').hidden = deviceName() !== 'téléphone';
+    $('car-btn').addEventListener('click', () => { if (this.car) this.exitCar('bouton'); else this.enterCar('bouton'); });
+    $('car-exit').addEventListener('click', () => this.exitCar('bouton'));
     s.on('tap', () => {
       if (!this.started) { this.boot(); return; }
       this.voice.warm();
@@ -1059,7 +1370,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       const E = this.ecoState, thinking = E && (E.busy || E.cap);
       const searching = !!(this._searches && this._searches.size);
       // Images : aucune envoyée d'office (R6) ; seulement à la demande (outil « regarder »).
-      const keep = this.settings.convTimeout * 1000;
+      const keep = this.car ? CAR_IDLE_MS : this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
       if (this._gazeMode && !this.continuous) {
         // R3 : le regard pilote la discussion. 3 s sans regard (sauf s'il parle ou cherche) → veille ; regardé → reprise.
@@ -1081,7 +1392,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     }
     // Veille → dodo quand la pièce est vide (ou la nuit).
     if (v && v.hasPerson) this.presenceAt = now;
-    if (this.state === 'veille') {
+    if (this.state === 'veille' && !this.car) {
       const empty = now - this.presenceAt;
       const dark = v && v.light < 0.05;
       if (empty > 10 * 60000 || (this._isNight() && empty > 2 * 60000) || (dark && empty > 2 * 60000)) this.setState('dodo');

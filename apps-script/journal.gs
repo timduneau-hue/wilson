@@ -2,7 +2,9 @@
 //  1. journal à distance : reçoit le journal de la tablette et le range dans la feuille (Claude la lit pour diagnostiquer) ;
 //  2. recherche Internet : Wilson lui envoie une question, le script interroge Tavily (gratuit : 1 000 recherches par mois)
 //     et renvoie la réponse. La clé Tavily reste ici, dans le Drive de Timothée, jamais dans le code publié ;
-//  3. réglages communs à tous les appareils (téléphone, tablette, PC) : rangés dans les propriétés du script, le plus récent gagne.
+//  3. réglages communs à tous les appareils (téléphone, tablette, PC) : rangés dans les propriétés du script, le plus récent gagne ;
+//  4. CRM à la voix : les questions de Wilson (actions « crm_… ») sont relayées à l'application Web du CRM avec le jeton
+//     de Timothée. Le CRM reste en accès « Moi uniquement » : sans ce jeton, personne d'autre ne peut l'ouvrir.
 // Déploiement : Déployer → Nouveau déploiement → Application Web → Exécuter en tant que « moi », accès « Tout le monde ».
 // Ouvrir ensuite l'adresse du déploiement : la page affiche un QR code que Wilson scanne (Réglages → Journal à distance).
 
@@ -10,6 +12,7 @@ var FEUILLE = 'COLLE_ICI_L_ID_DE_LA_FEUILLE';   // l'identifiant de « Wilson �
 var MAX = { 'Journal': 20000, 'Délais': 5000 };   // au-delà, les lignes les plus anciennes sont effacées
 var FORMAT_DATE = 'dd/mm/yy hh"h"mm:ss';
 var TAVILY_CLE = 'COLLE_ICI_TA_CLE_TAVILY';      // ta clé Tavily (app.tavily.com, commence par tvly-)
+var CRM_URL = 'COLLE_ICI_L_ADRESSE_DE_TON_CRM';   // l'adresse de ton CRM, celle que tu ouvres d'habitude (finit par /exec)
 
 function doPost(e) {
   var d = JSON.parse((e && e.postData && e.postData.contents) || '{}');
@@ -18,6 +21,7 @@ function doPost(e) {
       if (d.action === 'chercher') return chercher_(d);
       if (d.action === 'reglages_lire') return json_(lireReglages_());
       if (d.action === 'reglages_ecrire') return json_(ecrireReglages_(d));
+      if (String(d.action).indexOf('crm_') === 0) return json_(crm_(d));
       return json_({ ok: false, erreur: 'action inconnue : ' + d.action });
     } catch (err) { return json_({ ok: false, erreur: 'script : ' + String(err && err.message || err) }); }   // ex. autorisation manquante
   }
@@ -100,6 +104,30 @@ function ecrireReglages_(d) {
     p.setProperty('reglages', JSON.stringify({ t: t, reglages: d.reglages || {} }));
     return { ok: true, applique: true, t: t };
   } finally { lock.releaseLock(); }
+}
+
+// Question au CRM : transmise à son application Web avec le jeton de Timothée (le CRM vérifie que c'est bien lui).
+// Le jeton doit porter l'autorisation Google Drive : elle est demandée une fois en lançant « essaiCRM » dans l'éditeur.
+function crm_(d) {
+  if (!/^https:\/\/script\.google\.com\/.+\/exec\/?$/.test(CRM_URL)) return { ok: false, erreur: 'adresse du CRM absente du script (ligne CRM_URL)' };
+  var r = UrlFetchApp.fetch(CRM_URL, {
+    method: 'post', contentType: 'text/plain;charset=utf-8', payload: JSON.stringify(d), muteHttpExceptions: true, followRedirects: true,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+  });
+  var code = r.getResponseCode(), txt = r.getContentText();
+  try { return JSON.parse(txt); } catch (err) {}
+  if (/doPost/.test(txt)) return { ok: false, erreur: 'le CRM en ligne n\'a pas encore la partie Wilson : colle le nouveau WebApp_autonome.gs et déploie une nouvelle version du CRM' };
+  if (code === 401 || code === 403 || /ServiceLogin|accounts\.google\.com/.test(txt)) return { ok: false, erreur: 'le CRM refuse l\'accès : lance « essaiCRM » dans l\'éditeur du script de Wilson et accepte les autorisations' };
+  return { ok: false, erreur: 'réponse illisible du CRM (' + code + ')' };
+}
+// Ne sert qu'à faire demander l'autorisation Google Drive, sans laquelle le CRM refuse le jeton.
+function autoriserDrive_() { return DriveApp.getRootFolder().getName(); }
+
+// Essai depuis l'éditeur : sélectionne « essaiCRM » puis « Exécuter » (accepte les autorisations la 1re fois).
+function essaiCRM() {
+  autoriserDrive_();
+  Logger.log(JSON.stringify(crm_({ action: 'crm_etat' })));
+  Logger.log(String(JSON.stringify(crm_({ action: 'crm_journee', jour: 'aujourdhui' }))).slice(0, 1500));
 }
 
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }

@@ -49,7 +49,8 @@ const QUOTA_SKIP_MS = 6 * 3600000;    // un modèle refusé pour quota est essay
 // interrupts : Google coupe Wilson dès qu'il entend parler (coupure « directe ») ; sinon il finit sa phrase (« prudente »).
 // proactive : false = Gemini répond à TOUT ce qu'il entend (il n'entend que ce qu'on lui dit en le regardant) ; sans ce réglage
 // explicite, il jugeait souvent que la phrase n'était pas pour lui et restait muet (journal du 24/10/26, sans photo).
-function buildSetup({ model, voice, system, level, handle, think, interrupts = false, proactive }) {
+// extra : outils en plus (CRM à la voix, PLAN 2 quater), déclarés seulement quand le CRM est relié.
+function buildSetup({ model, voice, system, level, handle, think, interrupts = false, proactive, extra = [] }) {
   const setup = {
     model: `models/${model}`,
     generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
@@ -58,7 +59,7 @@ function buildSetup({ model, voice, system, level, handle, think, interrupts = f
     sessionResumption: handle ? { handle } : {},
   };
   if (level <= 1) {
-    setup.tools = [{ functionDeclarations: TOOLS[0].functionDeclarations.map(({ behavior, ...f }) => (level === 0 ? { behavior, ...f } : f)) }];
+    setup.tools = [{ functionDeclarations: [...TOOLS[0].functionDeclarations, ...extra].map(({ behavior, ...f }) => (level === 0 ? { behavior, ...f } : f)) }];
     setup.realtimeInputConfig = { automaticActivityDetection: { prefixPaddingMs: 200, silenceDurationMs: 700 } };
   }
   // Gemini 2.5 « native audio » réfléchit par défaut avant de parler : plusieurs secondes de silence. On coupe la réflexion.
@@ -194,15 +195,16 @@ export class Brain {
   // Les réponses « silencieuses » aux outils n'existent qu'avec la configuration complète du modèle 3.8.
   get canSchedule() { return this.level === 0 && /3\.8/.test(this.modelUsed || ''); }
 
-  _open(url, { model, voice, system, resume = true, level = 0, think, interrupts, proactive }) {
+  _open(url, { model, voice, system, resume = true, level = 0, think, interrupts, proactive, extra }) {
     countSession();
     return new Promise((resolve, reject) => {
       this._closing = false; this.ready = false;
+      this.inText = ''; this.outText = '';          // un tour coupé par la fin de la discussion ne déborde pas sur la suivante
       const ws = new WebSocket(url);
       this.ws = ws;
       const timer = setTimeout(() => { reject(new Error('Délai de connexion dépassé (Google ne répond pas)')); try { ws.close(); } catch (_) {} }, 15000);
       ws.onopen = () => {
-        const setup = buildSetup({ model, voice, system, level, think, interrupts, proactive, handle: resume ? this.handle : null });
+        const setup = buildSetup({ model, voice, system, level, think, interrupts, proactive, extra, handle: resume ? this.handle : null });
         ws.send(JSON.stringify({ setup }));
       };
       ws.onmessage = async (e) => {

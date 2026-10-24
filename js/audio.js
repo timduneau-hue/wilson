@@ -13,6 +13,7 @@ export class AudioIO {
     this.gainDb = 0; this.aec = false; this.playedSec = 0;
   }
   on(ev, fn) { this.listeners[ev].push(fn); }
+  off(ev, fn) { this.listeners[ev] = this.listeners[ev].filter((f) => f !== fn); }
   _emit(ev, ...a) { for (const fn of this.listeners[ev]) fn(...a); }
 
   // aec : annulation d'écho du micro. Sur Android, elle fait passer TOUT le son de la page en « mode appel »

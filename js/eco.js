@@ -45,8 +45,22 @@ export const ECO_SCHEMA = {
   propertyOrdering: ORDER,
 };
 
-// Consigne de format. search : 2e requête (recherche Google) ; canSearch : la recherche est-elle possible ?
-export function ecoFormat({ search = false, canSearch = true } = {}) {
+// CRM à la voix (PLAN 2 quater) : un champ « crm » en plus, seulement quand le CRM est relié.
+const CRM_OUTILS = ['aucun', 'client', 'agenda', 'bilan', 'produit', 'appeler', 'noter', 'confirmer'];
+const CRM_ORDER = ['outil', 'client', 'contact', 'jour', 'produit', 'question', 'type', 'texte', 'date', 'heure', 'echange'];
+const ORDER_CRM = ['pour_moi', 'chercher', 'regarder', 'crm', 'emotion', 'reponse', 'geste', 'memoriser', 'oublier', 'fin', 'entendu'];
+export function ecoSchema(crm = false) {
+  if (!crm) return ECO_SCHEMA;
+  const S = (d) => ({ type: 'STRING', ...(d ? { enum: d } : {}) });
+  return { ...ECO_SCHEMA,
+    properties: { ...ECO_SCHEMA.properties, crm: { type: 'OBJECT', required: ['outil'], propertyOrdering: CRM_ORDER, properties: {
+      outil: S(CRM_OUTILS), client: S(), contact: S(), jour: S(), produit: S(), question: S(['qui_achete', 'infos']),
+      type: S(['tache', 'compte_rendu', 'rdv', 'note']), texte: S(), date: S(), heure: S(), echange: S(['visite', 'appel']) } } },
+    propertyOrdering: ORDER_CRM };
+}
+
+// Consigne de format. search : 2e requête (recherche Google) ; canSearch : la recherche est-elle possible ? crm : CRM relié.
+export function ecoFormat({ search = false, canSearch = true, crm = false } = {}) {
   const head = search
     ? `MODE ÉCONOMIQUE — RECHERCHE : fais une recherche Google pour répondre à la dernière question de la conversation, puis réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs DANS CET ORDRE EXACT :`
     : `MODE ÉCONOMIQUE — tu reçois l'enregistrement audio de ce qui vient d'être dit dans le salon (et parfois une photo de ce que tu vois, ou une consigne écrite entre crochets).
@@ -60,7 +74,7 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs
       + (canSearch ? ' ; si chercher n\'est pas vide : SEULEMENT une courte phrase d\'attente naturelle (par exemple « Attends, je regarde. »), sans inventer la réponse' : '');
   return `${head}
 {"pour_moi": ${search ? 'true' : 'true si la phrase s\'adresse à toi (on te regardait en la disant : c\'est en général le cas, ou la suite évidente de votre conversation), false si c\'est la télé, un bruit, une phrase coupée ou visiblement adressée à quelqu\'un d\'autre'},
-${chercher}${search ? '' : ` "regarder": true SEULEMENT si on te demande de regarder ou de décrire quelque chose (ce que tu vois, une couleur, lire, un objet montré, une tenue…) et qu'aucune photo n'est jointe ; alors "reponse" = une très courte phrase d'attente (« Je regarde… »). Sinon false,\n`} "emotion": "une émotion parmi ${EMOTIONS.join(', ')}",
+${chercher}${search ? '' : ` "regarder": true SEULEMENT si on te demande de regarder ou de décrire quelque chose (ce que tu vois, une couleur, lire, un objet montré, une tenue…) et qu'aucune photo n'est jointe ; alors "reponse" = une très courte phrase d'attente (« Je regarde… »). Sinon false,\n`}${crm && !search ? ` "crm": {"outil": "aucun", sauf si la phrase porte sur le CRM de Timothée (ses clients, rendez-vous, tâches, devis, chiffres, articles), s'il faut appeler un client ou noter quelque chose : "client" (fiche d'un client : remplis "client" avec le nom dit), "agenda" ("jour" : aujourd'hui, demain, jeudi…), "bilan" (son chiffre d'affaires global), "produit" ("produit" et "question" qui_achete ou infos), "appeler" ("client", "contact"), "noter" ("type" tache, compte_rendu, rdv ou note, "client", "texte" = ses mots mis au propre, "date", "heure", "echange" visite ou appel : RIEN n'est écrit, tu recevras la phrase à lui relire), "confirmer" (SEULEMENT s'il vient de répondre oui à ta relecture)} ; quand "outil" n'est pas "aucun", "reponse" = une très courte phrase d'attente (« Je regarde dans le CRM… »), ou vide pour noter et confirmer. Ne devine jamais un nom, un chiffre ou une date du CRM,\n` : ''} "emotion": "une émotion parmi ${EMOTIONS.join(', ')}",
  "reponse": "${reponse}",
  "geste": "${GESTES.join(', ')}",
  "memoriser": ["informations durables à retenir, phrases courtes et autonomes avec les prénoms"],
@@ -127,7 +141,7 @@ export class EcoBrain {
   _thinkOrder() { return [this.thinking, 'minimal', 'low', null].filter((v, i, a) => a.indexOf(v) === i); }
 
   // web : outil Google Search joint (2e requête « recherche ») ; false = même format, sans Internet (quota de recherche épuisé, météo fournie…).
-  _body({ system, contents, think, search, web = search, model = '' }) {
+  _body({ system, contents, think, search, web = search, model = '', crm = false }) {
     const schema = !search && !this.noSchema;
     return {
       systemInstruction: { parts: [{ text: system }] },
@@ -135,7 +149,7 @@ export class EcoBrain {
       ...(web && !this.noSearch ? { tools: [{ googleSearch: {} }] } : {}),
       generationConfig: {
         temperature: 0.85, maxOutputTokens: 1024,
-        ...(schema ? { responseMimeType: 'application/json', responseSchema: ECO_SCHEMA } : {}),
+        ...(schema ? { responseMimeType: 'application/json', responseSchema: ecoSchema(crm) } : {}),
         // Gemini 2.5 : « thinkingBudget » (0 = pas de réflexion) ; Gemini 3 : « thinkingLevel ».
         ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: think } } : {}),
       },
@@ -144,7 +158,7 @@ export class EcoBrain {
 
   // req : { audio: Int16Array 16 kHz, image: base64 jpeg, text, hint } ; onPartial({pourMoi, emotion, reponse, closed}) pendant l'écriture.
   // search : 2e requête, avec Google Search (texte seul). La réponse n'entre dans l'historique que par commit().
-  async ask({ key, system, audio, image, text, hint, signal, onPartial, search = false, web = search, fresh = false }) {
+  async ask({ key, system, audio, image, text, hint, signal, onPartial, search = false, web = search, fresh = false, crm = false }) {
     const parts = [];
     if (audio && audio.length) parts.push({ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio) } });
     if (image) parts.push({ inlineData: { mimeType: 'image/jpeg', data: image } });
@@ -161,7 +175,7 @@ export class EcoBrain {
       const thinks = this._thinkOrder(); let ti = 0;
       while (ti < thinks.length) {
         const think = thinks[ti];
-        const res = await this._race(model, this._body({ system, contents, think, search, web, model }), key, signal, onText, hedge);
+        const res = await this._race(model, this._body({ system, contents, think, search, web, model, crm }), key, signal, onText, hedge);
         if (res.ok) {
           if (this.refused[model]) { delete this.refused[model]; try { localStorage.setItem('wilson.eco.refus', JSON.stringify(this.refused)); } catch (_) {} }
           const out = res.txt != null ? parseText(res.txt) : parseReply(res.json);
@@ -188,6 +202,30 @@ export class EcoBrain {
       }
     }
     throw quotaErr || last || new Error('Aucun modèle disponible');
+  }
+
+  // Second avis de l'oreille du mode voiture : la phrase commence-t-elle par « Wilson » ? (true / false ; requête courte)
+  async nomDit({ key, audio, signal }) {
+    const order = ECO_MODELS.rapide, now = Date.now();
+    const models = [...order.filter((m) => !(this.refused[m] > now)), ...order.filter((m) => this.refused[m] > now)].slice(0, 3);
+    const question = "Écoute l'enregistrement. Est-ce que quelqu'un y appelle « Wilson » par son prénom (en général au début : « Wilson, … ») ? Réponds seulement par oui ou par non.";
+    let last = null;
+    for (const model of models) {
+      for (const think of [true, false]) {
+        const body = { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio) } }, { text: question }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 8, ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' } } : {}) } };
+        this.sent.push(performance.now());
+        const res = await this._one(API + model + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, signal);
+        if (res.ok) {
+          const t = ((((res.json.candidates || [])[0] || {}).content || {}).parts || []).filter((x) => x.text && !x.thought).map((x) => x.text).join(' ');
+          return /\boui\b/i.test(t);
+        }
+        last = res;
+        if (res.status === 400 && /think/i.test(res.msg || '')) continue;
+        break;
+      }
+    }
+    throw new Error((last && last.msg) || 'pas de réponse');
   }
 
   // Une requête, relancée en parallèle si Google n'a encore rien écrit après hedgeMs ; la 1re qui écrit gagne, l'autre est annulée.
@@ -328,6 +366,7 @@ export function parseReply(j) {
     memoriser: arr(o.memoriser),
     oublier: String(o.oublier || '').trim(),
     fin: o.fin === true || o.fin === 'true',
+    crm: o.crm && typeof o.crm === 'object' && o.crm.outil && o.crm.outil !== 'aucun' ? o.crm : null,
   };
 }
 

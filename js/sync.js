@@ -3,7 +3,8 @@
 //  2. Ensuite, synchronisation par le script de Timothée (reglages_lire / reglages_ecrire) : le plus récent gagne.
 
 // Propres à chaque appareil : calibrage et sens du regard (position de la caméra), voix installées sur l'appareil.
-export const LOCAL_ONLY = ['gazeCalib', 'mirror', 'ecoVoice', 'v'];
+// Oreille du mode voiture : sa sensibilité dépend du micro de l'appareil (ses empreintes restent aussi sur l'appareil).
+export const LOCAL_ONLY = ['gazeCalib', 'mirror', 'ecoVoice', 'v', 'oreilleSens'];
 const PULL_MS = 10 * 60000;
 
 export function shareable(s) {

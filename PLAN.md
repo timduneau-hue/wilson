@@ -43,6 +43,24 @@ Les réglages sont **les mêmes partout** (téléphone, tablette, PC) ; la confi
 - **Restent propres à chaque appareil** : calibrage du regard, sens du regard (miroir), voix de la tablette du mode
   économique (les voix installées diffèrent d'un appareil à l'autre).
 
+## 2 quater. Le CRM à la voix et le mode voiture (choix de Timothée, 24/10/26)
+
+But : **en voiture, en allant chez un client**, poser des questions sur son CRM et avoir des réponses précises.
+Timothée accepte que les données du CRM passent par Gemini (palier gratuit).
+
+| # | Règle | Comment c'est garanti |
+|---|-------|-----------------------|
+| C1 | **Les réponses viennent du CRM lui-même**, jamais d'une copie. | Wilson → script de Wilson → application Web du CRM (accès « Moi uniquement » inchangé, appel avec le jeton de Timothée) → les fonctions du CRM (fiche, historique, CA, devis, comptes rendus, tâches, agenda, articles). Mêmes chiffres qu'à l'écran. |
+| C2 | **Rien ne s'écrit dans le CRM sans confirmation.** | Verrou dans le code de l'appli, pas seulement une consigne à Gemini : Wilson relit mot pour mot, l'écriture n'est débloquée que par un « oui » de Timothée entendu **après** la relecture (ou un appui sur « Oui » à l'écran). |
+| C3 | **Tâches** : le « oui » suffit. **Comptes rendus, RDV, notes** : brouillons à valider dans le CRM. | Tâche → `api_tacheAjouter` du CRM. Le reste → onglet masqué « WILSON A VALIDER » ; dans Mes tâches, rubrique « Dicté à Wilson » (sur tous les appareils) : « Reprendre dans la fiche » ouvre la fiche **pré-remplie**, Timothée vérifie et touche Enregistrer → tout le circuit habituel du CRM (Negos, journal des visites, agenda, mails au client selon ses règles, jamais le week-end). Une note devient un compte rendu de type « Autre » (le CRM n'a plus de champ Notes). |
+| C4 | **Appeler un client.** | Wilson trouve le contact et affiche un grand bouton vert ; un appui ouvre le numéro dans le téléphone (une page web n'a pas le droit de lancer un appel seule) ; pendant l'appel Wilson se tait, au retour il propose un compte rendu d'appel. |
+| C5 | **En voiture, pas besoin de regarder l'écran.** | Mode voiture : caméra coupée, réveil quand on dit **« Wilson »** (oreille locale apprise sur la voix de Timothée, rien n'est envoyé tant qu'il ne l'a pas dit), puis la discussion continue sans le nom ; veille après 1 min de silence. Réponses très courtes, l'essentiel d'abord. Entrée : bouton à l'écran, ou toute seule en roulant (GPS, téléphone seulement). |
+| C6 | Pas de fausse alerte de la radio. | 2e vérification : la phrase transcrite par Gemini doit contenir « Wilson », sinon il se tait et se rendort. |
+| C7 | Rapide. | Au passage en mode voiture, les fiches des RDV du jour sont chargées d'avance ; sinon Wilson dit « je regarde dans le CRM… » le temps de la réponse (1 à 5 s). |
+
+Android Auto (à partir du 27/10/26) : une appli web ne s'affiche pas sur l'écran de la voiture ; Wilson reste sur le
+téléphone, le son passe par la voiture. Comportement exact à vérifier dans le journal.
+
 ## 3. Les états (machine à états unique, dans `app.js`)
 
 ```
@@ -82,6 +100,8 @@ Les réglages sont **les mêmes partout** (téléphone, tablette, PC) ; la confi
 | `js/remote.js` | Journal à distance : journal, délais et bilan → feuille Google « Wilson — journal » (lue par Claude) ; lecture du QR code | `apps-script/journal.gs` |
 | `apps-script/journal.gs` | Script Apps Script de Timothée (application Web) : range le journal dans la feuille ; recherche Internet par Tavily (clé dans le script) ; réglages communs (propriétés du script) | Google Sheets, Tavily |
 | `js/sync.js` | Mêmes réglages partout : lien de copie (#reglages=…), synchronisation par le script | `remote.js` |
+| `js/crm.js` | CRM à la voix : questions au CRM par le script, fiches gardées pour la journée, dates dites (« jeudi », « demain 10h »), verrou de confirmation des écritures, bouton d'appel | `remote.js`, CRM (`WebApp_autonome.gs`, action `doPost` → `wilson`) |
+| `js/oreille.js` | Oreille locale du mode voiture : reconnaît « Wilson » dit par Timothée (empreintes de sa voix, comparaison DTW), sur l'appareil | `audio.js` |
 
 ## 5. Choix techniques et pourquoi
 
@@ -94,6 +114,11 @@ Les réglages sont **les mêmes partout** (téléphone, tablette, PC) ; la confi
   La voix de la tablette (mode économique) n'est pas touchée : c'est un autre programme (le moteur de synthèse vocale).
 - **Regard calculé sur la tablette** (MediaPipe) : aucune donnée envoyée en veille, aucun quota consommé.
   Le mot-clé « Wilson » (Vosk) a été retiré le 23/10/26 : il ralentissait trop la tablette.
+  En voiture (1.13.0), le regard n'est pas possible : une **oreille légère** reconnaît « Wilson » sans modèle à télécharger.
+  Timothée dit 5 fois « Wilson » (Réglages → Mode voiture) ; ses empreintes (coefficients MFCC, 100–3 800 Hz pour
+  supporter le micro Bluetooth de la voiture) sont comparées à chaque début de phrase (DTW), quelques millisecondes de calcul.
+- **CRM** : le CRM reste en accès « Moi uniquement » ; le script de Wilson l'appelle avec le jeton de Timothée
+  (`ScriptApp.getOAuthToken()`, portée Drive). Aucune donnée du CRM dans le dépôt public.
 - **La clé API** n'est jamais dans le code publié : elle est saisie sur la tablette et reste dessus.
 
 ## 6. Deux cerveaux (réglage « Cerveau »)
@@ -139,7 +164,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 24/10/26 : **version 1.12.2** en ligne.
+État au 24/10/26 : **version 1.13.0** en ligne (CRM à la voix et mode voiture, section 2 quater).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -221,7 +246,30 @@ Historique récent :
   détection des visages en panne sur la carte graphique → processeur ; analyse muette 8 s → relancée. Noté dans le
   journal et le bilan (« relancée n fois, n réparation(s) »).
 
+- 1.13.0 (24/10/26) — **CRM à la voix et mode voiture** (section 2 quater), à la demande de Timothée (« en voiture, en allant
+  chez un client, poser des questions et avoir des réponses précises » ; « rien ne s'écrit dans le CRM sans confirmation »).
+  Ses choix : réveil en disant « Wilson » ; tâches → son « oui » suffit ; comptes rendus, RDV, notes → brouillons à valider
+  dans le CRM ; Bluetooth aujourd'hui, Android Auto à partir du 27/10/26. Côté Wilson : `js/crm.js` (outils crm_client,
+  crm_agenda, crm_bilan, crm_produit, appeler, crm_noter, crm_confirmer ; champ « crm » en mode économique ; verrou par tour
+  de parole), `js/oreille.js` (empreintes MFCC + DTW, seuil placé entre ses « Wilson » et une phrase sans le nom ; « presque »
+  → second avis de Gemini Flash-Lite, 20 par heure au plus), mode voiture (bouton, GPS), réponse retenue jusqu'à la
+  transcription du nom. Corrigé au passage : réglages coupés à droite en portrait (grille trop large depuis 1.10.0) ;
+  transcription d'un tour coupé qui débordait sur la discussion suivante.
+  **Côté CRM** (fichiers complets remis à Timothée, pas dans ce dépôt) : `WebApp_autonome.gs` section 53 « WILSON » (`doPost`
+  → `wilson(d)` : crm_etat, crm_trouver, crm_client, crm_journee, crm_bilan, crm_produit, crm_tache, crm_brouillon ; noms
+  dits à voix haute retrouvés par mots + clé phonétique + Jaro-Winkler + ville ; onglet masqué « WILSON A VALIDER »),
+  `api_mesTaches` renvoie les brouillons, `api_saveClient` marque fait le brouillon repris ; `Index.html` : rubrique
+  « Dicté à Wilson » en tête de Mes tâches (tous appareils), « Reprendre dans la fiche » pré-remplit la fiche.
+  Script de Wilson : ligne `CRM_URL` (adresse du CRM), relais `crm_…` avec `ScriptApp.getOAuthToken()`, `essaiCRM`.
+
 En attente :
+- **Mise en place par Timothée (1.13.0)** : 1) CRM : coller les deux fichiers, puis Déployer → Gérer les déploiements →
+  nouvelle version ; 2) script de Wilson : coller le nouveau code (garder sa clé Tavily), coller l'adresse du CRM ligne
+  `CRM_URL`, lancer `essaiCRM` et accepter (Google Drive), puis nouvelle version du déploiement ; 3) téléphone : Réglages →
+  CRM et voiture → cocher « Relier Wilson à mon CRM », « Apprendre mon nom » (dans la voiture, moteur allumé).
+- Lire dans le journal : lignes « CRM : … en x s », « Oreille : phrase de …, écart …, limite … » (réglage de l'oreille),
+  « Nom vérifié », « Pas mon nom », « Écriture REFUSÉE par le verrou ». Onglet État : lignes CRM, Mode voiture, Oreille.
+- Android Auto (27/10/26) : vérifier son, micro et réveil au nom.
 - Journal à distance en place depuis le 23/10/26 : lire la feuille avant de poser des questions à Timothée ;
 - son du mode direct confirmé audible en 1.8.1 (36 s jouées, Timothée a répondu) ;
 - vérifier dans le journal que la recherche passe par Tavily (« Recherche Tavily faite ») après `essaiRecherche` ; onglet État → « Recherche Internet » ;
