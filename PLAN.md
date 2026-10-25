@@ -197,6 +197,16 @@ Constat du 25/10/26 : aucun Home Assistant sur le réseau (box Free, 192.168.1.x
 | D5 | Sécurité. | Compte Home Assistant créé par Timothée ; jeton d'accès créé et collé par lui dans Wilson (jamais dans le dépôt) ; comptes Google Cloud / Tailscale : consentements donnés par lui. |
 | D6 | Accès de Claude au PC. | Extension Claude dans Chrome (en place le 25/10/26) + appli Claude de bureau avec « Computer use » (pour VirtualBox) ; téléchargements seulement avec l'accord de Timothée ; fenêtres d'administrateur Windows validées par lui. |
 
+Avancement (25/10/26, 14h55) :
+- Fait : VirtualBox 7.2.22 installé ; image Home Assistant OS 18.3 ; machine virtuelle « HomeAssistant » créée et démarrée par
+  le script `Téléchargements\Installer Home Assistant.bat` (→ `installer-home-assistant.ps1`, rejouable : il complète ce qui
+  manque et écrit `installation-home-assistant.log`) — EFI, 3 Go, 2 cœurs, disque 32 Go, pont sur la Wi-Fi (Realtek
+  RTL8822BE), MAC 08:00:27:BC:8E:6E ; relancée à chaque ouverture de session (`Démarrage\Home Assistant.cmd`).
+- Home Assistant répond sur http://homeassistant.local:8123 ; le DNS de la box bloquait le premier téléchargement →
+  DNS Cloudflare choisi dans l'écran de préparation ; téléchargement de Home Assistant Core en cours (20 min ou plus).
+- Reste : compte Home Assistant (Timothée) ; appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
+  outil `maison` dans Wilson ; ouverture de session Windows automatique (sinon la machine ne redémarre qu'après connexion).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 25/10/26 : **version 1.15.0** en ligne (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
