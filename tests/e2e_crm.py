@@ -149,6 +149,8 @@ async def main():
         fin_tour(); await asyncio.sleep(0.1)
         r = await tool('crm_noter', {'type': 'rdv', 'client': 'lui', 'date': 'mardi prochain'}, 'c13')
         check('RDV sans heure : il demande l\'heure (rien de préparé)', r and "Il manque l'heure" in r)
+        r = await tool('crm_noter', {'type': 'tache', 'client': 'Gaudin', 'texte': 'Rappeler Gaudin'}, 'c13b')
+        check('Tâche sans jour : il demande pour quand (journal du 25/10 : rappel mis au jour même)', r and 'Il manque le jour du rappel' in r and await page.evaluate("document.getElementById('cards').hidden"), str(r))
         r = await tool('crm_noter', {'type': 'compte_rendu', 'client': 'Gaudin', 'texte': 'Il veut 40 fenêtres, devis Hoppe à faire', 'echange': 'visite'}, 'c14')
         check('Compte rendu : relecture « Compte rendu de visite, Menuiserie Gaudin »', r and 'Compte rendu de visite, Menuiserie Gaudin (Jean Gaudin)' in r, str(r))
         fin_tour(); await asyncio.sleep(0.1)

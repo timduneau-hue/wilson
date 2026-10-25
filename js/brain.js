@@ -84,6 +84,7 @@ function countSession() {
 // Nature d'un refus de connexion, pour savoir quoi réessayer.
 function classify(e) {
   const m = (e && e.message) || '';
+  if (/session (not found|history)|session handle|session.*expired/i.test(m)) return 'session';   // reprise impossible (journal du 25/10/26)
   if (e.auth || AUTH_RE.test(m)) return 'auth';
   if (/quota|exceeded|exhausted|rate.?limit|too many requests|429/i.test(m)) return 'quota';
   if (/not found|not supported for|is not available|overloaded|unavailable|high demand|503/i.test(m)) return 'model';
@@ -136,11 +137,16 @@ export class Brain {
   _restore() {
     try {
       const o = JSON.parse(localStorage.getItem('wilson.live') || 'null');
-      if (o) { this.modelUsed = o.model || null; this.level = o.level ?? null; this.authMode = o.auth || null; this.think = o.think === null ? null : false; this.proactive = o.proactive === null ? null : false; this.refused = o.refused || {}; }
+      if (o) {
+        this.modelUsed = o.model || null; this.level = o.level ?? null; this.authMode = o.auth || null; this.think = o.think === null ? null : false; this.refused = o.refused || {};
+        // « réponds à tout » refusé par le modèle : on réessaie une fois par jour (Google fait évoluer ses modèles)
+        this.proRefusAt = o.proRefusAt || 0;
+        this.proactive = o.proactive === null && Date.now() - this.proRefusAt < 24 * 3600000 ? null : false;
+      }
     } catch (_) {}
   }
   _save() {
-    try { localStorage.setItem('wilson.live', JSON.stringify({ model: this.modelUsed, level: this.level, auth: this.authMode, think: this.think, proactive: this.proactive, refused: this.refused })); } catch (_) {}
+    try { localStorage.setItem('wilson.live', JSON.stringify({ model: this.modelUsed, level: this.level, auth: this.authMode, think: this.think, proactive: this.proactive, proRefusAt: this.proRefusAt || 0, refused: this.refused })); } catch (_) {}
   }
   on(ev, fn) { this.handlers[ev] = fn; }
   _emit(ev, ...a) { const f = this.handlers[ev]; if (f) try { f(...a); } catch (e) { console.error(ev, e); } }
@@ -178,10 +184,16 @@ export class Brain {
           } catch (e) {
             last = e; const kind = classify(e); if (e.code && !serverErr) serverErr = e;   // réponse réelle de Google
             this._emit('log', `Essai ${mode}/${model}/niv.${level} → ${kind} : ${e.message}`);
+            // Google a perdu la session à reprendre (après « Internal error ») : nouvelle session, même modèle et même réglage.
+            // Avant : 8 essais avec la poignée périmée, puis abandon de la discussion (journal du 25/10/26, 07h53).
+            if (kind === 'session') {
+              if (this.handle) { this.handle = null; this._emit('log', 'Session perdue chez Google : nouvelle session'); li--; tries--; continue; }
+              break auth;
+            }
             if (kind === 'auth') { authErr = e; continue auth; }      // la clé ne passe pas ainsi : autre méthode
             if (kind === 'quota') { e.quota = true; e.model = model; quotaErr = quotaErr || e; this.refused[model] = Date.now() + QUOTA_SKIP_MS; this._save(); break; }   // quota du modèle : modèle de secours, rien d'autre
             if (kind === 'config' && /think/i.test(e.message) && this.think === false) { this.think = null; this._save(); li--; continue; }   // réglage de réflexion refusé : même niveau, sans lui
-            if (kind === 'config' && /proactiv/i.test(e.message) && this.proactive === false) { this.proactive = null; this._save(); li--; continue; }   // idem pour « réponds à tout »
+            if (kind === 'config' && /proactiv/i.test(e.message) && this.proactive === false) { this.proactive = null; this.proRefusAt = Date.now(); this._emit('log', 'Réglage « réponds à tout » refusé par le modèle : réessayé dans 24 h'); this._save(); li--; continue; }   // idem pour « réponds à tout »
             if (kind === 'config') continue;                         // un réglage refusé : configuration plus simple
             if (kind === 'model') break;                             // modèle indisponible : modèle de secours
             break auth;                                              // réseau, délai… : inutile d'insister

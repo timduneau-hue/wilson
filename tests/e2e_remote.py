@@ -91,6 +91,10 @@ async def main():
         await page.evaluate("document.getElementById('s-close').click()")
 
         # 3. Une réponse : la phrase échangée et les délais partent.
+        # (en écoute « toujours », le micro simulé a pu ouvrir une discussion plus tôt : on repart d'une discussion neuve)
+        await page.evaluate("if (wilson.state === 'conversation') wilson.endConversation('test'); window.__spoken.length = 0; wilson._lastReply = ''")
+        await page.wait_for_function('wilson.state === "veille"', timeout=5000)
+        nd = await page.evaluate("wilson.logs.filter(l => l.includes('Délais')).length")
         n_conv = len(st['posts'])
         await page.evaluate("wilson.startConversation('ouvert')")
         await page.wait_for_function('wilson.state === "conversation"', timeout=5000); await page.wait_for_timeout(300)
@@ -99,7 +103,7 @@ async def main():
             await page.wait_for_function("window.__spoken.includes('Le chat dort sur le canapé.')", timeout=8000)
         except Exception:
             print('\n'.join(l for l in logs if 'Wilson' in l or 'rror' in l)[-2500:]); raise
-        await page.wait_for_function("wilson.logs.some(l => l.includes('Délais'))", timeout=8000)
+        await page.wait_for_function(f"wilson.logs.filter(l => l.includes('Délais')).length > {nd}", timeout=8000)
         n = len(st['posts']); await page.evaluate('wilson.remote.flush()'); await page.wait_for_timeout(400)
         msgs = [l['m'] for p_ in st['posts'][n_conv:] for l in p_['lignes']]
         p1 = {'mesures': [m for p_ in st['posts'][n_conv:] for m in p_.get('mesures', [])]}

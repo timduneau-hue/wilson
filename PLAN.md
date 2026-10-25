@@ -164,7 +164,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 24/10/26 : **version 1.13.0** en ligne (CRM à la voix et mode voiture, section 2 quater).
+État au 25/10/26 : **version 1.13.1** en ligne (CRM à la voix et mode voiture, section 2 quater ; corrections d'après le journal du 25/10).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -262,11 +262,27 @@ Historique récent :
   « Dicté à Wilson » en tête de Mes tâches (tous appareils), « Reprendre dans la fiche » pré-remplit la fiche.
   Script de Wilson : ligne `CRM_URL` (adresse du CRM), relais `crm_…` avec `ScriptApp.getOAuthToken()`, `essaiCRM`.
 
+- 1.13.1 (25/10/26) — d'après le journal du téléphone (07h46–08h04, premier essai du CRM : relié ✓, fiches, journée et
+  bilan lus ✓, tâches écrites après « Oui » ✓, verrou ✓, carte d'appel ✓) :
+  - caméra figée au retour d'arrière-plan (plus aucune image, regard resté sur « oui ») → « plus regardé / regardé » toutes
+    les 3 s pendant 10 min : un regard sans nouvelle image depuis 2,5 s ne compte plus (`vision.stale`), et la caméra est
+    rouverte au bout de 5 s sans image (10 fois au plus, noté dans le journal) ;
+  - après « Internal error » de Google, la reprise de session était refusée (« session not found ») et Wilson essayait
+    8 modèles/réglages puis abandonnait → nouvelle session tout de suite ;
+  - mode voiture déclenché en roulant au milieu d'une discussion : la discussion était coupée → elle continue ; quitté à la
+    main, il ne revient pas tout seul avant 20 min ; vitesse calculée seulement sur des positions précises (≤ 25 m) et
+    nettement éloignées, 8 s de suite au-dessus de 22 km/h (avant : fausses vitesses à l'intérieur) ;
+  - tâche dictée sans jour → mise au jour même : il demande maintenant « pour quand ? » ;
+  - il disait « c'est noté » avant la confirmation du CRM → consigne : « J'enregistre… » puis confirmation ; transcription
+    parfois en anglais/espagnol/russe (français mal compris) → il répond en français et fait répéter ;
+  - réglage « réponds à tout » refusé une fois par le modèle → retenu pour toujours ; maintenant réessayé après 24 h.
+  Pas changé : délais du CRM (≈ 3 s par appel au script, 6 à 9 s pour un gros historique ou le bilan) — à surveiller.
+
 En attente :
-- **Mise en place par Timothée (1.13.0)** : 1) CRM : coller les deux fichiers, puis Déployer → Gérer les déploiements →
-  nouvelle version ; 2) script de Wilson : coller le nouveau code (garder sa clé Tavily), coller l'adresse du CRM ligne
-  `CRM_URL`, lancer `essaiCRM` et accepter (Google Drive), puis nouvelle version du déploiement ; 3) téléphone : Réglages →
-  CRM et voiture → cocher « Relier Wilson à mon CRM », « Apprendre mon nom » (dans la voiture, moteur allumé).
+- **Mise en place par Timothée (1.13.0)** : CRM et script faits le 25/10/26 (journal : « CRM : relié »). Reste : téléphone →
+  Réglages → CRM et voiture → « Apprendre mon nom » (dans la voiture, moteur allumé) — pas encore fait au 25/10.
+- Idées proposées à Timothée le 25/10/26 (à faire seulement s'il les choisit) : itinéraire vers le client (il faut l'adresse
+  de la fiche → petit ajout côté CRM), « classer un devis » à la voix, préparer un e-mail au client (brouillon).
 - Lire dans le journal : lignes « CRM : … en x s », « Oreille : phrase de …, écart …, limite … » (réglage de l'oreille),
   « Nom vérifié », « Pas mon nom », « Écriture REFUSÉE par le verrou ». Onglet État : lignes CRM, Mode voiture, Oreille.
 - Android Auto (27/10/26) : vérifier son, micro et réveil au nom.

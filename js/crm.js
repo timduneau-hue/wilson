@@ -283,7 +283,9 @@ export class Crm {
     const p = { type, cle: e ? e.cle : '', societe: e ? e.societe : '', contact: e ? e.contact : '', texte, at: performance.now(), atMs: Date.now(), turn: this.app._turnN || 0 };
     const qui = e ? `${e.societe}${e.contact ? ' (' + e.contact + ')' : ''}` : '';
     if (type === 'tache') {
-      const d = a.date ? parseJour(a.date) : minuit(new Date());
+      // sans jour dit, on demande (avant : rappel mis à aujourd'hui d'office, journal du 25/10/26)
+      if (!String(a.date || '').trim()) return { ok: false, dire: 'Il manque le jour du rappel : demande-lui pour quand (aujourd\'hui, demain, un jour précis), sans rien préparer.' };
+      const d = parseJour(a.date);
       if (!d) return { ok: false, dire: `Je ne comprends pas la date « ${a.date} » : demande-lui le jour du rappel.` };
       p.date = frDate(d); p.relu = `Tâche pour le ${jourDit(d)}${qui ? ', ' + qui : ''} : « ${texte} ».`;
     } else if (type === 'rdv') {
