@@ -15,8 +15,9 @@ import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
 import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
+import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.14.0';
+const VERSION = '1.15.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -359,7 +360,7 @@ class App {
       // Sans réseau (C8) : il le dit (voix du téléphone, sans Internet), et la phrase qui l'a réveillé part au retour du réseau.
       this.face.setEmotion('confus', 3000); this.badge("Pas d'Internet : je te réponds dès qu'il revient", 6000);
       const pcm = this._wakePcm || (reason === 'prenom' ? this.audio.recent(4000) : null); this._wakePcm = null;
-      if (this.car || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant'].includes(reason)) this._netLost('hors ligne au réveil', { start: { reason, pcm, handle: opts.handle } });
+      if (this.car || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant', 'reponse_tardive'].includes(reason)) this._netLost('hors ligne au réveil', { start: { reason, pcm, handle: opts.handle } });
       return;
     }
     // Quel cerveau ? Direct (Gemini Live) si possible, sinon mode économique (Gemini Flash + voix de la tablette).
@@ -387,7 +388,7 @@ class App {
       if (this.convId !== myConv) return;                              // arrêtée entre-temps (appel…)
       this.log('Gemini : ' + e.message);
       this.lastError = e.message;
-      if (isNetErr(e) && (this.car || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant'].includes(reason))) {
+      if (isNetErr(e) && (this.car || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant', 'reponse_tardive'].includes(reason))) {
         // Réseau trop faible pour joindre Google (C8) : même chose que hors ligne, la phrase est gardée (8 s au plus).
         const pcm = (this.pending || []).length ? concat(this.pending).slice(0, 16000 * 8) : null;
         this.mode = null; this.pending = null; this.setState('veille');
@@ -417,6 +418,7 @@ class App {
     if (reason === 'toucher') this.brain.sendText(this.car ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
     if (reason === 'apres_appel') this.brain.sendText(this._apresAppelTexte());
     if (reason === 'apres_appel_entrant') this.brain.sendText(this._apresAppelEntrantTexte());
+    if (reason === 'reponse_tardive' && this._lateText) this.brain.sendText(this._lateText);
     if (this.netWait && this.netWait.start) this._netBack();          // réveillé sans réseau : c'est reparti
     this.lastActivity = performance.now();
   }
@@ -439,6 +441,7 @@ class App {
     else if (reason === 'toucher') this._say(['Oui ?', "Je t'écoute.", 'Oui, dis-moi ?'][Math.floor(Math.random() * 3)]);
     else if (reason === 'apres_appel') this._ecoSend({ text: this._apresAppelTexte() });
     else if (reason === 'apres_appel_entrant') this._ecoSend({ text: this._apresAppelEntrantTexte() });
+    else if (reason === 'reponse_tardive' && this._lateSay) this._say(this._lateSay);
     if (this.netWait && this.netWait.start) this._netBack();
   }
 
@@ -618,10 +621,10 @@ class App {
         }
         // 2e temps : le CRM (PLAN 2 quater). Wilson a dit sa phrase d'attente ; l'appli interroge le CRM.
         if (out.crm && conv === this.convId) {
-          const nom = { client: 'crm_client', agenda: 'crm_agenda', bilan: 'crm_bilan', produit: 'crm_produit', appeler: 'appeler', noter: 'crm_noter', confirmer: 'crm_confirmer' }[out.crm.outil];
+          const nom = { client: 'crm_client', agenda: 'crm_agenda', bilan: 'crm_bilan', produit: 'crm_produit', question: 'crm_question', itineraire: 'itineraire', appeler: 'appeler', noter: 'crm_noter', confirmer: 'crm_confirmer' }[out.crm.outil];
           if (nom) {
             tSearch = tSearch || performance.now(); emoSet = false;
-            if (!sess && !['crm_noter', 'crm_confirmer', 'appeler'].includes(nom)) this.face.setEmotion('reflexion', 30000, 0.6);
+            if (!sess && !['crm_noter', 'crm_confirmer', 'appeler', 'itineraire'].includes(nom)) this.face.setEmotion('reflexion', nom === 'crm_question' ? ANALYSE_MAX_MS : 30000, 0.6);
             this.log(`CRM (économique) : ${out.crm.outil} ${JSON.stringify(out.crm).slice(0, 160)}`, true);
             let res;
             try { res = await this._crmRun(nom, out.crm, req.ctl.signal, { heard: [{ t: performance.now(), text: out.entendu }] }); }
@@ -800,11 +803,13 @@ L'heure et la date : appelle date_et_heure.`;
     const travail = !crm ? '' : `
 Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
 - Dès qu'il parle d'un client, d'un rendez-vous, d'une tâche, d'un devis, d'un chiffre ou d'un article, ${eco ? 'remplis le champ "crm"' : 'dis « Je regarde dans le CRM… » puis appelle l\'outil (crm_client, crm_agenda, crm_bilan, crm_produit)'}. Ne devine jamais un nom, un chiffre ou une date : dis seulement ce que le CRM répond. Pour « lui », « ce client », c'est le dernier client dont vous avez parlé.
+- Toute autre question sur ses données (un chiffre passé, un total, une liste, un détail, une comparaison, « qui… », « combien… », « quand… », les devis à relancer) : ${eco ? 'outil "question" avec la question complète dans "demande"' : 'dis « Je cherche l\'information… » puis appelle crm_question avec la question complète'}. Un analyste cherche dans tout le CRM : ça peut prendre une minute ou plus, attends le résultat sans relancer.
+- « Emmène-moi chez X », « l'adresse de X » : ${eco ? 'outil "itineraire"' : 'outil itineraire'} (un bouton s'affiche, il appuie dessus pour lancer le GPS).
 - « Appelle X » : ${eco ? 'outil "appeler"' : 'outil appeler'} (un bouton vert s'affiche, il appuie dessus).
 - Écrire dans le CRM (tâche, compte rendu, rendez-vous, note) : JAMAIS sans son accord. ${eco ? 'Mets l\'outil "noter"' : 'Appelle crm_noter'}, relis-lui exactement la phrase préparée, demande « Je l'enregistre ? », et ${eco ? 'mets l\'outil "confirmer"' : 'dis « J\'enregistre… » puis appelle crm_confirmer'} seulement après son « oui ». S'il corrige, prépare de nouveau. Les comptes rendus, rendez-vous et notes arrivent en brouillon dans son CRM : il les valide lui-même.
 - Ne dis jamais « c'est noté » ou « c'est enregistré » si l'enregistrement n'a pas été confirmé par le CRM.
 - Si un nom de client, un chiffre ou une date que tu as entendu te semble douteux, ne devine pas : dis ce que tu as compris et demande si c'est bien ça (« Tu parles de Franck Monvoisin, chez AD2M ? »), surtout avant de préparer une écriture.
-- Tu ne sais que ce que dit la réponse du CRM : si on te demande un détail qui n'y est pas (le contenu exact d'une commande, par exemple), dis que tu ne l'as pas au lieu de le reconstituer.
+- Tu ne sais que ce que disent les réponses du CRM : si un détail demandé n'y est pas (le contenu d'une commande, par exemple), ${eco ? 'utilise l\'outil "question"' : 'appelle crm_question pour le chercher'} au lieu de le reconstituer.
 `;
     const voiture = !car ? '' : `
 En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (caméra coupée en voiture).
@@ -978,7 +983,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
       // (pas de relance pendant qu'un outil travaille : CRM ou recherche en cours, il répondra avec le résultat — journal du 25/10/26, 10h21)
-      else if (user && realPhrase(user) && this._gazeMode && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && !(this._searches && this._searches.size)) {
+      else if (user && realPhrase(user) && this._gazeMode && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)) {
         // Écoute au regard : tout ce qu'il entend lui est adressé. Une vraie phrase restée sans réponse (souvent la 1re
         // d'une discussion, journal du 24/10/26) → on lui demande de répondre, une seule fois.
         this._nudgedFor = user;
@@ -995,7 +1000,11 @@ Nous sommes ${fmtDate()}.${bat}`;
     b.on('said', (t) => { if (this.settings.subtitles || this.car) $('subtitle').textContent = cleanSpeech(t).slice(-220); });
     b.on('toolcall', (calls) => this._tools(calls));
     b.on('toolcancel', (ids) => {        // la personne a coupé Wilson pendant une recherche : on l'abandonne
-      for (const id of ids) { const c = this._searches && this._searches.get(id); if (c) { this._searches.delete(id); c.abort(); this.log('Recherche annulée'); } }
+      for (const id of ids) {
+        const A = this._analyses && this._analyses.get(id);
+        if (A) { A.cancelled = true; this.log('Question au CRM : Gemini n\'attend plus, la réponse viendra quand même'); continue; }   // C11 bis
+        const c = this._searches && this._searches.get(id); if (c) { this._searches.delete(id); c.abort(); this.log('Recherche annulée'); }
+      }
     });
     b.on('goaway', () => this._reconnect('goAway'));
     b.on('closed', (e) => {
@@ -1004,6 +1013,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (this.state === 'conversation') this._reconnect('coupure');
     });
     b.on('log', (m) => this.log(m));
+    b.on('ready', () => { this._liveGen = (this._liveGen || 0) + 1; });   // nouvelle session : un outil d'avant n'y a plus de réponse attendue
   }
 
   async _reconnect(why) {
@@ -1353,6 +1363,28 @@ Nous sommes ${fmtDate()}.${bat}`;
       case 'crm_agenda': return lu(await C.agenda(a.jour, signal));
       case 'crm_bilan': return lu(await C.bilan(signal));
       case 'crm_produit': return lu(await C.produit(a.produit || '', a.question, signal));
+      case 'crm_question': {                                                          // C11 : toutes les autres questions
+        const q = String(a.demande || (/^(qui_achete|infos)$/.test(a.question || '') ? '' : a.question) || '').trim();
+        if (!q) return { info: 'Il manque la question : demande-lui ce qu\'il veut savoir.', dire: 'Qu\'est-ce que tu veux savoir exactement ?' };
+        const last = C.last ? `Dernier client dont vous avez parlé : ${C.last.societe}${C.last.contact ? ' (' + C.last.contact + ')' : ''}.` : '';
+        let r;
+        try {
+          r = await C.analyste.repondre({ key: this.settings.apiKey, question: q, contexte: last, voiture: car, signal,
+            onEtape: (n, pourquoi, rq) => this.log(`Analyste, étape ${n} : ${pourquoi || 'recherche'} (${rq.map((x) => x.table).join(', ')})`, true) });
+        } catch (e) {
+          if (e.name === 'AbortError') throw e;
+          this.log('Analyste impossible : ' + e.message);
+          return { echec: true, info: e.crm ? `Impossible de chercher : ${e.message}. Dis-le simplement.` : `La recherche n'a pas abouti (${shorten(e.message)}). Dis-le simplement et propose de réessayer.`,
+            dire: e.crm ? 'Le CRM n\'a pas encore le moteur de questions.' : 'Je n\'ai pas réussi à finir la recherche.' };
+        }
+        this.log(`Analyste : réponse en ${Math.round(r.ms / 1000)} s, ${r.etapes} étape(s), ${r.recherches} recherche(s) (${r.model}) : ${r.reponse.slice(0, 160)}`, true);
+        return { info: `Réponse de l'analyste du CRM (après ${r.recherches} recherche(s) dans ses données) : ${r.reponse}\nDis-la-lui à l'oral, sans rien ajouter ni inventer${car ? ', en une ou deux phrases très courtes' : ''}.`, dire: r.reponse };
+      }
+      case 'itineraire': {                                                            // C12
+        const r = await C.routeTarget(a, signal);
+        if (r.ok) this.showRoute(r.target);
+        return { info: r.dire, dire: r.ok ? `J'affiche l'itinéraire vers ${r.target.societe} : appuie sur le bouton bleu.` : null };
+      }
       case 'appeler': {
         const r = await C.callTarget(a, signal);
         if (r.ok) this.showCall(r.target);
@@ -1390,6 +1422,7 @@ Nous sommes ${fmtDate()}.${bat}`;
 
   // Outil du CRM en mode direct : Wilson a dit « je regarde dans le CRM », il répond quand le CRM a répondu (filet : 40 s).
   async _crmTool(call) {
+    if (call.name === 'crm_question') return this._analyse(call);
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
     this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
     if (['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit'].includes(call.name)) this.face.setEmotion('reflexion', CRM_MAX_MS + 2000, 0.6);
@@ -1415,6 +1448,76 @@ Nous sommes ${fmtDate()}.${bat}`;
     }, 6000);
   }
 
+  // Question libre (C11) : l'analyste cherche aussi longtemps qu'il faut (10 min au plus), tête qui réfléchit pendant ce temps.
+  // Elle n'est pas arrêtée par la fin de la discussion : la réponse arrive quand même (C11 bis).
+  async _analyse(call) {
+    const a = call.args || {};
+    const A = { id: call.id, question: String(a.question || a.demande || '').trim(), t0: performance.now(), conv: this.convId, gen: this._liveGen || 0, ctl: new AbortController(), cancelled: false };
+    this._analyses = this._analyses || new Map(); this._analyses.set(call.id, A);
+    this.face.setEmotion('reflexion', ANALYSE_MAX_MS, 0.7);
+    this.log(`Question au CRM (analyste) : « ${A.question.slice(0, 160)} »`, true);
+    const timer = setTimeout(() => A.ctl.abort(), ANALYSE_MAX_MS + 5000);
+    let res;
+    try { res = await this._crmRun('crm_question', a, A.ctl.signal); }
+    catch (e) { res = { echec: true, info: 'La recherche a pris trop de temps. Dis-le simplement.', dire: 'La recherche a pris trop de temps, je n\'ai pas de réponse.' }; this.log('Analyste : abandon (' + e.message + ')'); }
+    finally { clearTimeout(timer); this._analyses.delete(call.id); }
+    if (!this._analyses.size && this.face.emotion === 'reflexion') this.face.clearEmotion();
+    this._livrer(A, res);
+  }
+  // La réponse : dans la même discussion, comme résultat de l'outil ; sinon il la dit dès que possible (C11 bis). Toujours à l'écran.
+  _livrer(A, res) {
+    const s = Math.round((performance.now() - A.t0) / 1000);
+    if (!res.echec && res.dire) this.showAnswer(A.question, res.dire);
+    const meme = !A.cancelled && A.conv === this.convId && this.state === 'conversation' && this.mode === 'live' && this.brain.open && A.gen === (this._liveGen || 0);
+    if (meme) {
+      this.brain.respond([{ id: A.id, name: 'crm_question', response: { result: res.info } }]);
+      const n = this._modelOut, conv = this.convId;
+      setTimeout(() => {
+        if (conv !== this.convId || this._modelOut !== n || !this.brain.open || this.audio.playing) return;
+        this.log('Pas de réponse 6 s après l\'analyste : relance');
+        this.brain.sendText('[Donne maintenant à voix haute la réponse de l\'analyste du CRM.]');
+      }, 6000);
+      return;
+    }
+    this._lateAnswer(A, res, s);
+  }
+  _lateAnswer(A, res, s, n = 0) {
+    const again = (ms) => { if (n < 400) setTimeout(() => this._lateAnswer(A, res, s, n + 1), ms); };
+    if (this.phone || this.state === 'eveil' || this.netWait) return again(3000);           // pendant un appel ou une reconnexion : après
+    const dire = res.dire || res.info;
+    this.log(`Réponse à « ${A.question.slice(0, 80)} » arrivée après ${s} s${this.state === 'conversation' ? '' : ' : je me réveille pour la dire'}`, true);
+    this._lateText = `[La recherche dans le CRM que tu avais lancée pour la question « ${A.question} » est terminée (${s} s). Résultat : ${dire} Dis-la-lui maintenant, en commençant par « J'ai la réponse à ta question sur … » (quelques mots du sujet).]`;
+    this._lateSay = `J'ai la réponse à ta question. ${dire}`;
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) { this.brain.sendText(this._lateText); return; }
+    if (this.state === 'conversation') { this._say(this._lateSay); return; }
+    this.startConversation('reponse_tardive');
+  }
+
+  // Cartes à l'écran : bouton d'appel (C4), confirmation d'une écriture (C2), itinéraire (C12), réponse de l'analyste (C11).
+  showRoute(t) {
+    const el = $('cards');
+    el.innerHTML = `<div class="card route" data-kind="route"><div class="card-t">Itinéraire</div><div class="card-n">${esc(t.societe)}</div><div class="card-s">${esc(t.adresse)}</div>`
+      + `<div class="card-b"><a class="card-go route" href="${esc(t.maps)}" target="_blank" rel="noopener">Y aller</a><a class="card-go waze" href="${esc(t.waze)}" target="_blank" rel="noopener">Waze</a><button class="card-x" type="button">Fermer</button></div></div>`;
+    el.hidden = false;
+    el.querySelectorAll('.card-go').forEach((x) => x.addEventListener('click', () => this._goRoute(t)));
+    el.querySelector('.card-x').addEventListener('click', () => this.hideCard());
+    clearTimeout(this._cardT); this._cardT = setTimeout(() => this.hideCard('route'), 120000);
+    this.log(`Bouton d'itinéraire affiché : ${t.societe}`, true);
+  }
+  _goRoute(t) {
+    this.log(`GPS ouvert vers ${t.societe}`, true);
+    this.hideCard('route');
+    setTimeout(() => { if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('itinéraire'); }, 400);
+  }
+  showAnswer(q, texte) {
+    const el = $('cards'), c = el.firstElementChild;
+    if (c && c.dataset.kind !== 'answer') return;                        // un bouton d'appel ou une confirmation reste à l'écran
+    el.innerHTML = `<div class="card answer" data-kind="answer"><div class="card-t">Réponse du CRM</div><div class="card-q">${esc(q)}</div><div class="card-r">${esc(texte)}</div>`
+      + `<div class="card-b"><button class="card-x" type="button">Fermer</button></div></div>`;
+    el.hidden = false;
+    el.querySelector('.card-x').addEventListener('click', () => this.hideCard());
+    clearTimeout(this._cardT); this._cardT = setTimeout(() => this.hideCard('answer'), 5 * 60000);
+  }
   // Cartes à l'écran : bouton d'appel (C4), confirmation d'une écriture (C2).
   showCall(t) {
     const el = $('cards');
@@ -1583,12 +1686,15 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (v.gazeReady) this.badge('Regarde-moi et parle-moi : je t\'écoute', 5000);
       else this.badge('Je ne vois pas bien les visages : touche-moi pour me parler', 10000, true);
     }
+    // Question au CRM en cours (C11) : tête qui réfléchit tant qu'il cherche (sauf quand il parle)
+    if (this._analyses && this._analyses.size && !this.speaking && f.emotion !== 'reflexion') f.setEmotion('reflexion', 60000, 0.7);
     // Lèvres
     if (this.audio.playing) { const [l, r] = this.audio.outputLevels(); f.setTalk(l, r); this._outPeak = Math.max(this._outPeak || 0, l); }
     else if (this.voice.speaking) f.setTalk(this.voice.mouth(now), 0.25);
     if (this.state === 'conversation') {
       const E = this.ecoState, thinking = E && (E.busy || E.cap);
-      const searching = !!(this._searches && this._searches.size);
+      // une question à l'analyste garde la discussion ouverte 90 s ; au-delà, la réponse viendra de toute façon (C11 bis)
+      const searching = !!(this._searches && this._searches.size) || [...(this._analyses || new Map()).values()].some((A) => now - A.t0 < 90000);
       // Images : aucune envoyée d'office (R6) ; seulement à la demande (outil « regarder »).
       const keep = this.car ? CAR_IDLE_MS : this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);

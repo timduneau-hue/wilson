@@ -8,7 +8,7 @@ pip install playwright && playwright install chromium   # une fois
 ./make_fixtures.sh                                       # fausses vidéos de caméra (.y4m) à partir des photos
 python3 make_voix.py                                     # voix de synthèse pour l'oreille du mode voiture (espeak-ng + mbrola-fr1/fr4)
 cd .. && python3 -m http.server 8765 --bind 127.0.0.1 &  # servir l'appli (dossier racine du dépôt)
-cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py e2e_attention.py e2e_sync.py e2e_vision_health.py e2e_crm.py e2e_car.py e2e_journal_2510.py e2e_route.py; do python3 $t; done
+cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py e2e_attention.py e2e_sync.py e2e_vision_health.py e2e_crm.py e2e_car.py e2e_journal_2510.py e2e_route.py e2e_question.py; do python3 $t; done
 node apps_script_unit.js                                 # script Apps Script du journal, avec une fausse feuille
 node oreille_unit.mjs                                    # oreille du mode voiture sur les voix de synthèse
 ```
@@ -36,6 +36,7 @@ node oreille_unit.mjs                                    # oreille du mode voitu
 | `e2e_car.py` | Mode voiture sur un téléphone simulé : bouton, caméra coupée, journée préparée, oreille apprise, réveil par « Wilson, qui je vois demain ? » au micro (pas par « Il fait beau »), réponse retenue jusqu'à la transcription du nom, faux réveil rendormi, GPS |
 | `e2e_journal_2510.py` | Corrections d'après le journal du 25/10/26 : caméra figée (regard périmé ignoré, discussion continue), session perdue chez Google (nouvelle session tout de suite), mode voiture en roulant sans couper la discussion, pas de retour tout seul 20 min après l'avoir quitté, positions imprécises ignorées |
 | `e2e_route.py` | Sur la route (PLAN C8–C10), téléphone simulé : réseau bloqué ou coupé (discussion gardée, voix du téléphone, même session reprise, phrase dite pendant la coupure envoyée), abandon au bout du délai, réveil sans réseau, appel téléphonique (silence numérique : il se tait, aucun « oui » ne compte, reprise), écriture gardée sans réseau puis envoyée, écriture incertaine non renvoyée, nom de client approximatif, téléphone secoué, pas de relance pendant un outil |
+| `e2e_question.py` | Moteur de questions (PLAN C11–C12) : l'analyste (Gemini simulé) lit la description du CRM, écrit une recherche que le CRM (simulé) exécute, puis répond ; tête qui réfléchit ; réponse affichée ; outil annulé → réponse par message ; discussion terminée → il se réveille pour la dire ; CRM pas encore à jour ; itinéraire (Google Maps, Waze) ; mode économique |
 | `oreille_unit.mjs` | Oreille seule (Node) : apprentissage, phrases avec et sans le nom, bruit de voiture, autre voix, flux continu, temps de calcul |
 | `apps_script_unit.js` (suite) | Relais du CRM : adresse absente, jeton transmis, CRM pas à jour, accès refusé, essaiCRM |
 

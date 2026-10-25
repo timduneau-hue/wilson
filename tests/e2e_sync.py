@@ -51,6 +51,9 @@ async def main():
         await phone.goto('http://127.0.0.1:8765/index.html')
         await phone.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
         await phone.wait_for_function("wilson.sync.state.startsWith('à jour')", timeout=8000)
+        for _ in range(30):                                  # « premier envoi » : l'état change avant la fin de l'envoi
+            if store['reglages']: break
+            await asyncio.sleep(0.1)
         check('Téléphone : 1er appareil relié, ses réglages deviennent la référence', store['reglages'] and store['reglages']['voice'] == 'Charon' and 'gazeCalib' not in store['reglages'] and 'mirror' not in store['reglages'], str(store['calls']))
 
         # --- Copier les réglages : QR code + lien + partage.

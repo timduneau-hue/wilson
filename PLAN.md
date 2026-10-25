@@ -70,6 +70,10 @@ je peux recevoir des appels pendant que je parle à Wilson ») :
 | C8 bis | Écriture confirmée mais pas de réseau. | Elle est gardée sur le téléphone et envoyée seule au retour du réseau (sa confirmation est déjà donnée) ; Wilson le dit (« pas encore enregistré, je le fais dès que le réseau revient », puis « c'est enregistré »). Si le CRM n'a pas répondu à temps, Wilson ne sait pas si c'est passé : il le dit, rien n'est renvoyé (pas de doublon). Lecture impossible : fiche ou journée gardée sur le téléphone, avec son heure. |
 | C9 | **Appel téléphonique pendant une discussion.** | Le téléphone prend le micro (Wilson ne reçoit plus que du silence numérique, ou le micro est « coupé ») → Wilson se tait aussitôt, la discussion est mise de côté (son fil est gardé), aucune confirmation d'écriture n'est possible pendant l'appel. Micro rendu → si l'appel a duré plus de 8 s, Wilson reprend : « On reprend ? » (et propose un compte rendu si c'était un client) ; une écriture en attente est relue de nouveau avant tout « oui ». Téléphone seulement (la tablette n'a pas d'appels). |
 | C10 | **Son mauvais (Bluetooth, bruit) : il fait confirmer.** | Consigne à Gemini : demande bizarre, incomplète, hors sujet, nom, chiffre ou date douteux → il reformule ce qu'il a compris et demande « c'est bien ça ? » au lieu de deviner ; rien compris → « tu peux répéter ? ». Client retrouvé à partir d'un nom approximatif → il commence par le nom du client trouvé, pour qu'on puisse le corriger. Conversation au téléphone avec quelqu'un d'autre → il se tait. |
+| C11 | **Il répond à toutes les questions sur le CRM, quel que soit le temps** (choix de Timothée, 25/10/26 : « les questions peuvent être infinies », gratuit, pas de clé payante ; Claude avec son forfait Pro est exclu : pas d'accès pour les programmes, et Anthropic interdit d'utiliser un forfait hors de Claude). | **Moteur de questions** : outil `crm_question` (la question complète). Wilson dit « Je cherche l'information… », tête qui réfléchit pendant toute la recherche. Un « analyste » (Gemini gratuit, avec réflexion) reçoit la description des tableaux du CRM (`crm_schema`) et écrit des recherches (`crm_requete` : table, filtres, regroupement, totaux, tri, limite) ; le CRM les exécute **en lecture seule** sur ses feuilles (lignes de commandes et de devis de l'extraction Negos — mêmes chiffres que l'écran —, clients, devis à relancer, tâches, comptes rendus, visites, veille) ; plusieurs étapes si besoin (8 au plus, 10 min au plus), puis la réponse. Les outils rapides (fiche, journée, bilan) restent pour les questions simples. |
+| C11 bis | Réponse longue à venir. | Si la discussion s'est terminée entre-temps, Wilson se réveille pour la dire dès qu'il l'a (« J'ai la réponse à ta question sur… ») et l'affiche à l'écran ; pendant un appel, il attend la fin de l'appel. |
+| C12 | **Itinéraire vers le client.** | « Emmène-moi chez AD2M » : adresse de la fiche (colonne LOCALISATION) → grand bouton qui ouvre le GPS (Google Maps, ou Waze) ; un appui suffit (une page web ne peut pas l'ouvrir seule). |
+| C13 | Réponses du CRM plus rapides, jamais en double. | Côté CRM : fiche, journée (5 min) et bilan (30 min) gardés en mémoire, oubliés dès qu'une écriture a lieu (Wilson ou l'écran du CRM) ; une écriture renvoyée après une coupure (même identifiant) n'est jamais enregistrée deux fois. |
 
 ## 3. Les états (machine à états unique, dans `app.js`)
 
@@ -110,6 +114,7 @@ je peux recevoir des appels pendant que je parle à Wilson ») :
 | `js/remote.js` | Journal à distance : journal, délais et bilan → feuille Google « Wilson — journal » (lue par Claude) ; lecture du QR code | `apps-script/journal.gs` |
 | `apps-script/journal.gs` | Script Apps Script de Timothée (application Web) : range le journal dans la feuille ; recherche Internet par Tavily (clé dans le script) ; réglages communs (propriétés du script) | Google Sheets, Tavily |
 | `js/sync.js` | Mêmes réglages partout : lien de copie (#reglages=…), synchronisation par le script | `remote.js` |
+| `js/analyste.js` | Moteur de questions (C11) : Gemini gratuit lit la description des tableaux du CRM, écrit des recherches (lecture seule) exécutées par le CRM, plusieurs étapes, puis la réponse orale | `crm.js` (actions `crm_schema`, `crm_requete` du CRM, section 54) |
 | `js/crm.js` | CRM à la voix : questions au CRM par le script, fiches gardées pour la journée, dates dites (« jeudi », « demain 10h »), verrou de confirmation des écritures, bouton d'appel | `remote.js`, CRM (`WebApp_autonome.gs`, action `doPost` → `wilson`) |
 | `js/oreille.js` | Oreille locale du mode voiture : reconnaît « Wilson » dit par Timothée (empreintes de sa voix, comparaison DTW), sur l'appareil | `audio.js` |
 
@@ -179,7 +184,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 25/10/26 : **version 1.14.0** en ligne (CRM à la voix et mode voiture, section 2 quater ; sur la route : réseau, appels, son mauvais, C8 à C10).
+État au 25/10/26 : **version 1.15.0** en ligne (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -306,14 +311,26 @@ Historique récent :
   Vu aussi (pas un bug de Wilson) : « devis à relancer », « CA de juillet 2025 », « liste des clients qui ont commandé »,
   « détail d'une commande », « adresse pour le GPS » ne sont pas dans les réponses du CRM → ajouts côté CRM proposés.
 
+- 1.15.0 (25/10/26) — **toutes les questions sur le CRM** (C11 à C13), à la demande de Timothée (« Wilson doit pouvoir
+  répondre à toutes les questions, peu importe le temps », tête qui réfléchit, « je recherche l'information… », gratuit ;
+  passer par son forfait Claude Pro n'est pas possible : pas d'accès pour les programmes, et Anthropic interdit d'utiliser un
+  forfait hors de Claude). Ses choix : moteur de questions ; tête qui réfléchit + « Je cherche… » (pas de « je cherche
+  encore », pas de compteur) ; réponse dite dès qu'elle arrive, même discussion terminée, et affichée ; en plus : itinéraire,
+  CRM plus rapide, anti-doublon. Wilson : `js/analyste.js`, outils `crm_question` et `itineraire` (direct et économique),
+  carte « Réponse du CRM », carte d'itinéraire (Google Maps, Waze). CRM (`WebApp_autonome.gs`, section 54, à recoller) :
+  `crm_schema`, `crm_requete` (tables commandes, devis, devis_a_relancer, clients, taches, comptes_rendus, visites, veille ;
+  filtres, regroupements, calculs, « avoir », tri, limite), adresse dans la fiche, fiche/journée/bilan gardés en mémoire
+  (oubliés à chaque écriture), anti-doublon par identifiant.
+
 En attente :
+- **Timothée (1.15.0)** : coller le nouveau `WebApp_autonome.gs` dans le CRM (Index.html inchangé), puis Déployer → Gérer
+  les déploiements → nouvelle version. Sans ça, Wilson répond « le CRM n'a pas encore le moteur de questions ».
+- À lire dans le journal (1.15.0) : « Question au CRM (analyste) », « Analyste, étape n : … », « Analyste : réponse en n s,
+  n étape(s) … (modèle) », « Réponse à … arrivée après n s » ; quotas : « Analyste : … quota » (modèle suivant).
 - **À lire dans le journal (1.14.0)** : « Micro pris par le téléphone (silence numérique | micro coupé…) » puis « Micro rendu
   … fin de l'appel » au premier appel reçu (si rien n'apparaît pendant un appel, la détection ne marche pas sur son
   téléphone) ; « Réseau coupé (…) », « Phrase gardée pendant la coupure », « Réseau revenu après n s », « Réseau bloqué » ;
   « Audio : appareils audio changés (Bluetooth ?) », « Audio : micro arrêté par le système : je le rouvre ».
-- **Proposé à Timothée (côté CRM, un seul envoi de fichiers)** : bilan avec devis à relancer, chiffre par mois (« juillet
-  2025 »), liste des clients actifs du mois ; détail des 2 dernières commandes dans la fiche ; adresse du client (itinéraire) ;
-  anti-doublon des écritures (identifiant `id` déjà envoyé par Wilson) ; réponses plus rapides (cache côté CRM).
 - **Mise en place par Timothée (1.13.0)** : CRM et script faits le 25/10/26 (journal : « CRM : relié »). Reste : téléphone →
   Réglages → CRM et voiture → « Apprendre mon nom » (dans la voiture, moteur allumé) — pas encore fait au 25/10.
 - Idées proposées à Timothée le 25/10/26 (à faire seulement s'il les choisit) : itinéraire vers le client (il faut l'adresse

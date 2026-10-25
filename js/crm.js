@@ -7,6 +7,8 @@
 //    Tâche → directement dans le CRM ; compte rendu, rendez-vous, note → brouillon à valider dans le CRM.
 //  - Appeler (C4) : bouton vert avec le numéro (une page web n'a pas le droit de lancer un appel seule).
 
+import { Analyste } from './analyste.js';
+
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
 const NOMBRES = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9, dix: 10, quinze: 15, premier: 1 };
@@ -154,6 +156,12 @@ export const CRM_TOOLS = [
   { name: 'crm_produit', behavior: 'BLOCKING',
     description: "Catalogue et ventes : quels clients achètent un fabricant ou un article (question qui_achete), ou référence, prix et disponibilité d'un article (question infos).",
     parameters: { type: 'OBJECT', properties: { produit: { type: 'STRING', description: 'fabricant, référence ou désignation' }, question: { type: 'STRING', enum: ['qui_achete', 'infos'] } }, required: ['produit'] } },
+  { name: 'crm_question', behavior: 'BLOCKING',
+    description: "Toute autre question sur ses données, même inhabituelle : chiffre d'un mois ou d'une année passée, devis à relancer, clients qui ont (ou n'ont pas) commandé, quand un client a acheté un article, détail d'une commande, comparaisons, listes, totaux… Un analyste cherche dans tout le CRM et répond, même si ça prend une minute ou plus. Avant de l'appeler, dis « Je cherche l'information… », puis attends le résultat sans relancer.",
+    parameters: { type: 'OBJECT', properties: { question: { type: 'STRING', description: 'la question complète, avec le nom du client et la période s\'il les a dits (ou le client dont vous parlez)' } }, required: ['question'] } },
+  { name: 'itineraire', behavior: 'BLOCKING',
+    description: "Aller chez un client : affiche un grand bouton qui ouvre le GPS (Google Maps ou Waze) avec l'adresse de sa fiche ; Timothée appuie dessus.",
+    parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou le contact' } }, required: ['client'] } },
   { name: 'appeler', behavior: 'BLOCKING',
     description: "Appeler un client : affiche sur l'écran un grand bouton vert avec son numéro ; Timothée appuie dessus pour lancer l'appel.",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou le contact' }, contact: { type: 'STRING', description: 'la personne à appeler, si elle est précisée' } }, required: ['client'] } },
@@ -176,6 +184,7 @@ export class Crm {
   constructor(app) {
     this.app = app; this.cache = new Map(); this.pending = null; this.last = null; this.journee = null; this._bilan = null;
     this.state = ''; this.etat = null; this.call = null; this.queue = [];
+    this.analyste = new Analyste({ ask: (p, s) => this.ask(p, s), log: (m) => this.app.log(m) });
     this._load();
     try { this.queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]') || []; } catch (_) { this.queue = []; }
     if (this.queue.length) setTimeout(() => this.flushQueue(), 8000);
@@ -210,7 +219,7 @@ export class Crm {
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ jour: frDate(new Date()), e: [...this.cache.values()].slice(-15) })); } catch (_) {}
   }
   _keep(r) {
-    const e = { cle: r.cle, societe: r.societe, contact: r.contact, ville: r.ville || '', contacts: r.contacts || [], texte: r.texte, rdv: r.rdv || '', at: Date.now(),
+    const e = { cle: r.cle, societe: r.societe, contact: r.contact, ville: r.ville || '', adresse: r.adresse || '', contacts: r.contacts || [], texte: r.texte, rdv: r.rdv || '', at: Date.now(),
       noms: [r.contact, ...(r.contacts || []).map((c) => c.nom)].filter(Boolean) };
     this.cache.delete(r.cle); this.cache.set(r.cle, e); this._save();
     this.last = e;
@@ -417,6 +426,22 @@ export class Crm {
         if (this.app._crmQueued) this.app._crmQueued(q, !!r.ok, r.erreur);
       }
     } finally { this._flushing = false; }
+  }
+
+  // ---- itinéraire (C12) ----
+  async routeTarget({ client = '' } = {}, signal) {
+    const r = await this._resolve(client, signal);
+    if (!r.e) return { ok: false, dire: r.texte };
+    let e = r.e;
+    if (!e.adresse) {                                         // fiche gardée avant la 1.15.0 : sans adresse, on la redemande
+      const c = await this.ask({ action: 'crm_client', cle: e.cle }, signal);
+      if (c.ok && c.cle) e = this._keep(c);
+    }
+    if (!e.adresse) return { ok: false, dire: `La fiche de ${e.societe} n'a pas d'adresse dans le CRM. Dis-le simplement.` };
+    const q = encodeURIComponent(e.adresse);
+    const target = { societe: e.societe, contact: e.contact, adresse: e.adresse,
+      maps: `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`, waze: `https://waze.com/ul?q=${q}&navigate=yes` };
+    return { ok: true, target, dire: `Le bouton pour aller chez ${e.societe} (${e.adresse}) est affiché : dis-lui d'appuyer dessus pour lancer le GPS.` };
   }
 
   // ---- appeler (C4) ----

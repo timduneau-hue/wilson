@@ -112,6 +112,10 @@ textarea.field { resize: vertical; }
 .card-go, .card-ok { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 64px; border-radius: 14px; border: none;
   font: inherit; font-size: 22px; font-weight: 700; text-decoration: none; cursor: pointer; }
 .card-go { background: #2fb35a; color: #fff; }
+.card-go.route { background: #2f7de1; }
+.card-go.waze { flex: none; padding: 0 16px; background: #33ccff; color: #062a3a; font-size: 18px; }
+.card-q { color: var(--ink-2); font-size: 14px; font-style: italic; margin-top: 4px; }
+.card.answer .card-r { max-height: 34vh; overflow-y: auto; }
 .card-ok { background: linear-gradient(180deg, var(--amber-2), var(--amber)); color: #2a1404; }
 .card-x { flex: none; min-height: 64px; padding: 0 18px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--ink); font: inherit; font-size: 17px; cursor: pointer; }
 .carbtn { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 12px; width: 44px; height: 44px; border-radius: 12px; z-index: 4;
