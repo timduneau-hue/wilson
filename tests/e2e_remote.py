@@ -94,6 +94,7 @@ async def main():
         # (en écoute « toujours », le micro simulé a pu ouvrir une discussion plus tôt : on repart d'une discussion neuve)
         await page.evaluate("if (wilson.state === 'conversation') wilson.endConversation('test'); window.__spoken.length = 0; wilson._lastReply = ''")
         await page.wait_for_function('wilson.state === "veille"', timeout=5000)
+        await page.wait_for_function('!wilson.voice.speaking && performance.now() - wilson.playEndAt > 1300', timeout=8000)   # fin de sa voix (garde anti-écho)
         nd = await page.evaluate("wilson.logs.filter(l => l.includes('Délais')).length")
         n_conv = len(st['posts'])
         await page.evaluate("wilson.startConversation('ouvert')")

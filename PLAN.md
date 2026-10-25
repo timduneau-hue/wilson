@@ -61,6 +61,16 @@ Timothée accepte que les données du CRM passent par Gemini (palier gratuit).
 Android Auto (à partir du 27/10/26) : une appli web ne s'affiche pas sur l'écran de la voiture ; Wilson reste sur le
 téléphone, le son passe par la voiture. Comportement exact à vérifier dans le journal.
 
+Sur la route (demande de Timothée, 25/10/26 : « parfois il n'y a plus de réseau, avec le Bluetooth on entend très mal,
+je peux recevoir des appels pendant que je parle à Wilson ») :
+
+| # | Règle | Comment c'est garanti |
+|---|-------|-----------------------|
+| C8 | **Réseau coupé : la discussion n'est pas perdue.** | Coupure (connexion fermée, ou téléphone hors ligne) → deux notes descendantes + « Je n'ai plus de réseau, je reprends dès qu'il revient » (voix du téléphone, qui marche sans Internet), une seule fois. Wilson réessaie (tout de suite quand le réseau revient, sinon 2, 4, 8, puis toutes les 15 s) pendant 3 min en voiture (1 min ailleurs), en reprenant la même session (même fil). La dernière phrase dite pendant la coupure (6 s au plus) est gardée et envoyée dès le retour : il y répond. Retour → deux notes montantes. Au-delà : veille, « je me mets en veille ». Réveillé sans réseau en voiture : « Pas de réseau pour l'instant », et la phrase qui l'a réveillé part dès le retour. |
+| C8 bis | Écriture confirmée mais pas de réseau. | Elle est gardée sur le téléphone et envoyée seule au retour du réseau (sa confirmation est déjà donnée) ; Wilson le dit (« pas encore enregistré, je le fais dès que le réseau revient », puis « c'est enregistré »). Si le CRM n'a pas répondu à temps, Wilson ne sait pas si c'est passé : il le dit, rien n'est renvoyé (pas de doublon). Lecture impossible : fiche ou journée gardée sur le téléphone, avec son heure. |
+| C9 | **Appel téléphonique pendant une discussion.** | Le téléphone prend le micro (Wilson ne reçoit plus que du silence numérique, ou le micro est « coupé ») → Wilson se tait aussitôt, la discussion est mise de côté (son fil est gardé), aucune confirmation d'écriture n'est possible pendant l'appel. Micro rendu → si l'appel a duré plus de 8 s, Wilson reprend : « On reprend ? » (et propose un compte rendu si c'était un client) ; une écriture en attente est relue de nouveau avant tout « oui ». Téléphone seulement (la tablette n'a pas d'appels). |
+| C10 | **Son mauvais (Bluetooth, bruit) : il fait confirmer.** | Consigne à Gemini : demande bizarre, incomplète, hors sujet, nom, chiffre ou date douteux → il reformule ce qu'il a compris et demande « c'est bien ça ? » au lieu de deviner ; rien compris → « tu peux répéter ? ». Client retrouvé à partir d'un nom approximatif → il commence par le nom du client trouvé, pour qu'on puisse le corriger. Conversation au téléphone avec quelqu'un d'autre → il se tait. |
+
 ## 3. Les états (machine à états unique, dans `app.js`)
 
 ```
@@ -87,7 +97,7 @@ téléphone, le son passe par la voiture. Comportement exact à vérifier dans l
 |---------|------|-----------|
 | `js/app.js` | Machine à états, chef d'orchestre | tous |
 | `js/face.js` | Visage : dessin, émotions, regard, lèvres | — |
-| `js/audio.js` | Micro (16 kHz), tampon, niveau de voix, lecture 24 kHz | Web Audio |
+| `js/audio.js` | Micro (16 kHz), tampon, niveau de voix, lecture 24 kHz ; micro pris par le téléphone (silence numérique, piste coupée : C9), micro rouvert s'il s'arrête (Bluetooth), notes « réseau perdu / revenu » | Web Audio |
 | `js/brain.js` | Client Gemini Live (WebSocket) — cerveau « direct » | clé API Gemini |
 | `js/eco.js` | Cerveau « économique » : phrase enregistrée + photo → Gemini Flash → réponse JSON (schéma imposé, recherche en deux temps, relance) | clé API Gemini |
 | `js/voice.js` | Voix de la tablette (synthèse vocale) pour le mode économique | navigateur |
@@ -112,6 +122,11 @@ téléphone, le son passe par la voiture. Comportement exact à vérifier dans l
 - **Micro sans annulation d'écho par défaut** : sur Android, l'annulation d'écho bascule tout le son de la page en
   « mode appel » (volume d'appel, écouteur d'un téléphone) — la voix du mode direct était inaudible (23/10/26).
   La voix de la tablette (mode économique) n'est pas touchée : c'est un autre programme (le moteur de synthèse vocale).
+- **Appel téléphonique détecté par le micro** (C9) : une page web ne voit pas les appels ; mais pendant un appel Android
+  ne lui donne plus que des zéros (silence numérique), alors qu'un vrai micro a toujours un peu de souffle. 1,2 s de zéros
+  = micro pris. Seulement sur le téléphone (la tablette n'a pas d'appels). À confirmer dans le journal au premier appel.
+- **Réseau** (C8) : `navigator.onLine` ne suffit pas sur la route (le téléphone se croit souvent « en ligne » sans données) ;
+  la coupure est aussi déduite d'une connexion fermée, d'un délai dépassé, ou du son du micro qui s'accumule sans partir.
 - **Regard calculé sur la tablette** (MediaPipe) : aucune donnée envoyée en veille, aucun quota consommé.
   Le mot-clé « Wilson » (Vosk) a été retiré le 23/10/26 : il ralentissait trop la tablette.
   En voiture (1.13.0), le regard n'est pas possible : une **oreille légère** reconnaît « Wilson » sans modèle à télécharger.
@@ -164,7 +179,7 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 25/10/26 : **version 1.13.1** en ligne (CRM à la voix et mode voiture, section 2 quater ; corrections d'après le journal du 25/10).
+État au 25/10/26 : **version 1.14.0** en ligne (CRM à la voix et mode voiture, section 2 quater ; sur la route : réseau, appels, son mauvais, C8 à C10).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
@@ -278,7 +293,27 @@ Historique récent :
   - réglage « réponds à tout » refusé une fois par le modèle → retenu pour toujours ; maintenant réessayé après 24 h.
   Pas changé : délais du CRM (≈ 3 s par appel au script, 6 à 9 s pour un gros historique ou le bilan) — à surveiller.
 
+- 1.14.0 (25/10/26) — **sur la route** (C8 à C10), à la demande de Timothée (« parfois il n'y a plus de réseau, avec le
+  Bluetooth on entend très mal, je peux recevoir des appels pendant que je parle à Wilson ») : réseau coupé → discussion
+  gardée, il le dit avec la voix du téléphone, réessaie 3 min en voiture en reprenant la même session, et répond à la phrase
+  dite pendant la coupure ; réveillé sans réseau → il répond au retour ; écriture confirmée sans réseau → envoyée seule au
+  retour (identifiant joint pour un futur anti-doublon côté CRM) ; journée et bilan gardés (10 et 15 min) et repris sans
+  réseau ; appel téléphonique → il se tait, discussion mise de côté, aucun « oui » ne compte, puis « On reprend ? » ;
+  son mauvais → il reformule et fait confirmer, cite d'abord le client retrouvé à partir d'un nom approximatif.
+  D'après le journal du téléphone (09h12–10h25) : plus de « Oulà, ça a bougé ! » quand on bouge le téléphone ; plus de
+  relance pendant qu'un outil travaille ; durée du CRM notée sur la bonne réponse ; consigne : ne pas reconstituer un détail
+  absent de la réponse du CRM (il avait décrit le contenu d'une commande que le dossier ne donne pas).
+  Vu aussi (pas un bug de Wilson) : « devis à relancer », « CA de juillet 2025 », « liste des clients qui ont commandé »,
+  « détail d'une commande », « adresse pour le GPS » ne sont pas dans les réponses du CRM → ajouts côté CRM proposés.
+
 En attente :
+- **À lire dans le journal (1.14.0)** : « Micro pris par le téléphone (silence numérique | micro coupé…) » puis « Micro rendu
+  … fin de l'appel » au premier appel reçu (si rien n'apparaît pendant un appel, la détection ne marche pas sur son
+  téléphone) ; « Réseau coupé (…) », « Phrase gardée pendant la coupure », « Réseau revenu après n s », « Réseau bloqué » ;
+  « Audio : appareils audio changés (Bluetooth ?) », « Audio : micro arrêté par le système : je le rouvre ».
+- **Proposé à Timothée (côté CRM, un seul envoi de fichiers)** : bilan avec devis à relancer, chiffre par mois (« juillet
+  2025 »), liste des clients actifs du mois ; détail des 2 dernières commandes dans la fiche ; adresse du client (itinéraire) ;
+  anti-doublon des écritures (identifiant `id` déjà envoyé par Wilson) ; réponses plus rapides (cache côté CRM).
 - **Mise en place par Timothée (1.13.0)** : CRM et script faits le 25/10/26 (journal : « CRM : relié »). Reste : téléphone →
   Réglages → CRM et voiture → « Apprendre mon nom » (dans la voiture, moteur allumé) — pas encore fait au 25/10.
 - Idées proposées à Timothée le 25/10/26 (à faire seulement s'il les choisit) : itinéraire vers le client (il faut l'adresse

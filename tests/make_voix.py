@@ -59,5 +59,7 @@ for i, t in enumerate(['Les informations de midi.', 'Il fait beau sur toute la r
 ecrire('flux', np.concatenate([dire('Il fait beau aujourd\'hui.'), np.zeros(8000), dire('Wilson, qui je vois demain ?', vitesse=150, hauteur=51), np.zeros(8000)]))
 # Micro simulé de la voiture (test de bout en bout) : « Il fait beau » puis « Wilson, qui je vois demain ? », en boucle
 z = lambda s: np.zeros(int(16000 * s))
-ecrire('voiture_micro', np.concatenate([z(2.5), dire("Il fait beau aujourd'hui.", vitesse=150), z(2.0), dire('Wilson, qui je vois demain ?', vitesse=150, hauteur=51), z(9)]))
+# (souffle du micro à −70 dB : un vrai micro ne donne jamais de zéros purs — ceux-ci veulent dire « micro pris par un appel », PLAN C9)
+mic = np.concatenate([z(2.5), dire("Il fait beau aujourd'hui.", vitesse=150), z(2.0), dire('Wilson, qui je vois demain ?', vitesse=150, hauteur=51), z(9)])
+ecrire('voiture_micro', mic + np.random.default_rng(11).standard_normal(len(mic)) * 3e-4)
 print(len(os.listdir(OUT)), 'fichiers dans', OUT)

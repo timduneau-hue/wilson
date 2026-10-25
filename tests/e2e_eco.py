@@ -40,6 +40,7 @@ async def main():
 
         async def gen(route):
             req = route.request
+            if st['eco'] == 'down': await route.abort('internetdisconnected'); return
             if req.method == 'OPTIONS':
                 await route.fulfill(status=204, headers={'access-control-allow-origin': '*', 'access-control-allow-headers': '*'}); return
             body = json.loads(req.post_data); model = req.url.split('/models/')[1].split(':')[0]
@@ -138,6 +139,23 @@ async def main():
         st['replies_seq'] = []
         # (la fausse voix de ce test ne met pas les phrases en file : la 1re ne finit qu'au filet de sécurité, d'où l'attente)
         await page.wait_for_function('!wilson.voice.speaking', timeout=15000)
+
+        # 2c. Pas de réseau (PLAN C8) : il le dit, la phrase est gardée et renvoyée au retour du réseau
+        await page.wait_for_function('!wilson.voice.speaking', timeout=8000)
+        old = st['reply']; st['eco'] = 'down'; ns = len(await page.evaluate('window.__spoken'))
+        st['reply'] = {'entendu': 'Quelle heure est-il ?', 'pour_moi': True, 'reponse': 'Il est dix heures.', 'emotion': 'neutre'}
+        await page.wait_for_timeout(1200)
+        await page.evaluate("window.__voice()")
+        await page.wait_for_function("!!wilson.netWait", timeout=8000)
+        await page.wait_for_timeout(300)
+        sp = (await page.evaluate('window.__spoken'))[ns:]
+        check('Économique sans réseau : il le dit, la phrase est gardée', any('plus de réseau' in x for x in sp) and await page.evaluate("!!(wilson.netWait && wilson.netWait.eco && wilson.state === 'conversation')"), str(sp))
+        st['eco'] = 'ok'
+        await page.evaluate("window.dispatchEvent(new Event('online'))")
+        await page.wait_for_function("window.__spoken.includes('Il est dix heures.')", timeout=8000)
+        check('… réseau revenu : la même phrase est renvoyée, il y répond', not await page.evaluate('!!wilson.netWait'))
+        st['reply'] = old
+        await page.wait_for_function('!wilson.voice.speaking', timeout=8000)
 
         # 3. Les gens parlent entre eux → silence
         st['reply'] = {'entendu': 'On mange à quelle heure ?', 'pour_moi': False, 'reponse': '', 'emotion': 'neutre'}
