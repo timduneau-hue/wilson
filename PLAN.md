@@ -204,6 +204,9 @@ Avancement (25/10/26, 14h55) :
   RTL8822BE), MAC 08:00:27:BC:8E:6E ; relancée à chaque ouverture de session (`Démarrage\Home Assistant.cmd`).
 - Home Assistant répond sur http://homeassistant.local:8123 ; le DNS de la box bloquait le premier téléchargement →
   DNS Cloudflare choisi dans l'écran de préparation ; téléchargement de Home Assistant Core en cours (20 min ou plus).
+- Incident 25/10 : VirtualBox passait par Hyper-V (NEM, « Intégrité de la mémoire » active) → la machine se figeait
+  (jusqu'à 42 min). Timothée a désactivé l'Intégrité de la mémoire et redémarré : VT-x direct (VBox.log), 2 Go de
+  mémoire, horloge UTC (script `Redemarrer Home Assistant.bat`, arrêt propre sans forcer). Prêt pour l'accueil à 18h33.
 - Reste : compte Home Assistant (Timothée) ; appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
   outil `maison` dans Wilson ; ouverture de session Windows automatique (sinon la machine ne redémarre qu'après connexion).
 
