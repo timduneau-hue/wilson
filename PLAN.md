@@ -178,9 +178,24 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 
 ## 7. Lots suivants (prévus, pas dans ce lot)
 
-1. Domotique via Home Assistant (lumières, télé, prises).
+1. **Domotique via Home Assistant** — en cours (25/10/26), voir 7 bis.
 2. Alertes e-mail (intrusion, fumée) quand la maison est vide.
 3. Reconnaissance des membres de la famille.
+
+## 7 bis. Domotique : Home Assistant (demande de Timothée, 25/10/26)
+
+« Je ne veux pas avoir à tout reprogrammer » ; gratuit ; Claude fait les démarches depuis le PC de la maison.
+Constat du 25/10/26 : aucun Home Assistant sur le réseau (box Free, 192.168.1.x ; seul un appareil Google Cast répond, en
+192.168.1.44) ; Timothée pense ne pas l'avoir installé. Lumières, télé et prises sont dans Google Home.
+
+| # | Règle | Comment |
+|---|-------|---------|
+| D1 | Home Assistant gratuit, toujours allumé. | Home Assistant OS (image officielle) dans une machine virtuelle VirtualBox sur le PC de la maison (Windows 64 bits, 12 cœurs), réseau « pont » (adresse sur la box), démarrage automatique avec Windows ; le PC ne se met jamais en veille (réglage fait par Timothée). |
+| D2 | Pas de reprogrammation des appareils. | Ce que Home Assistant découvre seul (Google Cast, télés, prises connues) est ajouté tel quel ; le reste passe par l'intégration « Google Assistant SDK » : Home Assistant transmet la phrase à Google, c'est Google Home qui exécute (limites : pas toujours de confirmation, pas de routines). |
+| D3 | Wilson pilote la maison avec une seule commande. | Outil `maison` : la phrase dite est envoyée à l'assistant de Home Assistant (français), qui agit sur ses appareils ou la passe à Google. Rien à coder appareil par appareil. |
+| D4 | Wilson joint Home Assistant partout (maison, voiture). | Adresse https gratuite par Tailscale (variante à choisir : privée, avec l'appli Tailscale sur téléphone et tablette ; ou publique, protégée par le mot de passe de Home Assistant). Nabu Casa écarté (payant). |
+| D5 | Sécurité. | Compte Home Assistant créé par Timothée ; jeton d'accès créé et collé par lui dans Wilson (jamais dans le dépôt) ; comptes Google Cloud / Tailscale : consentements donnés par lui. |
+| D6 | Accès de Claude au PC. | Extension Claude dans Chrome (en place le 25/10/26) + appli Claude de bureau avec « Computer use » (pour VirtualBox) ; téléchargements seulement avec l'accord de Timothée ; fenêtres d'administrateur Windows validées par lui. |
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
