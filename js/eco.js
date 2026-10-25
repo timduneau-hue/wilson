@@ -46,15 +46,15 @@ export const ECO_SCHEMA = {
 };
 
 // CRM à la voix (PLAN 2 quater) : un champ « crm » en plus, seulement quand le CRM est relié.
-const CRM_OUTILS = ['aucun', 'client', 'agenda', 'bilan', 'produit', 'appeler', 'noter', 'confirmer'];
-const CRM_ORDER = ['outil', 'client', 'contact', 'jour', 'produit', 'question', 'type', 'texte', 'date', 'heure', 'echange'];
+const CRM_OUTILS = ['aucun', 'client', 'agenda', 'bilan', 'produit', 'question', 'itineraire', 'appeler', 'noter', 'confirmer'];
+const CRM_ORDER = ['outil', 'client', 'contact', 'jour', 'produit', 'question', 'demande', 'type', 'texte', 'date', 'heure', 'echange'];
 const ORDER_CRM = ['pour_moi', 'chercher', 'regarder', 'crm', 'emotion', 'reponse', 'geste', 'memoriser', 'oublier', 'fin', 'entendu'];
 export function ecoSchema(crm = false) {
   if (!crm) return ECO_SCHEMA;
   const S = (d) => ({ type: 'STRING', ...(d ? { enum: d } : {}) });
   return { ...ECO_SCHEMA,
     properties: { ...ECO_SCHEMA.properties, crm: { type: 'OBJECT', required: ['outil'], propertyOrdering: CRM_ORDER, properties: {
-      outil: S(CRM_OUTILS), client: S(), contact: S(), jour: S(), produit: S(), question: S(['qui_achete', 'infos']),
+      outil: S(CRM_OUTILS), client: S(), contact: S(), jour: S(), produit: S(), question: S(['qui_achete', 'infos']), demande: S(),
       type: S(['tache', 'compte_rendu', 'rdv', 'note']), texte: S(), date: S(), heure: S(), echange: S(['visite', 'appel']) } } },
     propertyOrdering: ORDER_CRM };
 }
@@ -74,7 +74,7 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs
       + (canSearch ? ' ; si chercher n\'est pas vide : SEULEMENT une courte phrase d\'attente naturelle (par exemple « Attends, je regarde. »), sans inventer la réponse' : '');
   return `${head}
 {"pour_moi": ${search ? 'true' : 'true si la phrase s\'adresse à toi (on te regardait en la disant : c\'est en général le cas, ou la suite évidente de votre conversation), false si c\'est la télé, un bruit, une phrase coupée ou visiblement adressée à quelqu\'un d\'autre'},
-${chercher}${search ? '' : ` "regarder": true SEULEMENT si on te demande de regarder ou de décrire quelque chose (ce que tu vois, une couleur, lire, un objet montré, une tenue…) et qu'aucune photo n'est jointe ; alors "reponse" = une très courte phrase d'attente (« Je regarde… »). Sinon false,\n`}${crm && !search ? ` "crm": {"outil": "aucun", sauf si la phrase porte sur le CRM de Timothée (ses clients, rendez-vous, tâches, devis, chiffres, articles), s'il faut appeler un client ou noter quelque chose : "client" (fiche d'un client : remplis "client" avec le nom dit), "agenda" ("jour" : aujourd'hui, demain, jeudi…), "bilan" (son chiffre d'affaires global), "produit" ("produit" et "question" qui_achete ou infos), "appeler" ("client", "contact"), "noter" ("type" tache, compte_rendu, rdv ou note, "client", "texte" = ses mots mis au propre, "date", "heure", "echange" visite ou appel : RIEN n'est écrit, tu recevras la phrase à lui relire), "confirmer" (SEULEMENT s'il vient de répondre oui à ta relecture)} ; quand "outil" n'est pas "aucun", "reponse" = une très courte phrase d'attente (« Je regarde dans le CRM… »), ou vide pour noter et confirmer. Ne devine jamais un nom, un chiffre ou une date du CRM,\n` : ''} "emotion": "une émotion parmi ${EMOTIONS.join(', ')}",
+${chercher}${search ? '' : ` "regarder": true SEULEMENT si on te demande de regarder ou de décrire quelque chose (ce que tu vois, une couleur, lire, un objet montré, une tenue…) et qu'aucune photo n'est jointe ; alors "reponse" = une très courte phrase d'attente (« Je regarde… »). Sinon false,\n`}${crm && !search ? ` "crm": {"outil": "aucun", sauf si la phrase porte sur le CRM de Timothée (ses clients, rendez-vous, tâches, devis, chiffres, articles), s'il faut appeler un client ou noter quelque chose : "client" (fiche d'un client : remplis "client" avec le nom dit), "agenda" ("jour" : aujourd'hui, demain, jeudi…), "bilan" (son chiffre d'affaires global), "produit" ("produit" et "question" qui_achete ou infos), "question" (TOUTE autre question sur ses données : chiffre passé, total, liste, détail, « qui », « combien », « quand », devis à relancer… ; "demande" = la question complète avec le client et la période ; un analyste cherche dans tout le CRM, "reponse" = « Je cherche l'information… »), "itineraire" ("client" : aller chez lui, un bouton GPS s'affiche), "appeler" ("client", "contact"), "noter" ("type" tache, compte_rendu, rdv ou note, "client", "texte" = ses mots mis au propre, "date", "heure", "echange" visite ou appel : RIEN n'est écrit, tu recevras la phrase à lui relire), "confirmer" (SEULEMENT s'il vient de répondre oui à ta relecture)} ; quand "outil" n'est pas "aucun", "reponse" = une très courte phrase d'attente (« Je regarde dans le CRM… »), ou vide pour noter et confirmer. Ne devine jamais un nom, un chiffre ou une date du CRM,\n` : ''} "emotion": "une émotion parmi ${EMOTIONS.join(', ')}",
  "reponse": "${reponse}",
  "geste": "${GESTES.join(', ')}",
  "memoriser": ["informations durables à retenir, phrases courtes et autonomes avec les prénoms"],
