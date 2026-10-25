@@ -16,7 +16,11 @@ export const frDate = (d) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.g
 export const jourDit = (d) => `${JOURS[d.getDay()]} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)}`;
 const minuit = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const plus = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-const CACHE_KEY = 'wilson.crm.cache', PENDING_MS = 5 * 60000, CACHE_MS = 6 * 3600000;
+const CACHE_KEY = 'wilson.crm.cache', QUEUE_KEY = 'wilson.crm.attente', PENDING_MS = 5 * 60000, CACHE_MS = 6 * 3600000;
+const JOURNEE_MS = 10 * 60000, BILAN_MS = 15 * 60000;      // journée et bilan récents : réponse immédiate (et sans réseau)
+const hm = (t) => { const d = new Date(t); return `${d.getHours()}h${pad(d.getMinutes())}`; };
+// Pas de réseau, ou réseau trop faible (C8) : la requête n'est pas partie.
+export const netErr = (e) => !navigator.onLine || (e && e.name === 'TypeError') || /Failed to fetch|NetworkError|Load failed|network/i.test(String((e && e.message) || ''));
 
 // « demain », « jeudi », « le 30 », « 30/10 », « 30 octobre », « dans 2 semaines »… → Date (minuit) ou null.
 // futur : une date sans année déjà passée est prise l'an prochain (tâche, rendez-vous) ; sinon dans le passé (compte rendu).
@@ -170,9 +174,11 @@ export const CRM_TOOL_NAMES = CRM_TOOLS.map((t) => t.name);
 
 export class Crm {
   constructor(app) {
-    this.app = app; this.cache = new Map(); this.pending = null; this.last = null; this.journee = null;
-    this.state = ''; this.etat = null; this.call = null;
+    this.app = app; this.cache = new Map(); this.pending = null; this.last = null; this.journee = null; this._bilan = null;
+    this.state = ''; this.etat = null; this.call = null; this.queue = [];
     this._load();
+    try { this.queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]') || []; } catch (_) { this.queue = []; }
+    if (this.queue.length) setTimeout(() => this.flushQueue(), 8000);
   }
   get on() { return !!this.app.settings.crm && this.app.remote.on; }
   log(m, priv) { this.app.log('CRM : ' + m, priv); }
@@ -224,20 +230,46 @@ export class Crm {
     if (!cle && this._isLast(client) && this.last) return { ok: true, e: this.last, cached: true };
     const hit = cle ? this.cache.get(cle) : this._fromCache(client);
     if (hit && Date.now() - hit.at < CACHE_MS) { this.last = hit; this.log(`fiche gardée : ${hit.societe}`); return { ok: true, e: hit, cached: true }; }
-    const r = await this.ask(cle ? { action: 'crm_client', cle } : { action: 'crm_client', client }, signal);
+    let r;
+    try { r = await this.ask(cle ? { action: 'crm_client', cle } : { action: 'crm_client', client }, signal); }
+    catch (e) {
+      // pas de réseau vers le CRM : la fiche gardée sur le téléphone, même ancienne, avec son heure (C8 bis)
+      if (netErr(e) && hit) { this.last = hit; this.log(`pas de réseau : fiche gardée de ${hm(hit.at)} (${hit.societe})`); return { ok: true, e: hit, cached: true, vieux: hit.at }; }
+      throw e;
+    }
     if (!r.ok) return r;
     if (!r.cle) return { ok: true, texte: r.texte, choix: r.choix || [] };            // inconnu ou plusieurs possibles
-    return { ok: true, e: this._keep(r) };
+    const e = this._keep(r);
+    // nom entendu loin du client trouvé (son mauvais, nom écorché) : Wilson cite d'abord le client, pour qu'on le corrige (C10)
+    return { ok: true, e, approx: !cle && ressemblance(client, e) < 0.9 };
   }
-  async agenda(jour, signal) {
+  async agenda(jour, signal, { frais = false } = {}) {
     const d = parseJour(jour || "aujourd'hui") || new Date();
     const auj = minuit(new Date());
     const j = +minuit(d) === +auj ? 'aujourdhui' : +minuit(d) === +plus(auj, 1) ? 'demain' : frDate(d);
-    const r = await this.ask({ action: 'crm_journee', jour: j }, signal);
-    if (r.ok && j === 'aujourdhui') this.journee = { at: Date.now(), ...r };
+    const J = j === 'aujourdhui' && this.journee && this.journee.jourDe === frDate(auj) ? this.journee : null;
+    if (J && !frais && Date.now() - J.at < JOURNEE_MS) { this.log(`journée gardée de ${hm(J.at)}`); return J; }
+    let r;
+    try { r = await this.ask({ action: 'crm_journee', jour: j }, signal); }
+    catch (e) {
+      if (netErr(e) && J) { this.log(`pas de réseau : journée gardée de ${hm(J.at)}`); return { ...J, texte: `(Pas de réseau vers le CRM : journée telle qu'elle était à ${hm(J.at)}.)\n${J.texte}` }; }
+      throw e;
+    }
+    if (r.ok && j === 'aujourdhui') this.journee = { at: Date.now(), jourDe: frDate(auj), ...r };
     return r;
   }
-  bilan(signal) { return this.ask({ action: 'crm_bilan' }, signal); }
+  async bilan(signal) {
+    const B = this._bilan;
+    if (B && Date.now() - B.at < BILAN_MS) { this.log(`bilan gardé de ${hm(B.at)}`); return B; }
+    let r;
+    try { r = await this.ask({ action: 'crm_bilan' }, signal); }
+    catch (e) {
+      if (netErr(e) && B && Date.now() - B.at < 12 * 3600000) { this.log(`pas de réseau : bilan gardé de ${hm(B.at)}`); return { ...B, texte: `(Pas de réseau vers le CRM : chiffres de ${hm(B.at)}.)\n${B.texte}` }; }
+      throw e;
+    }
+    if (r.ok) this._bilan = { at: Date.now(), ...r };
+    return r;
+  }
   produit(produit, question, signal) { return this.ask({ action: 'crm_produit', produit, question: question === 'infos' ? 'infos' : 'qui_achete' }, signal); }
 
   // Mode voiture : la journée et les fiches des rendez-vous du jour, chargées d'avance (C7).
@@ -317,6 +349,7 @@ export class Crm {
     if (!p) return { ok: false, why: 'rien à enregistrer' };
     if (Date.now() - p.atMs > PENDING_MS) { this.pending = null; return { ok: false, why: 'préparation trop ancienne' }; }
     if (tapped) return { ok: true };
+    if (p.call) return { ok: false, why: 'appel téléphonique en cours : aucun « oui » ne compte' };
     const apres = (heard || []).filter((h) => (h.n == null || h.n < 0 ? h.t > p.at : h.n > p.turn) && String(h.text || '').trim());
     if (!apres.length) return { ok: false, why: 'pas de réponse de Timothée depuis la relecture' };
     const dit = apres[apres.length - 1].text;                 // sa DERNIÈRE réponse (« attends… » puis « oui, vas-y »)
@@ -328,17 +361,62 @@ export class Crm {
     const p = this.pending; if (!p) return { ok: false, dire: 'Il n\'y a rien à enregistrer.' };
     this.pending = null;
     if (this.app.hideCard) this.app.hideCard('confirm');
+    // id : le même envoi n'est jamais enregistré deux fois (renvoi après une coupure de réseau)
+    const id = p.id || (p.id = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
     const payload = p.type === 'tache'
-      ? { action: 'crm_tache', texte: p.texte, date: p.date, cle: p.cle, confirme: true }
-      : { action: 'crm_brouillon', type: p.type, cle: p.cle, texte: p.texte, date: p.date, heure: p.heure || '', echange: p.echange || '', confirme: true };
-    const r = await this.ask(payload, signal);
+      ? { action: 'crm_tache', id, texte: p.texte, date: p.date, cle: p.cle, confirme: true }
+      : { action: 'crm_brouillon', id, type: p.type, cle: p.cle, texte: p.texte, date: p.date, heure: p.heure || '', echange: p.echange || '', confirme: true };
+    let r;
+    try { r = await this.ask(payload, signal); }
+    catch (e) {
+      if (netErr(e)) {             // pas de réseau : la requête n'est pas partie → gardée et envoyée seule au retour du réseau (C8 bis)
+        this._enqueue(p, payload);
+        return { ok: false, queued: true, dire: 'Pas de réseau : ce n\'est PAS encore enregistré. C\'est gardé sur le téléphone et je l\'enregistrerai tout seul dès que le réseau revient. Dis-le en une phrase, sans dire « c\'est noté ».',
+          phrase: 'Pas de réseau : je l\'enregistrerai dès qu\'il revient.' };
+      }
+      if (e.name === 'AbortError') {  // parti, mais sans réponse à temps : impossible de savoir s'il est passé, rien n'est renvoyé
+        this.log(`écriture INCERTAINE (pas de réponse à temps) : ${p.relu}`, true);
+        return { ok: false, dire: 'Le CRM n\'a pas répondu à temps : je ne sais pas si c\'est enregistré. Dis-lui de vérifier dans Mes tâches, sans réessayer tout de suite.', phrase: 'Le CRM n\'a pas répondu : vérifie dans Mes tâches si c\'est passé.' };
+      }
+      throw e;
+    }
     if (!r.ok) { this.pending = p; return { ok: false, dire: `Le CRM a refusé : ${r.erreur || 'erreur'}. Rien n'est écrit ; dis-le simplement.`, phrase: 'Le CRM a refusé : rien n\'est écrit.' }; }
     this.log(`enregistré : ${p.relu}`, true);
+    if (p.type === 'tache') this.journee = null;          // la journée gardée n'a pas cette tâche
     const jour = p.date ? jourDit(new Date(+p.date.slice(6), +p.date.slice(3, 5) - 1, +p.date.slice(0, 2))) : '';
     return p.type === 'tache'
       ? { ok: true, dire: `C'est noté dans Mes tâches pour le ${jour}. Confirme-le en une phrase.`, phrase: `C'est noté dans tes tâches pour le ${jour}.` }
       : { ok: true, dire: 'C\'est prêt dans le CRM, dans Mes tâches, rubrique « Dicté à Wilson » : il le validera une fois garé, avec Enregistrer. Dis-le en une phrase.',
         phrase: 'C\'est prêt : tu le valideras dans le CRM, dans Mes tâches.' };
+  }
+
+  // ---- écritures confirmées, en attente du réseau (C8 bis) ----
+  _enqueue(p, payload) {
+    this.queue.push({ payload, relu: p.relu, type: p.type, at: Date.now() });
+    this._saveQueue();
+    this.log(`pas de réseau : écriture gardée sur le téléphone, envoyée au retour du réseau : ${p.relu}`, true);
+    clearTimeout(this._qT); this._qT = setTimeout(() => this.flushQueue(), 30000);
+  }
+  _saveQueue() { try { localStorage.setItem(QUEUE_KEY, JSON.stringify(this.queue)); } catch (_) {} }
+  async flushQueue() {
+    if (!this.queue.length || this._flushing || !this.on) return;
+    if (!navigator.onLine) { clearTimeout(this._qT); this._qT = setTimeout(() => this.flushQueue(), 30000); return; }
+    this._flushing = true;
+    try {
+      while (this.queue.length) {
+        const q = this.queue[0];
+        let r; const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 40000);
+        try { r = await this.ask(q.payload, ctl.signal); }
+        catch (e) {
+          if (e.name !== 'AbortError' && netErr(e)) { clearTimeout(this._qT); this._qT = setTimeout(() => this.flushQueue(), 30000); return; }
+          r = { ok: false, erreur: e.name === 'AbortError' ? 'pas de réponse à temps, je ne sais pas si c\'est passé : vérifie dans Mes tâches' : e.message };
+        } finally { clearTimeout(tm); }
+        this.queue.shift(); this._saveQueue();
+        if (r.ok) { this.log(`enregistré au retour du réseau : ${q.relu}`, true); if (q.type === 'tache') this.journee = null; }
+        else this.log(`refusé au retour du réseau (${r.erreur || 'erreur'}) : ${q.relu}`, true);
+        if (this.app._crmQueued) this.app._crmQueued(q, !!r.ok, r.erreur);
+      }
+    } finally { this._flushing = false; }
   }
 
   // ---- appeler (C4) ----

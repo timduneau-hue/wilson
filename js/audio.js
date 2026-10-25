@@ -8,7 +8,9 @@ export class AudioIO {
     this.ring = new Int16Array(TARGET * 6); this.ringPos = 0; this.ringFilled = 0;   // 6 s de tampon
     this.level = 0; this.db = -100; this.floor = -60; this.speaking = false; this.lastVoicedAt = 0;
     this._onCnt = 0; this._offCnt = 0;
-    this.listeners = { frame: [], speechstart: [], speechend: [], drained: [] };
+    this.listeners = { frame: [], speechstart: [], speechend: [], drained: [], mic: [], info: [] };
+    // Micro pris par le téléphone (appel) : Android ne donne plus que du silence numérique (zéros), ou coupe la piste.
+    this.micTaken = false; this.takenN = 0; this._muted = false; this._zero = false; this._zeroMs = 0; this._liveMs = 0;
     this.sources = []; this.nextTime = 0; this.outLevel = 0; this.outRound = 0;
     this.gainDb = 0; this.aec = false; this.playedSec = 0;
   }
@@ -22,7 +24,9 @@ export class AudioIO {
   async start({ aec = false } = {}) {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     this.aec = !!aec;
-    this.stream = await this._openMic(this.aec);
+    this.stream = await this._openMic(this.aec); this._watchTrack();
+    this.ctx.onstatechange = () => this._emit('info', `son : ${this.ctx.state}`);
+    if (navigator.mediaDevices && 'ondevicechange' in navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', () => this._emit('info', 'appareils audio changés (Bluetooth ?)'));
     await this.ctx.audioWorklet.addModule(new URL('./worklets/capture.js', import.meta.url));
     const node = this.node = new AudioWorkletNode(this.ctx, 'wilson-capture');
     node.port.onmessage = (e) => this._onCapture(e.data);
@@ -50,9 +54,39 @@ export class AudioIO {
     if (!this.ctx || !this.node || aec === this.aec) return false;
     if (this.src) { try { this.src.disconnect(); } catch (_) {} }
     if (this.stream) this.stream.getTracks().forEach((tr) => tr.stop());
-    this.stream = await this._openMic(aec); this.aec = aec;
+    this.stream = await this._openMic(aec); this.aec = aec; this._watchTrack();
     this.src = this.ctx.createMediaStreamSource(this.stream); this.src.connect(this.node);
     return true;
+  }
+  // Piste du micro : coupée par le système (appel…), ou arrêtée (Bluetooth qui change) → rouverte, sinon Wilson resterait sourd.
+  _watchTrack() {
+    const t = this.stream && this.stream.getAudioTracks()[0]; if (!t) return;
+    t.onmute = () => { this._muted = true; this._micUpdate('micro coupé par le système'); };
+    t.onunmute = () => { this._muted = false; this._micUpdate('micro rendu'); };
+    t.onended = () => {
+      if (this.stream && this.stream.getAudioTracks()[0] !== t) return;          // ancienne piste, fermée par nous
+      this._emit('info', 'micro arrêté par le système : je le rouvre'); this._muted = false;
+      setTimeout(() => this._reopen(), 800);
+    };
+    if (t.muted) { this._muted = true; this._micUpdate('micro coupé par le système'); }
+  }
+  async _reopen(n = 0) {
+    try {
+      if (this.src) { try { this.src.disconnect(); } catch (_) {} }
+      this.stream = await this._openMic(this.aec); this._watchTrack();
+      this.src = this.ctx.createMediaStreamSource(this.stream); this.src.connect(this.node);
+      this._emit('info', 'micro rouvert');
+    } catch (e) {
+      this._emit('info', 'micro impossible à rouvrir : ' + e.message);
+      if (n < 5) setTimeout(() => this._reopen(n + 1), 3000);
+    }
+  }
+  _micUpdate(why) {
+    const taken = this._muted || this._zero;
+    if (taken === this.micTaken) return;
+    this.micTaken = taken;
+    if (taken) { this.takenAt = performance.now(); this.takenN++; }
+    this._emit('mic', { taken, why });
   }
   // Son d'essai (trois notes) par le même chemin que la voix du mode direct.
   chime() {
@@ -65,11 +99,22 @@ export class AudioIO {
       o.connect(g); g.connect(this.out); o.start(t0 + i * 0.22); o.stop(t0 + i * 0.22 + 0.55);
     });
   }
+  // Deux notes : « perdu » (descendantes, réseau coupé) ou « revenu » (montantes). Marche sans Internet.
+  tone(kind) {
+    if (!this.ctx) return;
+    const t0 = this.ctx.currentTime + 0.03, f = kind === 'revenu' ? [523.25, 783.99] : [659.25, 440];
+    f.forEach((hz, i) => {
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain(), t = t0 + i * 0.18;
+      o.frequency.value = hz; o.type = 'sine';
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.35, t + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      o.connect(g); g.connect(this.out); o.start(t); o.stop(t + 0.32);
+    });
+  }
   // État du son pour le journal à distance.
   describe() {
     const c = this.ctx; if (!c) return 'pas démarré';
     const lat = Math.round(((c.baseLatency || 0) + (c.outputLatency || 0)) * 1000);
-    return `${c.state}, ${c.sampleRate} Hz, latence de sortie ${lat} ms, annulation d'écho ${this.aec ? 'oui (Android : son en mode appel)' : 'non (haut-parleur normal)'}, voix du direct jouée : ${Math.round(this.playedSec)} s`;
+    return `${c.state}, ${c.sampleRate} Hz, latence de sortie ${lat} ms, annulation d'écho ${this.aec ? 'oui (Android : son en mode appel)' : 'non (haut-parleur normal)'}, voix du direct jouée : ${Math.round(this.playedSec)} s${this.takenN ? `, micro pris par le téléphone ${this.takenN} fois${this.micTaken ? ' (EN CE MOMENT)' : ''}` : ''}`;
   }
 
   get running() { return this.ctx && this.ctx.state === 'running'; }
@@ -77,6 +122,11 @@ export class AudioIO {
 
   // ----- capture -----
   _onCapture(f) {
+    // Silence numérique (que des zéros) pendant 1,2 s : un vrai micro a toujours un peu de souffle → le téléphone l'a pris.
+    let pk = 0; for (let i = 0; i < f.length; i++) { const a = f[i] < 0 ? -f[i] : f[i]; if (a > pk) pk = a; }
+    const dur = (f.length / this.ctx.sampleRate) * 1000;
+    if (pk < 1e-6) { this._zeroMs += dur; this._liveMs = 0; if (!this._zero && this._zeroMs >= 1200) { this._zero = true; this._micUpdate('silence numérique'); } }
+    else { this._zeroMs = 0; if (this._zero && (this._liveMs += dur) >= 200) { this._zero = false; this._micUpdate('son rendu'); } }
     // Rééchantillonnage vers 16 kHz : moyenne sur une fenêtre de largeur `ratio` (filtre anti-repliement simple).
     const r = this.ratio, half = r / 2, out = new Float32Array(Math.ceil(f.length / r) + 2);
     let n = 0, pos = this._frac;

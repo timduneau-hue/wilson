@@ -16,7 +16,7 @@ import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
 import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 
-const VERSION = '1.13.1';
+const VERSION = '1.14.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -138,14 +138,14 @@ class App {
       'Réponses du direct': this.brain.proactive === false ? 'répond à tout ce qu\'il entend (proactivité coupée)' : 'Gemini choisit à quoi répondre (réglage refusé par le modèle)',
       'Photos': `seulement à la demande — ${this._photos || 0} prise(s) depuis le démarrage`,
       'Batterie': b ? `${Math.round(b.level * 100)} %${b.charging ? ', branchée' : ', NON branchée'}` : '—',
-      'Réseau': navigator.onLine ? 'en ligne' : 'hors ligne',
+      'Réseau': `${navigator.onLine ? 'en ligne' : 'hors ligne'}${this.netWait ? `, COUPURE en cours depuis ${Math.round((now - this.netWait.since) / 1000)} s (${this.netWait.why})` : ''}${this.phone ? ', appel téléphonique en cours' : ''}`,
       'Recherche Internet': this.remote.on ? `Tavily par le script${this._searchState ? ' — dernière : ' + this._searchState : ''}` : 'Gemini seulement (pas de script)',
       'Mode économique': `${e.modelUsed || '—'}, réflexion ${e.thinking ?? 'par défaut'}${e.noSchema ? ', sans schéma' : ''}${e.noSearch ? ', sans recherche' : ''}, ${e.recent()} requête(s) dans la dernière minute`,
       'Quota direct': this.quotaUntil && now < this.quotaUntil ? `en pause : ${this.quotaMsg || ''}` : 'pas de pause',
       'Quota économique': this.ecoQuotaUntil && now < this.ecoQuotaUntil ? `en pause : ${this.ecoQuotaMsg || ''}` : 'pas de pause',
       'Voix de la tablette': `${s.ecoVoice || 'automatique'} (${this.voice.voices().length} voix françaises)`,
       'Souvenirs': `${this.memory.facts.length}`,
-      'CRM': this.crm.on ? `relié — ${this.crm.state || 'pas encore interrogé'}${this.crm.cache.size ? `, ${this.crm.cache.size} fiche(s) gardée(s)` : ''}${this.crm.pending ? ', une écriture attend sa confirmation' : ''}` : (this.settings.crm ? 'activé, mais pas de script sur cet appareil' : 'non relié'),
+      'CRM': this.crm.on ? `relié — ${this.crm.state || 'pas encore interrogé'}${this.crm.cache.size ? `, ${this.crm.cache.size} fiche(s) gardée(s)` : ''}${this.crm.pending ? ', une écriture attend sa confirmation' : ''}${this.crm.queue.length ? `, ${this.crm.queue.length} écriture(s) confirmée(s) en attente du réseau` : ''}` : (this.settings.crm ? 'activé, mais pas de script sur cet appareil' : 'non relié'),
       'Mode voiture': `${this.car ? `oui (${this.car.why})` : 'non'}${this.settings.voitureAuto && deviceName() === 'téléphone' ? `, automatique en roulant${this._geoErr ? ' (GPS : ' + this._geoErr + ')' : this.speed != null ? `, vitesse ${Math.round(this.speed * 3.6)} km/h` : ''}` : ''}`,
       'Oreille (voiture)': this.oreille.ready ? `apprise, ${this.oreille.templates.length} empreintes, limite ${this.oreille.limite.toFixed(1)} (${this.oreille.sens})${this.oreille.last.length ? ' — dernières phrases : ' + this.oreille.last.slice(-8).map((x) => x.s + (x.oui ? '✓' : '')).join(' ') : ''}` : 'pas apprise',
       'Réglages communs': this.remote.on ? (this.sync.state || 'pas encore vérifiés') : 'pas de script : réglages propres à cet appareil',
@@ -219,7 +219,7 @@ class App {
   }
   _reloadWhenIdle(why) {
     const go = () => {
-      if (this.state === 'eveil' || this.state === 'conversation' || this.settingsOpen) return setTimeout(go, 15000);
+      if (this.state === 'eveil' || this.state === 'conversation' || this.settingsOpen || this.phone || this.netWait) return setTimeout(go, 15000);
       try { sessionStorage.setItem('wilson.reloadedFor', `${why}|${Date.now()}`); } catch (_) {}
       this.log('Mise à jour : rechargement'); this.remote.flush({ beacon: true }); location.reload();
     };
@@ -350,10 +350,18 @@ class App {
     this.startConversation('prenom');
   }
 
-  async startConversation(reason) {
+  // opts.handle : reprendre une session de Gemini (même fil), après un appel ou une coupure de réseau.
+  async startConversation(reason, opts = {}) {
     if (this.state === 'eveil' || this.state === 'conversation') return;
-    if (!navigator.onLine) { this.face.setEmotion('confus', 3000); this.badge("Pas d'Internet : je ne peux pas répondre", 5000); return; }
+    if (this.phone) { if (reason === 'toucher') this.badge('Appel en cours : je ne t\'entends pas pendant l\'appel', 5000); return; }
     if (!this.settings.apiKey) { this.ui.showWelcome(); return; }
+    if (!navigator.onLine) {
+      // Sans réseau (C8) : il le dit (voix du téléphone, sans Internet), et la phrase qui l'a réveillé part au retour du réseau.
+      this.face.setEmotion('confus', 3000); this.badge("Pas d'Internet : je te réponds dès qu'il revient", 6000);
+      const pcm = this._wakePcm || (reason === 'prenom' ? this.audio.recent(4000) : null); this._wakePcm = null;
+      if (this.car || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant'].includes(reason)) this._netLost('hors ligne au réveil', { start: { reason, pcm, handle: opts.handle } });
+      return;
+    }
     // Quel cerveau ? Direct (Gemini Live) si possible, sinon mode économique (Gemini Flash + voix de la tablette).
     const now = Date.now(), want = this.settings.brainMode || 'auto';
     const liveBlocked = this.quotaUntil && now < this.quotaUntil, ecoBlocked = this.ecoQuotaUntil && now < this.ecoQuotaUntil;
@@ -362,7 +370,7 @@ class App {
       this.face.setEmotion('gene', 3000); this.face.play('shake');
       this.badge((mode === 'eco' ? this.ecoQuotaMsg : this.quotaMsg) + ' (appui long sur moi → « Vérifier » pour réessayer)', 9000, true); return;
     }
-    this.setState('eveil'); this.convId = (this.convId || 0) + 1;
+    this.setState('eveil'); this.convId = (this.convId || 0) + 1; const myConv = this.convId;
     if (mode === 'eco') warmUp(this.settings.apiKey);
     const preroll = this._wakePcm ? [this._wakePcm] : reason === 'prenom' ? [this.audio.recent(4000)] : reason === 'regard' ? [this.audio.recent(PREROLL_MS)] : [];
     this._wakePcm = null;
@@ -371,13 +379,21 @@ class App {
     if (mode === 'eco') return this._startEco(reason, preroll);
     this.mode = 'live';
     this.pending = preroll;
-    this.discard = false; this.endAfterSpeech = false; this.brain.handle = null;
+    this.discard = false; this.endAfterSpeech = false; this.brain.handle = opts.handle || null;
     this.lastActivity = performance.now();
     try {
       await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), interrupts: this.settings.bargeIn === 'directe', extra: this._extraTools() });
     } catch (e) {
+      if (this.convId !== myConv) return;                              // arrêtée entre-temps (appel…)
       this.log('Gemini : ' + e.message);
       this.lastError = e.message;
+      if (isNetErr(e) && (this.car || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant'].includes(reason))) {
+        // Réseau trop faible pour joindre Google (C8) : même chose que hors ligne, la phrase est gardée (8 s au plus).
+        const pcm = (this.pending || []).length ? concat(this.pending).slice(0, 16000 * 8) : null;
+        this.mode = null; this.pending = null; this.setState('veille');
+        this._netLost('Google injoignable au réveil', { start: { reason, pcm, handle: opts.handle } });
+        return;
+      }
       if (e.quota) this._quotaPause(e.message);
       if (e.quota && want === 'auto' && !(this.ecoQuotaUntil && Date.now() < this.ecoQuotaUntil)) {
         this.log('Direct refusé (quota) → mode économique');
@@ -390,6 +406,7 @@ class App {
         : `Je n'arrive pas à joindre mon cerveau : ${shorten(e.message)}`, 15000, true);
       this.mode = null; this.setState('veille'); return;
     }
+    if (this.convId !== myConv || this.state !== 'eveil') { this.brain.close(); return; }   // arrêtée pendant la connexion (appel…)
     this.log(`Conversation ouverte (${reason})`);
     this.setState('conversation');
     // Envoi du tampon (la phrase avec « Wilson ») puis passage au direct.
@@ -399,6 +416,8 @@ class App {
     if (reason === 'test') this.brain.sendText('Présente-toi en une phrase, avec chaleur.');
     if (reason === 'toucher') this.brain.sendText(this.car ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
     if (reason === 'apres_appel') this.brain.sendText(this._apresAppelTexte());
+    if (reason === 'apres_appel_entrant') this.brain.sendText(this._apresAppelEntrantTexte());
+    if (this.netWait && this.netWait.start) this._netBack();          // réveillé sans réseau : c'est reparti
     this.lastActivity = performance.now();
   }
 
@@ -419,6 +438,8 @@ class App {
     } else if (reason === 'test') this._ecoSend({ text: '[Présente-toi en une phrase, avec chaleur.]' });
     else if (reason === 'toucher') this._say(['Oui ?', "Je t'écoute.", 'Oui, dis-moi ?'][Math.floor(Math.random() * 3)]);
     else if (reason === 'apres_appel') this._ecoSend({ text: this._apresAppelTexte() });
+    else if (reason === 'apres_appel_entrant') this._ecoSend({ text: this._apresAppelEntrantTexte() });
+    if (this.netWait && this.netWait.start) this._netBack();
   }
 
   _ecoFrame(i16) {
@@ -526,6 +547,7 @@ class App {
       const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, text: req.text, hint: req.hint, onPartial, signal: req.ctl.signal, crm: this.crm.on });
       if (gate) await gate;                                  // envoi anticipé : fin de phrase confirmée (sinon : annulé)
       if (conv !== this.convId) return;
+      if (this.netWait) this._netBack();                     // Google a répondu : le réseau est revenu
       this.eco.commit(out, req.text);
       out.reponse = sayable(out.reponse);
       let said = out.reponse, last = out, tSearch = 0;
@@ -649,6 +671,9 @@ class App {
         this.badge(this.ecoQuotaMsg, 15000, true); this.face.setEmotion('gene', 4000); this.endConversation('quota');
       } else if (e.auth) {
         this.badge('Google refuse ma clé — appui long sur moi, puis « Vérifier la clé »', 15000, true); this.endConversation('clé');
+      } else if (isNetErr(e) && req.audio) {
+        // Pas de réseau (C8) : la phrase est gardée et renvoyée dès qu'il revient.
+        this._netLost('pas de réseau (mode économique)', { eco: { ...req, spec: false, confirmed: true, ctl: null } });
       } else {
         this.face.setEmotion('confus', 3000);
         this.badge(`Je n'arrive pas à réfléchir : ${shorten(e.message)}`, 10000, true);
@@ -749,7 +774,8 @@ class App {
 
   endConversation(why) {
     if (this.state !== 'conversation' && this.state !== 'eveil') return;
-    this.log(`Fin de conversation (${why})`); this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false;
+    if (this.netWait && !this.netWait.start) { clearTimeout(this.netWait.timer); this.netWait = null; }
+    this.log(`Fin de conversation (${why})`); this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false; this._searchMs = 0;
     if (this._searches) { for (const c of this._searches.values()) c.abort(); this._searches.clear(); }
     this.brain.close(); this.audio.flush(); this.voice.cancel(); this.outBuf = []; this.outLen = 0;
     if (this.ecoState) this.ecoState.queue = []; this.ecoState = null; this.mode = null;
@@ -777,9 +803,13 @@ Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat 
 - « Appelle X » : ${eco ? 'outil "appeler"' : 'outil appeler'} (un bouton vert s'affiche, il appuie dessus).
 - Écrire dans le CRM (tâche, compte rendu, rendez-vous, note) : JAMAIS sans son accord. ${eco ? 'Mets l\'outil "noter"' : 'Appelle crm_noter'}, relis-lui exactement la phrase préparée, demande « Je l'enregistre ? », et ${eco ? 'mets l\'outil "confirmer"' : 'dis « J\'enregistre… » puis appelle crm_confirmer'} seulement après son « oui ». S'il corrige, prépare de nouveau. Les comptes rendus, rendez-vous et notes arrivent en brouillon dans son CRM : il les valide lui-même.
 - Ne dis jamais « c'est noté » ou « c'est enregistré » si l'enregistrement n'a pas été confirmé par le CRM.
+- Si un nom de client, un chiffre ou une date que tu as entendu te semble douteux, ne devine pas : dis ce que tu as compris et demande si c'est bien ça (« Tu parles de Franck Monvoisin, chez AD2M ? »), surtout avant de préparer une écriture.
+- Tu ne sais que ce que dit la réponse du CRM : si on te demande un détail qui n'y est pas (le contenu exact d'une commande, par exemple), dis que tu ne l'as pas au lieu de le reconstituer.
 `;
     const voiture = !car ? '' : `
 En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (caméra coupée en voiture).
+Le son de la voiture est souvent mauvais (Bluetooth, bruit de la route, réseau faible) : ce que tu entends peut être déformé (mots étranges, bouts de phrase, autre langue). Si une demande te paraît bizarre, incomplète ou hors sujet, reformule en quelques mots ce que tu as compris et demande s'il confirme, au lieu de deviner ; si tu n'as rien compris, demande-lui simplement de répéter.
+S'il parle au téléphone avec quelqu'un d'autre (une conversation qui ne t'est pas adressée), tais-toi.
 `;
     return `${car ? 'Tu es Wilson, un compagnon qui vit dans le téléphone de Timothée. En ce moment vous êtes dans sa voiture.' : 'Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d\'une famille. Ton visage animé montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.'}
 
@@ -812,6 +842,8 @@ Nous sommes ${fmtDate()}.${bat}`;
 
   // ---------- son ----------
   _wireAudio() {
+    this.audio.on('info', (m) => this.log('Audio : ' + m));
+    this.audio.on('mic', ({ taken, why }) => (taken ? this._phoneStart(why) : this._phoneEnd(why)));
     this.audio.on('frame', (f32, i16, db) => {
       if (this._earTest) this.oreille.feed(f32, this.audio.speaking);              // réglages : « Tester l'oreille »
       if (this.state === 'veille' || this.state === 'dodo') {
@@ -831,6 +863,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       }
       if (this.state !== 'conversation' || !this.brain.open) return;
       const now = performance.now();
+      if (this.voice.speaking) return;                                 // sa voix de secours (réseau…) ne part pas vers Gemini
       if (this.settings.bargeIn === 'prudente') {
         // Il parle : rien n'est envoyé (le micro, sans annulation d'écho, entend sa voix) ; on le coupe en touchant l'écran (R4).
         // Y compris pendant un petit trou entre deux morceaux de sa réponse : sinon l'écho de sa voix lui coupait la parole (24/10/26).
@@ -843,7 +876,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (this.outLen >= 1600) { this.brain.sendAudio(concat(this.outBuf)); this.outBuf = []; this.outLen = 0; }
     });
     this.audio.on('speechstart', () => {
-      const now = performance.now();
+      const now = performance.now(); this._speechStartAt = now;
       if (this.state === 'conversation') { if (this.mode === 'live') this.lastUserSpeech = this.lastActivity = now; return; }
       this.presenceAt = now;                                   // quelqu'un parle dans la pièce
       if (this.state === 'dodo' && !this._isNight()) { this.setState('veille'); this.face.play('tilt'); }
@@ -851,6 +884,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     this.audio.on('speechend', () => {
       this._speechEndAt = performance.now() - 440;            // la détection attend 22 blocs de 20 ms de silence
       if (this.state === 'conversation' && this.mode === 'live') this.lastUserSpeech = this.lastActivity = performance.now();
+      this._netKeepPhrase();
     });
     this.audio.on('drained', () => {
       this.playEndAt = performance.now(); this.lastActivity = this.playEndAt; this.face.setTalk(0);
@@ -922,6 +956,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       this.audio.flush(); this.face.setTalk(0); this._liveTurn = null;
     });
     b.on('turn', ({ user, wilson }) => {
+      const hadTool = this._toolTurn === this._turnN;    // ce tour a appelé un outil : sa réponse vient avec le résultat
       this._turnN++;                                     // ce qui sera entendu ensuite appartient au tour suivant
       if (this._gate && !this._gate.ok) {
         if (!user || nomDit(user)) this._gateOpen(user ? 'nom dans la transcription' : 'pas de transcription');
@@ -942,7 +977,8 @@ Nous sommes ${fmtDate()}.${bat}`;
       this._liveTurn = null; this._outPeak = 0;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
-      else if (user && realPhrase(user) && this._gazeMode && this.brain.open && !this.paused && this._nudgedFor !== user) {
+      // (pas de relance pendant qu'un outil travaille : CRM ou recherche en cours, il répondra avec le résultat — journal du 25/10/26, 10h21)
+      else if (user && realPhrase(user) && this._gazeMode && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && !(this._searches && this._searches.size)) {
         // Écoute au regard : tout ce qu'il entend lui est adressé. Une vraie phrase restée sans réponse (souvent la 1re
         // d'une discussion, journal du 24/10/26) → on lui demande de répondre, une seule fois.
         this._nudgedFor = user;
@@ -971,18 +1007,114 @@ Nous sommes ${fmtDate()}.${bat}`;
   }
 
   async _reconnect(why) {
-    if (this._reconnecting) return; this._reconnecting = true;
+    if (this._reconnecting || this.netWait) return; this._reconnecting = true;
     this.log(`Reconnexion (${why})`);
     const handle = this.brain.handle;
     this.brain.close(); this.brain.handle = handle;
     try {
-      await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), resume: true, interrupts: this.settings.bargeIn === 'directe', extra: this._extraTools() });
-    } catch (e) { this.log('Reconnexion impossible : ' + e.message); this.endConversation('coupure'); }
+      await this._connectLive();
+    } catch (e) {
+      this.log('Reconnexion impossible : ' + e.message);
+      this._reconnecting = false;
+      // Réseau coupé (C8) : la discussion attend le retour du réseau au lieu de s'arrêter.
+      if (this.state === 'conversation' && isNetErr(e)) { if (!this.brain.handle) this.brain.handle = handle; return this._netLost('connexion perdue'); }
+      this.endConversation('coupure');
+    }
     this._reconnecting = false;
+  }
+  _connectLive() {
+    return this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), resume: true, interrupts: this.settings.bargeIn === 'directe', extra: this._extraTools() });
+  }
+
+  // ---------- réseau coupé sur la route (C8) ----------
+  // La discussion est gardée ; il le dit une fois (voix du téléphone, qui marche sans Internet) et réessaie : tout de suite
+  // quand le téléphone retrouve le réseau, sinon 2, 4, 8 puis toutes les 15 s, pendant 3 min en voiture (1 min ailleurs).
+  // extra.start : réveillé sans réseau (la conversation n'a pas commencé) ; extra.eco : requête du mode économique à renvoyer.
+  _netLost(why, extra = {}) {
+    const now = Date.now();
+    let W = this.netWait;
+    if (!W) {
+      const max = this.car ? 180000 : 60000;
+      W = this.netWait = { since: now, until: now + max, n: 0, why, phrase: null, phraseAt: 0, timer: null, mode: this.mode };
+      this.log(`Réseau coupé (${why}) : ${extra.start ? 'je réponds dès qu\'il revient' : 'discussion gardée'}, nouvel essai pendant ${max / 60000} min`);
+      this.audio.tone('perdu'); this.face.setEmotion('confus', 4000); this.badge('Plus de réseau — je réessaie', 8000, true);
+      // dit une fois (pas à chaque micro-coupure d'un réseau faible : une fois par minute au plus), après la fin de ce qu'il disait
+      if ((this.car || this.state === 'conversation' || extra.start) && (extra.start || now - (this._netToldAt || 0) > 60000)) {
+        W.toldAt = this._netToldAt = now;
+        this._sayAfter(extra.start ? 'Pas de réseau pour l\'instant, je te réponds dès qu\'il revient.' : 'Je n\'ai plus de réseau, je reprends dès qu\'il revient.');
+      }
+    } else if (extra.start && now - (W.toldAt || 0) > 8000) { W.toldAt = now; this._say('Toujours pas de réseau, je te réponds dès qu\'il revient.'); }
+    if (extra.start) { W.start = extra.start; W.mode = null; }
+    if (extra.eco) { W.eco = extra.eco; W.mode = 'eco'; }
+    if (this.mode === 'live' && this.brain.handle) W.handle = this.brain.handle;
+    if (this.mode === 'live') this.brain.close();
+    this._netSchedule();
+  }
+  // Voix du téléphone, une fois que la voix de Gemini déjà reçue a fini de sortir (pas deux voix en même temps).
+  _sayAfter(text, n = 0) { if (this.audio.playing && n < 40) setTimeout(() => this._sayAfter(text, n + 1), 250); else this._say(text); }
+  _netSchedule(ms) {
+    const W = this.netWait; if (!W) return;
+    clearTimeout(W.timer);
+    W.timer = setTimeout(() => this._netRetry(), ms ?? ([2000, 4000, 8000][W.n] || 15000));
+  }
+  async _netRetry() {
+    const W = this.netWait; if (!W || W.busy || this.phone) return;
+    if (Date.now() > W.until) return this._netGiveUp();
+    W.n++;
+    if (!navigator.onLine) return this._netSchedule();            // toujours hors ligne : on attendra l'événement « en ligne »
+    W.busy = true;
+    try {
+      if (W.start) {                                              // réveillé sans réseau : on redémarre la discussion avec sa phrase
+        const S = W.start; this._wakePcm = S.pcm || null;
+        await this.startConversation(S.reason, { handle: S.handle });
+      } else if (W.mode === 'eco') {
+        const req = W.eco; W.eco = null;
+        if (req && this.ecoState) { req.ctl = new AbortController(); this._ecoSend(req); }
+        else this._netBack();
+      } else if (this.state === 'conversation') {
+        this.brain.handle = W.handle || this.brain.handle;
+        await this._connectLive();
+        this._netBack();
+      } else { this.netWait = null; clearTimeout(W.timer); }
+    } catch (e) {
+      this.log(`Réseau : nouvel essai raté (${shorten(e.message)})`);
+      if (this.netWait === W) { if (isNetErr(e)) this._netSchedule(); else { this.netWait = null; this.endConversation('coupure'); } }
+    } finally { W.busy = false; }
+  }
+  // C'est reparti : deux notes montantes ; la dernière phrase dite pendant la coupure part tout de suite (il y répond).
+  _netBack() {
+    const W = this.netWait; if (!W) return;
+    this.netWait = null; clearTimeout(W.timer);
+    const s = Math.round((Date.now() - W.since) / 1000), phrase = W.phrase && Date.now() - W.phraseAt < 60000 ? W.phrase : null;
+    this.log(`Réseau revenu après ${s} s : ${W.start ? 'la discussion commence' : 'la discussion reprend'}${phrase && this.mode === 'live' ? ' (la phrase dite pendant la coupure est envoyée)' : ''}`);
+    this.audio.tone('revenu'); this.face.setEmotion('joie', 2000);
+    if (this.mode === 'live' && this.brain.open && !W.start) {
+      if (phrase) for (let i = 0; i < phrase.length; i += 3200) this.brain.sendAudio(phrase.subarray(i, i + 3200));
+      else this.brain.sendText('[Le réseau vient de revenir après une coupure : dis seulement « C\'est reparti, je t\'écoute. »]');
+    }
+    this.lastActivity = performance.now();
+    this.crm.flushQueue();
+  }
+  _netGiveUp() {
+    const W = this.netWait; if (!W) return;
+    this.netWait = null; clearTimeout(W.timer);
+    this.log(`Toujours pas de réseau après ${Math.round((Date.now() - W.since) / 1000)} s : veille`);
+    this._netEndedAt = Date.now();
+    if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('réseau');
+    if (this.car) this._say(`Toujours pas de réseau, je me mets en veille : ${this.oreille.ready ? 'redis « Wilson »' : 'touche l\'écran'} quand il reviendra.`);
+  }
+  // Pendant la coupure : la dernière phrase dite (6 s au plus) est gardée, pas l'écho de sa propre voix.
+  _netKeepPhrase() {
+    const W = this.netWait; if (!W || W.start || this.state !== 'conversation' || this.mode !== 'live') return;
+    const now = performance.now(), t0 = this._speechStartAt || now;
+    if (this.voice.speaking || t0 < (this.playEndAt || 0) + 300 || !this._addressed(now)) return;
+    W.phrase = this.audio.recent(Math.min(6000, now - t0 + 700)); W.phraseAt = Date.now();
+    this.log(`Phrase gardée pendant la coupure (${(W.phrase.length / 16000).toFixed(1)} s)`);
   }
 
   _tools(calls) {
     const res = [];
+    if (calls.some((c) => c.name !== 'exprimer_emotion' && c.name !== 'memoriser')) this._toolTurn = this._turnN;
     for (const c of calls) {
       const a = c.args || {};
       if (CRM_TOOL_NAMES.includes(c.name)) { this._crmTool(c); continue; }     // réponse envoyée quand le CRM a répondu
@@ -1012,6 +1144,10 @@ Nous sommes ${fmtDate()}.${bat}`;
     }
     if (res.length) this.brain.respond(res);
   }
+
+  // Durée d'un outil (recherche, CRM) : comptée dans le tour en cours (il a déjà dit « je regarde… »), sinon dans le suivant.
+  // Avant, elle restait en attente et s'affichait sur une réponse sans rapport (journal du 25/10/26, 09h14).
+  _noteToolMs(ms) { if (this._liveTurn) this._liveTurn.search = (this._liveTurn.search || 0) + ms; else this._searchMs = ms; }
 
   // Trouve l'info : recherche Google ; si Google la refuse (quota de recherche…), même question sans Internet, réponse prudente.
   // 1. Tavily par le script de Timothée (gratuit : 1 000 recherches par mois) ; 2. recherche Google de Gemini (pas gratuite
@@ -1078,7 +1214,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     } finally { clearTimeout(timer); }
     if (conv !== this.convId || !this._searches.has(call.id)) return;
     this._searches.delete(call.id);
-    this._searchMs = performance.now() - t0;
+    this._noteToolMs(performance.now() - t0);
     this.face.clearEmotion();
     this.brain.respond([{ id: call.id, name: call.name, response: { result } }]);
     // Filet de sécurité : si Gemini ne dit rien 6 s après le résultat, on lui demande de répondre.
@@ -1207,7 +1343,12 @@ Nous sommes ${fmtDate()}.${bat}`;
       case 'crm_client': {
         const r = await C.client({ client: a.client || '' }, signal);
         if (!r.ok) return lu(r);
-        return r.e ? { info: pourGemini(r.e.texte, car) } : { info: r.texte };        // inconnu, ou plusieurs clients possibles
+        if (!r.e) return { info: r.texte };                                         // inconnu, ou plusieurs clients possibles
+        const e = r.e, qui = `${e.societe}${e.contact ? ' (' + e.contact + ')' : ''}${e.ville ? ', ' + e.ville : ''}`;
+        // C10 : nom entendu approximatif → il cite d'abord le client trouvé ; C8 bis : fiche gardée faute de réseau
+        const avant = [r.approx ? `(Nom entendu : « ${a.client} » ; le CRM a trouvé ${qui}. Commence ta réponse par ce nom, pour qu'il puisse te corriger si ce n'est pas le bon client.)` : '',
+          r.vieux ? `(Pas de réseau vers le CRM : fiche telle qu'elle était à ${new Date(r.vieux).getHours()}h${pad(new Date(r.vieux).getMinutes())} ; dis-le s'il demande un chiffre récent.)` : ''].filter(Boolean).join('\n');
+        return { info: pourGemini((avant ? avant + '\n' : '') + e.texte, car) };
       }
       case 'crm_agenda': return lu(await C.agenda(a.jour, signal));
       case 'crm_bilan': return lu(await C.bilan(signal));
@@ -1237,6 +1378,16 @@ Nous sommes ${fmtDate()}.${bat}`;
     return { info: 'outil inconnu' };
   }
 
+  // Écriture gardée faute de réseau, envoyée au retour du réseau (C8 bis) : Wilson le dit.
+  _crmQueued(q, ok, err) {
+    const t = (q.payload && q.payload.texte) || '';
+    const phrase = ok ? `C'est enregistré dans le CRM${t ? ' : « ' + t + ' »' : ''}.` : `Je n'ai pas pu enregistrer ce que j'avais gardé${t ? ', « ' + t + ' »' : ''} : vérifie dans Mes tâches.`;
+    this.badge(ok ? 'Enregistré dans le CRM (après la coupure) ✓' : 'Écriture gardée pas enregistrée : vérifie dans Mes tâches', 8000, !ok);
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open)
+      this.brain.sendText(`[Le réseau est revenu : ${ok ? `ce que tu avais gardé est maintenant enregistré dans le CRM (« ${q.relu} »)` : `ce que tu avais gardé (« ${q.relu} ») n'a pas pu être enregistré (${err || 'erreur'}) : dis-lui de vérifier dans Mes tâches`}. Dis-le en une phrase courte.]`);
+    else if (this.state === 'conversation' || this.car) this._say(phrase);
+  }
+
   // Outil du CRM en mode direct : Wilson a dit « je regarde dans le CRM », il répond quand le CRM a répondu (filet : 40 s).
   async _crmTool(call) {
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
@@ -1248,11 +1399,12 @@ Nous sommes ${fmtDate()}.${bat}`;
     try { res = await this._crmRun(call.name, call.args || {}, ctl.signal); }
     catch (e) {
       if (!this._searches.has(call.id)) return;                                  // annulé (on l'a coupé)
-      res = { info: e.name === 'AbortError' ? 'Le CRM a mis trop de temps à répondre. Dis-le simplement et propose de réessayer.' : `Le CRM ne répond pas (${e.message}). Dis-le simplement.` };
+      res = { info: e.name === 'AbortError' ? 'Le CRM a mis trop de temps à répondre (réseau faible ?). Dis-le simplement et propose de réessayer.'
+        : isNetErr(e) ? 'Pas de réseau vers le CRM pour l\'instant. Dis-le simplement et propose de réessayer dans un moment.' : `Le CRM ne répond pas (${e.message}). Dis-le simplement.` };
       this.log(`CRM impossible (${((performance.now() - t0) / 1000).toFixed(1)} s) : ${e.name === 'AbortError' ? 'trop long' : e.message}`);
     } finally { clearTimeout(timer); }
     if (conv !== this.convId || !this._searches.has(call.id)) return;
-    this._searches.delete(call.id); this._searchMs = performance.now() - t0;
+    this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
     this.face.clearEmotion();
     this.brain.respond([{ id: call.id, name: call.name, response: { result: res.info } }]);
     const n = this._modelOut;
@@ -1291,7 +1443,8 @@ Nous sommes ${fmtDate()}.${bat}`;
   async _confirmTap() {
     if (!this.crm.gate(null, { tapped: true }).ok) { this.hideCard('confirm'); return; }
     this.log('Écriture confirmée en touchant « Oui » à l\'écran');
-    const r = await this.crm.commit();
+    let r;
+    try { r = await this.crm.commit(); } catch (e) { r = { dire: `Le CRM ne répond pas (${e.message}) : rien n'est écrit, dis-le simplement.`, phrase: 'Le CRM ne répond pas : rien n\'est écrit.' }; }
     if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Timothée a confirmé en touchant « Oui » sur l'écran. ${r.dire}]`);
     else if (r.phrase) this._say(r.phrase);
   }
@@ -1321,6 +1474,38 @@ Nous sommes ${fmtDate()}.${bat}`;
     return `[Timothée vient de raccrocher avec ${c.nom || 'un client'}${c.societe ? ' (' + c.societe + ')' : ''}. Demande-lui en une phrase s'il veut te dicter le compte rendu de l'appel ; s'il le fait, prépare-le comme compte rendu d'appel.]`;
   }
 
+  // ---------- appel reçu pendant une discussion (C9) ----------
+  // Le téléphone prend le micro : Wilson se tait, la discussion est mise de côté (son fil est gardé), aucun « oui » ne peut
+  // confirmer une écriture pendant l'appel. Micro rendu : Wilson reprend la discussion.
+  _phoneStart(why) {
+    if (deviceName() !== 'téléphone') { this.log(`Micro : ${why} (pas un téléphone : rien de changé)`); return; }
+    if (this.phone) return;
+    const conv = this.state === 'conversation' || this.state === 'eveil';
+    this.phone = { at: Date.now(), why, conv, handle: conv && this.mode === 'live' ? this.brain.handle : null, net: !!this.netWait };
+    this.log(`Micro pris par le téléphone (${why}) : appel en cours ? Je me tais${conv ? ', discussion mise de côté' : ''}`);
+    this.discard = true; if (this.audio.playing) this.audio.flush(); this.voice.cancel();
+    if (this.crm.pending) this.crm.pending.call = true;
+    if (conv) this.endConversation('appel téléphonique');
+    if (this.netWait) { clearTimeout(this.netWait.timer); this.netWait = null; }
+    this.badge('Appel en cours : je me tais', 8000);
+  }
+  _phoneEnd(why) {
+    const P = this.phone; if (!P) return;
+    this.phone = null;
+    const s = (Date.now() - P.at) / 1000, p = this.crm.pending;
+    this.log(`Micro rendu (${why}) après ${Math.round(s)} s${s >= 8 ? ' : fin de l\'appel' : ''}`);
+    // une écriture en attente doit être relue de nouveau : aucun « oui » d'avant (ou de pendant) l'appel ne compte
+    if (p && p.call) { p.call = false; p.at = performance.now(); p.atMs = Date.now(); p.turn = this._turnN; }
+    if (this._callAfter) { this._backFromCall(); return; }            // appel lancé par Wilson : il propose le compte rendu
+    if (!P.conv || s > 2 * 3600) return;
+    this._afterCall = { s, pending: !!p };
+    this.startConversation(s >= 8 ? 'apres_appel_entrant' : 'reprise', { handle: P.handle });
+  }
+  _apresAppelEntrantTexte() {
+    const A = this._afterCall || {}, p = this.crm.pending;
+    return `[Votre discussion a été coupée ${A.s >= 90 ? Math.round(A.s / 60) + ' min' : Math.round(A.s || 0) + ' s'} : le téléphone a pris le micro, sans doute pour un appel, et c'est fini. Dis en une phrase très courte que tu es là et propose de reprendre là où vous en étiez (rappelle le sujet en quelques mots)${this.crm.on ? ' ; si c\'était l\'appel d\'un client, propose aussi de noter un compte rendu' : ''}.${p ? ` Une écriture attendait sa confirmation : relis-la (« ${p.relu} ») et redemande « Je l'enregistre ? » ; seul un nouveau « oui » compte.` : ''}]`;
+  }
+
   // Photo nette, prise à la demande (R6) : plus grande et plus nette que les anciennes images automatiques.
   _photo() {
     if (!this.vision) return null;
@@ -1347,6 +1532,8 @@ Nous sommes ${fmtDate()}.${bat}`;
     s.on('doubletap', () => { this.face.doWink(1); this.face.setEmotion('joie', 1800); });
     s.on('longpress', () => this.ui.open());
     s.on('shake', () => {
+      // Un téléphone bouge tout le temps (dans la main, en voiture) : plus de « Oulà, ça a bougé ! » (journal du 25/10/26).
+      if (this.car || deviceName() === 'téléphone') return;
       this.face.setEmotion('peur', 2500);
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText('[La tablette vient d\'être secouée ou déplacée.]');
     });
@@ -1356,7 +1543,20 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (was && !was.charging && b.charging) this.face.setEmotion('joie', 2500);
       if (b.charging) this._batTold = false;
     });
-    s.on('network', (on) => { if (!on) { this.badge('Plus de réseau', 6000); this.face.setEmotion('confus', 3000); if (this.state === 'conversation') this.endConversation('réseau'); } });
+    s.on('network', (on) => {
+      this.log(on ? 'Téléphone de nouveau en ligne' : 'Téléphone hors ligne');
+      if (!on) {
+        this.badge('Plus de réseau', 6000); this.face.setEmotion('confus', 3000);
+        if (this.state === 'conversation') this._netLost('hors ligne');      // la discussion attend le réseau (C8)
+        return;
+      }
+      if (this.netWait) this._netSchedule(300);
+      this.crm.flushQueue();
+      // En voiture, la discussion s'est arrêtée faute de réseau il y a peu : il prévient que c'est revenu.
+      if (!this.netWait && this.car && this._netEndedAt && Date.now() - this._netEndedAt < 10 * 60000 && this.state === 'veille') {
+        this._netEndedAt = 0; this.audio.tone('revenu'); this._say('Le réseau est revenu.');
+      }
+    });
   }
 
   // ---------- boucle ----------
@@ -1392,7 +1592,17 @@ Nous sommes ${fmtDate()}.${bat}`;
       // Images : aucune envoyée d'office (R6) ; seulement à la demande (outil « regarder »).
       const keep = this.car ? CAR_IDLE_MS : this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
-      if (this._gazeMode && !this.continuous) {
+      // Réseau qui ne passe plus (le son du micro s'accumule sans partir, 3 s) : même chose qu'une coupure (C8).
+      if (this.mode === 'live' && this.brain.open && !this.netWait) {
+        const ba = (this.brain.ws && this.brain.ws.bufferedAmount) || 0;
+        if (ba > 96000) {
+          this._stallSince = this._stallSince || now;
+          if (now - this._stallSince > 3000) { this._stallSince = 0; this.log(`Réseau bloqué : ${Math.round(ba / 1000)} ko du micro en attente d'envoi`); this._netLost('réseau trop lent'); }
+        } else this._stallSince = 0;
+      }
+      if (this.netWait) {
+        // réseau coupé : la discussion attend (C8), son délai à elle décide
+      } else if (this._gazeMode && !this.continuous) {
         // R3 : le regard pilote la discussion. 3 s sans regard (sauf s'il parle ou cherche) → veille ; regardé → reprise.
         const lastSeen = Math.max(v.lookAt || 0, this.playEndAt || 0, this._resumedAt || 0, this._convAt || 0);
         if (this.paused) {
@@ -1464,6 +1674,13 @@ function realPhrase(t) {
 }
 
 function shorten(m) { m = (m || 'erreur inconnue').replace(/\s+/g, ' ').trim(); return m.length > 140 ? m.slice(0, 137) + '…' : m; }
+
+// Erreur de réseau (pas de couverture, réseau trop faible) plutôt qu'un refus de Google : on attend le réseau (C8).
+function isNetErr(e) {
+  if (!navigator.onLine) return true;
+  const m = String((e && e.message) || e || '');
+  return (e && e.code === 1006) || /code 1006|Délai de connexion|Failed to fetch|NetworkError|Load failed|network|ERR_INTERNET|ERR_NAME|ERR_CONNECTION|ERR_TIMED_OUT|Jeton refusé \(0\)/i.test(m);
+}
 
 function concat(list) {
   let n = 0; for (const a of list) n += a.length;
