@@ -16,7 +16,7 @@ import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
 import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 
-const VERSION = '1.13.0';
+const VERSION = '1.13.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -301,7 +301,7 @@ class App {
     const pol = this.settings.listenMode || 'regard', v = this.vision;
     if (pol === 'toucher') return false;
     if (pol === 'toujours') return true;
-    if (!v || !v.gazeReady) return false;                               // sans détection du regard : toucher pour parler
+    if (!v || !v.gazeReady || v.stale) return false;                    // sans détection du regard (ou caméra figée) : toucher pour parler
     if (this.paused) return false;                                      // en veille faute de regard : il n'écoute plus
     if (v.looking) return true;
     // R3 : pendant une discussion, on peut détourner les yeux 3 s ; sinon il faut le regarder (1,5 s de marge de détection).
@@ -309,7 +309,7 @@ class App {
   }
 
   // Le regard pilote la discussion (R3) : actif seulement avec la détection du regard.
-  get _gazeMode() { const v = this.vision; return (this.settings.listenMode || 'regard') === 'regard' && !!(v && v.gazeReady); }
+  get _gazeMode() { const v = this.vision; return (this.settings.listenMode || 'regard') === 'regard' && !!(v && v.gazeReady && !v.stale); }
 
   // Plus regardé depuis 3 s : veille visuelle, micro coupé vers Gemini ; la session est gardée pour reprendre aussitôt.
   _pause() {
@@ -775,7 +775,8 @@ L'heure et la date : appelle date_et_heure.`;
 Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
 - Dès qu'il parle d'un client, d'un rendez-vous, d'une tâche, d'un devis, d'un chiffre ou d'un article, ${eco ? 'remplis le champ "crm"' : 'dis « Je regarde dans le CRM… » puis appelle l\'outil (crm_client, crm_agenda, crm_bilan, crm_produit)'}. Ne devine jamais un nom, un chiffre ou une date : dis seulement ce que le CRM répond. Pour « lui », « ce client », c'est le dernier client dont vous avez parlé.
 - « Appelle X » : ${eco ? 'outil "appeler"' : 'outil appeler'} (un bouton vert s'affiche, il appuie dessus).
-- Écrire dans le CRM (tâche, compte rendu, rendez-vous, note) : JAMAIS sans son accord. ${eco ? 'Mets l\'outil "noter"' : 'Appelle crm_noter'}, relis-lui exactement la phrase préparée, demande « Je l'enregistre ? », et ${eco ? 'mets l\'outil "confirmer"' : 'appelle crm_confirmer'} seulement après son « oui ». S'il corrige, prépare de nouveau. Les comptes rendus, rendez-vous et notes arrivent en brouillon dans son CRM : il les valide lui-même.
+- Écrire dans le CRM (tâche, compte rendu, rendez-vous, note) : JAMAIS sans son accord. ${eco ? 'Mets l\'outil "noter"' : 'Appelle crm_noter'}, relis-lui exactement la phrase préparée, demande « Je l'enregistre ? », et ${eco ? 'mets l\'outil "confirmer"' : 'dis « J\'enregistre… » puis appelle crm_confirmer'} seulement après son « oui ». S'il corrige, prépare de nouveau. Les comptes rendus, rendez-vous et notes arrivent en brouillon dans son CRM : il les valide lui-même.
+- Ne dis jamais « c'est noté » ou « c'est enregistré » si l'enregistrement n'a pas été confirmé par le CRM.
 `;
     const voiture = !car ? '' : `
 En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (caméra coupée en voiture).
@@ -795,7 +796,7 @@ ${car ? `- Timothée t'a appelé par ton prénom : ce que tu entends maintenant 
 Ta vue : tu ne vois rien tant que tu n'as pas pris de photo. ${eco ? 'Si une photo est jointe, sers-t\'en pour répondre ; sinon, quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), mets "regarder" à true et dis seulement une très courte phrase d\'attente.' : 'Quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), dis une très courte phrase (« Je regarde… ») puis appelle regarder.'} Ne prétends jamais voir quelque chose sans photo.
 ${tools}
 ${travail}${voiture}${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (météo, actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
-Langue : parle toujours en français, y compris pour une phrase d'attente.`}
+Langue : parle toujours en français, y compris pour une phrase d'attente. La transcription de ce qu'on te dit sort parfois en anglais, en espagnol ou en russe par erreur : c'est du français mal compris. Réponds toujours en français ; si tu n'as pas compris, demande simplement de répéter.`}
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
 La maison : ${s.home || 'pas encore précisé — tu peux demander les prénoms et les retenir.'}
@@ -1093,9 +1094,10 @@ Nous sommes ${fmtDate()}.${bat}`;
   enterCar(why) {
     if (this.car) return;
     this.car = { why, at: Date.now() };
-    this.log(`Mode voiture (${why}) : caméra coupée, réveil quand on dit « Wilson »${this.oreille.ready ? ` (oreille prête, limite ${this.oreille.limite.toFixed(1)})` : ' — oreille pas encore apprise : toucher l\'écran pour parler'}`);
-    if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('mode voiture');
+    this.log(`Mode voiture (${why}) : caméra coupée, réveil quand on dit « Wilson »${this.oreille.ready ? ` (oreille prête, limite ${this.oreille.limite.toFixed(1)})` : ' — oreille pas encore apprise : toucher l\'écran pour parler'}${this.state === 'conversation' ? ' ; la discussion en cours continue' : ''}`);
+    // Une discussion en cours n'est plus coupée (journal du 25/10/26, 08h01) : elle continue, sans regard.
     if (this.vision) { this.vision.stop(); this.vision = null; }
+    if (this.paused) this._resume();
     document.body.classList.add('car'); $('car').hidden = false; $('subtitle').hidden = false; $('subtitle').textContent = ''; $('badge').hidden = true;
     this._carHint(); this.oreille.reset();
     if (this.state === 'dodo') this.setState('veille');
@@ -1104,6 +1106,8 @@ Nous sommes ${fmtDate()}.${bat}`;
   }
   exitCar(why) {
     if (!this.car) return;
+    // Quitté à la main : le GPS ne le remet pas tout seul pendant 20 min (on peut rouler comme passager, ou préférer le regard).
+    if (why === 'bouton' || why === 'réglages') this._carOffAt = Date.now();
     this.log(`Fin du mode voiture (${why})`); this.car = null; this._gate = null;
     if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('fin du mode voiture');
     document.body.classList.remove('car'); $('car').hidden = true; $('subtitle').hidden = !this.settings.subtitles;
@@ -1148,16 +1152,32 @@ Nous sommes ${fmtDate()}.${bat}`;
     const want = !!this.settings.voitureAuto && deviceName() === 'téléphone' && !!navigator.geolocation;
     if (!want) { if (this._geo != null) { navigator.geolocation.clearWatch(this._geo); this._geo = null; } return; }
     if (this._geo != null) return;
-    let fast = 0, slowSince = 0, prev = null;
+    let fast = 0, fastSince = 0, slowSince = 0, prev = null;
     const dist = (a, b) => { const R = 6371000, r = Math.PI / 180, x = (b.lon - a.lon) * r * Math.cos(((a.lat + b.lat) / 2) * r), y = (b.lat - a.lat) * r; return Math.hypot(x, y) * R; };
     this._geo = navigator.geolocation.watchPosition((p) => {
-      const c = p.coords, here = { t: p.timestamp, lat: c.latitude, lon: c.longitude };
+      const c = p.coords, here = { t: p.timestamp, lat: c.latitude, lon: c.longitude, acc: c.accuracy || 999 };
       let v = c.speed;
-      if ((v == null || isNaN(v)) && prev && here.t > prev.t) v = dist(prev, here) / ((here.t - prev.t) / 1000);
-      prev = here; this.speed = v;
-      if (v != null && v >= 6) { fast++; slowSince = 0; if (fast >= 2 && !this.car) this.enterCar('en roulant'); }
+      // Vitesse donnée par le GPS ; à défaut, calculée entre deux positions PRÉCISES et nettement éloignées
+      // (à l'intérieur, la position saute de dizaines de mètres : fausse vitesse, journal du 25/10/26).
+      if (v == null || isNaN(v)) {
+        v = null;
+        if (prev && here.t - prev.t >= 2000) {
+          const d = dist(prev, here), err = here.acc + prev.acc;
+          if (here.acc <= 25 && prev.acc <= 25) v = d > 2 * err ? d / ((here.t - prev.t) / 1000) : 0;
+          else if (d <= err) v = 0;                 // imprécis mais immobile : sert seulement à voir qu'on est garé
+        }
+      }
+      // Garder l'ancienne position 2 s (les positions arrivent chaque seconde), sauf pour une plus précise.
+      if (!prev || here.t - prev.t >= 2000 || (prev.acc > 25 && here.acc <= 25)) prev = here;
+      if (v == null) return;                        // pas de mesure fiable : rien ne change
+      this.speed = v;
+      const libre = !this._carOffAt || Date.now() - this._carOffAt > 20 * 60000;
+      if (v != null && v >= 6) {
+        fast++; fastSince = fastSince || Date.now(); slowSince = 0;
+        if (fast >= 3 && Date.now() - fastSince >= 8000 && !this.car && libre) this.enterCar('en roulant');
+      }
       else {
-        fast = 0;
+        fast = 0; fastSince = 0;
         if (v != null && v < 1.5) {
           slowSince = slowSince || Date.now();
           if (this.car && this.car.why === 'en roulant' && Date.now() - slowSince > 4 * 60000 && this.state !== 'conversation') this.exitCar('garé depuis 4 min');

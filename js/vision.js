@@ -20,12 +20,27 @@ export class Vision {
     this.looking = false; this.lookAt = 0; this.faceAt = 0; this.gaze = null; this.faces = 0;
     this._facingN = 0; this._awayN = 0; this.onLook = null; this.forceLook = false; this.calib = { yaw: 0, pitch: 0, down: 0 };
     this.stats = { ms: 0, last: 0, trip: 0, n: 0 };
-    this._lastResult = 0; this.restarts = 0; this.fixes = [];
+    this._lastResult = 0; this.restarts = 0; this.fixes = []; this.camRestarts = 0; this._noVideo = 0;
+  }
+  // Plus de résultat depuis 2,5 s (caméra figée au retour d'arrière-plan, analyse bloquée…) : le regard n'est plus fiable.
+  // L'appli ne s'en sert plus tant que ça dure (journal du 25/10/26 : « plus regardé / regardé » toutes les 3 s pendant 85 s).
+  get stale() { return !!this.worker && this.modelsDone && !document.hidden && performance.now() - this._lastResult > 2500; }
+  _constraints() { return { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15, max: 20 } }, audio: false }; }
+  _trackDead() { const t = this.stream && this.stream.getVideoTracks()[0]; return !t || t.readyState === 'ended' || t.muted; }
+  // Caméra figée (image absente depuis 5 s, appli au premier plan) : elle est rouverte.
+  async _restartCamera() {
+    this.camRestarts++;
+    this.onInfo && this.onInfo('Vision : plus d\'image de la caméra depuis 5 s → caméra rouverte');
+    try {
+      if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
+      this.stream = await navigator.mediaDevices.getUserMedia(this._constraints());
+      this.video.srcObject = this.stream; await this.video.play();
+      this._lastResult = performance.now();
+    } catch (e) { this.errors.push('caméra : ' + e.message); this.onInfo && this.onInfo('Vision : caméra impossible à rouvrir (' + e.message + ')'); }
   }
 
   async start() {
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15, max: 20 } }, audio: false });
+    this.stream = await navigator.mediaDevices.getUserMedia(this._constraints());
     this.video.srcObject = this.stream; await this.video.play();
     this._startWorker();
     // Écran éteint / appli en arrière-plan : l'analyse est en pause, ce n'est pas une panne.
@@ -65,8 +80,16 @@ export class Vision {
   _loop() {
     clearTimeout(this._timer);
     this._timer = setTimeout(() => this._loop(), Math.max(1000 / this.fps, (this.stats.last || 0) * 1.5));   // ≤ 2/3 d'un cœur
-    if (this.video.readyState < 2 || !this.worker) return;
     const now = performance.now();
+    // Regard périmé : il n'est plus « regardé » (sinon l'appli croit qu'on le regarde encore, sans pouvoir le vérifier).
+    if (this.stale && this.looking) { this.looking = false; this._facingN = 0; if (this.onLook) this.onLook(false); }
+    if (!document.hidden && this.stream && (this.video.readyState < 2 || this._trackDead())) {
+      this._noVideo = this._noVideo || now;
+      if (now - this._noVideo > 5000 && this.camRestarts < 10) { this._noVideo = 0; this._restartCamera(); }
+      return;
+    }
+    this._noVideo = 0;
+    if (this.video.readyState < 2 || !this.worker) return;
     if (this.modelsDone && !document.hidden && now - this._lastResult > 8000 && this.restarts < 20) return this._restartWorker('plus de réponse de l\'analyse depuis 8 s');
     if (this._busy && now - this._sentAt < 4000) return;          // une image à la fois : jamais de file d'attente
     this._busy = true; this._sentAt = now;

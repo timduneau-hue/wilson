@@ -8,7 +8,7 @@ pip install playwright && playwright install chromium   # une fois
 ./make_fixtures.sh                                       # fausses vidéos de caméra (.y4m) à partir des photos
 python3 make_voix.py                                     # voix de synthèse pour l'oreille du mode voiture (espeak-ng + mbrola-fr1/fr4)
 cd .. && python3 -m http.server 8765 --bind 127.0.0.1 &  # servir l'appli (dossier racine du dépôt)
-cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py e2e_attention.py e2e_sync.py e2e_vision_health.py e2e_crm.py e2e_car.py; do python3 $t; done
+cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py e2e_attention.py e2e_sync.py e2e_vision_health.py e2e_crm.py e2e_car.py e2e_journal_2510.py; do python3 $t; done
 node apps_script_unit.js                                 # script Apps Script du journal, avec une fausse feuille
 node oreille_unit.mjs                                    # oreille du mode voiture sur les voix de synthèse
 ```
@@ -34,6 +34,7 @@ node oreille_unit.mjs                                    # oreille du mode voitu
 | `jank.py` | Fluidité de l'animation pendant l'analyse de la caméra |
 | `e2e_crm.py` | CRM à la voix (PLAN 2 quater) : outils du direct, fiche gardée (nom mal prononcé), deux clients possibles, appel (bouton vert), verrou des écritures (la demande elle-même, « attends, non », puis « oui, vas-y »), brouillons, Oui/Non à l'écran, retour d'appel, même chemin en mode économique |
 | `e2e_car.py` | Mode voiture sur un téléphone simulé : bouton, caméra coupée, journée préparée, oreille apprise, réveil par « Wilson, qui je vois demain ? » au micro (pas par « Il fait beau »), réponse retenue jusqu'à la transcription du nom, faux réveil rendormi, GPS |
+| `e2e_journal_2510.py` | Corrections d'après le journal du 25/10/26 : caméra figée (regard périmé ignoré, discussion continue), session perdue chez Google (nouvelle session tout de suite), mode voiture en roulant sans couper la discussion, pas de retour tout seul 20 min après l'avoir quitté, positions imprécises ignorées |
 | `oreille_unit.mjs` | Oreille seule (Node) : apprentissage, phrases avec et sans le nom, bruit de voiture, autre voix, flux continu, temps de calcul |
 | `apps_script_unit.js` (suite) | Relais du CRM : adresse absente, jeton transmis, CRM pas à jour, accès refusé, essaiCRM |
 

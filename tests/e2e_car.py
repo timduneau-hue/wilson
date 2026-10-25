@@ -138,9 +138,11 @@ async def main():
         check('Quitter le mode voiture', not st['car'] and not st['cls'])
 
         # En roulant : mode voiture tout seul (GPS)
+        # (quitté à la main juste avant : pas de retour tout seul pendant 20 min → on fait comme si c'était il y a 21 min)
+        await page.evaluate("wilson._carOffAt = Date.now() - 21 * 60000")
         lat = 47.06
-        for _ in range(5):
-            lat += 0.0004; await ctx.set_geolocation({'latitude': lat, 'longitude': -0.88}); await page.wait_for_timeout(1100)
+        for _ in range(7):
+            lat += 0.0005; await ctx.set_geolocation({'latitude': lat, 'longitude': -0.88, 'accuracy': 10}); await page.wait_for_timeout(2300)
             if await page.evaluate('!!wilson.car'): break
         st = await page.evaluate("({ car: wilson.car, speed: wilson.speed })")
         check('En roulant (GPS) : mode voiture tout seul', st['car'] and st['car']['why'] == 'en roulant', str(st))
