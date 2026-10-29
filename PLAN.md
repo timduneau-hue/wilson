@@ -215,6 +215,12 @@ Avancement (25/10/26, 14h55) :
 - Appareils : Google Cast (enceinte « salon », télé) ; télé Sony KD-55XF9005 appairée en Android TV Remote (code PIN
   donné par Timothée) → `media_player.tele_2`, `remote.tele`. Découverts, non ajoutés : Freebox (bouton à presser),
   Bravia, DLNA, UPnP. Assistant de conversation en français OK (« quelle heure est-il » → « Il est 20:50 »).
+- Prises (29/10/26) : 2 TP-Link Tapo P100 (logiciel chiffré « TPAP » → Timothée a activé « Compatibilité tierce » dans
+  Tapo et changé son mot de passe Tapo, saisi par lui) : `switch.eclairage_balcon` (192.168.1.187, pièce Balcon),
+  `switch.lumiere_jaune_salon` (192.168.1.176, « lumières louis » dans Tapo, pièce Salon) ; 1 On-Earz OECO_PG02
+  (Tuya/Smart Life, ESP 192.168.1.108, réinitialisée puis réinstallée par Timothée) ajoutée par l'intégration Tuya
+  (code utilisateur + QR code) : `switch.grande_lumiere_salon` (alias « Grande lumière salon »). Noms = ceux de
+  Google Home ; toutes exposées à l'assistant, questions d'état OK.
 - Reste : appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
   outil `maison` dans Wilson ; ouverture de session Windows automatique (sinon la machine ne redémarre qu'après connexion).
 
