@@ -232,7 +232,15 @@ Avancement (25/10/26, 14h55) :
 - 29/10/26 22h55 : **maison reliée sur la tablette** (Tailscale sur la tablette, jeton « Wilson » créé et collé par
   Timothée ; identifiant Home Assistant `tim49`, mot de passe changé par lui). Les réglages Maison se recopient sur les
   autres appareils par la synchronisation.
-- Reste : Tailscale sur le téléphone (VPN permanent) ; essai réel à la voix ; Freebox et Google Home (enceinte) en
+- Essai réel 29/10/26 23h (journal) : « lumière jaune salon » OK ; « allume les lumières », « l'éclairage du balcon »
+  refusés (les prises étaient des interrupteurs, pas des lumières) ; « Netflix sur la télé » refusé ; Wilson insistait pour
+  un « nom exact ». Corrigé : prises converties en lumières (aide « Switch as X ») `light.grande_lumiere_salon`,
+  `light.lumiere_jaune_salon`, `light.eclairage_balcon` (alias), télé Android TV = `media_player.television` « Télé »
+  (la télé Cast en double n'est plus exposée), enceinte = `media_player.enceinte_salon` ; scripts `script.netflix`,
+  `script.youtube`, `script.prime_video` (remote.turn_on activité sur `remote.tele`) → « allume Netflix ». **1.16.1** :
+  en cas d'échec, l'outil renvoie la liste des appareils et leur état (Gemini réessaie seul, répond aux questions d'état) ;
+  consigne « ne harcèle pas pour un nom exact ».
+- Reste : Tailscale sur le téléphone (VPN permanent) ; nouvel essai à la voix ; Freebox et Google Home (enceinte) en
   option ; message « proactivity » refusé par gemini-3.8-live (déjà réessayé 24 h plus tard, sans gêne).
 - Reste : appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
   outil `maison` dans Wilson ; ouverture de session Windows automatique (sinon la machine ne redémarre qu'après connexion).

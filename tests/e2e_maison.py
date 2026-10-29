@@ -38,6 +38,9 @@ async def main():
             if req.headers.get('authorization') != 'Bearer jeton-test': await route.fulfill(status=401, headers=H, body='{"message":"Unauthorized"}'); return
             if req.url.endswith('/api/'): body = {'message': 'API running.'}
             elif req.url.endswith('/api/config'): body = {'location_name': 'Maison', 'version': '2026.10.4'}
+            elif req.url.endswith('/api/states'): body = [{'entity_id': 'light.grande_lumiere_salon', 'state': 'off', 'attributes': {'friendly_name': 'Grande lumière salon'}},
+                {'entity_id': 'media_player.television', 'state': 'on', 'attributes': {'friendly_name': 'Télé'}}, {'entity_id': 'script.netflix', 'state': 'off', 'attributes': {'friendly_name': 'Netflix'}},
+                {'entity_id': 'switch.prise_led', 'state': 'on', 'attributes': {'friendly_name': 'Prise LED'}}]
             else:
                 t = json.loads(req.post_data or '{}').get('text', '')
                 if 'grande lumière' in t:
@@ -73,7 +76,7 @@ async def main():
         c = conns[-1]; fns = [f['name'] for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', [])]
         sysp = c['setup']['systemInstruction']['parts'][0]['text']
         check('Maison reliée : outil « maison » proposé à Gemini', 'maison' in fns, str(fns))
-        check('… consigne : appeler maison, ne pas dire « c\'est fait » avant la réponse', 'appelle maison' in sysp and 'avant la réponse de Home Assistant' in sysp)
+        check('… consigne : appeler maison, ne pas dire « c\'est fait » avant la réponse, applis de la télé, pas de harcèlement', 'appelle maison' in sysp and 'avant la réponse de Home Assistant' in sysp and '« allume Netflix »' in sysp and 'ne harcèle pas' in sysp)
         await page.evaluate("wilson._tools([{ id: 'm1', name: 'maison', args: { demande: 'allume la grande lumière du salon' } }])")
         await page.wait_for_function("wilson.brain.open", timeout=3000); await page.wait_for_timeout(800)
         sent = st['ha'][-1] if st['ha'] else {}
@@ -83,6 +86,7 @@ async def main():
         await page.evaluate("wilson._tools([{ id: 'm2', name: 'maison', args: { demande: 'allume le frigo' } }])"); await page.wait_for_timeout(800)
         resp = json.dumps(c['tool'], ensure_ascii=False)
         check('Appareil inconnu : échec expliqué (redire avec le nom exact)', '"m2"' in resp and 'Échec' in resp and 'nom exact' in resp, resp[-300:])
+        check('… avec la liste des appareils et leur état (Gemini réessaie seul, sans harceler)', 'Grande lumière salon : éteint' in resp and 'Télé : allumé' in resp and 'allume Netflix' in resp and 'Prise LED' not in resp and 'sans lui redemander' in resp, resp[-500:])
         st['down'] = True
         await page.evaluate("wilson._tools([{ id: 'm3', name: 'maison', args: { demande: 'allume la grande lumière' } }])"); await page.wait_for_timeout(1200)
         resp = json.dumps(c['tool'], ensure_ascii=False); st['down'] = False
