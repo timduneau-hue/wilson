@@ -105,7 +105,7 @@ async def main():
         await page.wait_for_function('wilson.state === "conversation"', timeout=8000)
         conn = conns[-1]; s = conn['setup']
         sysp = s['systemInstruction']['parts'][0]['text']
-        check("Consigne (écoute au regard) : tout ce qu'il entend est pour lui, y compris la 1re phrase", 'TOUJOURS pour toi' in sysp and 'la toute première' in sysp and 'ne dis rien du tout' not in sysp)
+        check("Consigne (écoute au regard) : tout ce qu'il entend est pour lui, y compris la 1re phrase", 'd\'habitude c\'est pour toi' in sysp and 'la toute première' in sysp and 'ne dis rien du tout' not in sysp)
         check('Coupure prudente : Google ne coupe plus Wilson sur un bruit (NO_INTERRUPTION)', s.get('realtimeInputConfig', {}).get('activityHandling') == 'NO_INTERRUPTION', str(s.get('realtimeInputConfig')))
         await page.wait_for_timeout(500)
         def say(sec):
