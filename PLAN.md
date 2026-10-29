@@ -207,7 +207,15 @@ Avancement (25/10/26, 14h55) :
 - Incident 25/10 : VirtualBox passait par Hyper-V (NEM, « Intégrité de la mémoire » active) → la machine se figeait
   (jusqu'à 42 min). Timothée a désactivé l'Intégrité de la mémoire et redémarré : VT-x direct (VBox.log), 2 Go de
   mémoire, horloge UTC (script `Redemarrer Home Assistant.bat`, arrêt propre sans forcer). Prêt pour l'accueil à 18h33.
-- Reste : compte Home Assistant (Timothée) ; appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
+- 29/10/26 : compte créé par Timothée (« Timothée DUNEAU », admin ; lieu « Maison », Europe/Paris, fr). **Adresse :
+  http://homeassistant.local (port 80, plus 8123)**, IP 192.168.1.65. Après un arrêt de Windows la machine était restée
+  éteinte → nouveau script `VirtualBox VMs\HomeAssistant\home-assistant.ps1` (+ `Redemarrer Home Assistant.bat`) :
+  démarrage auto à l'ouverture de session (30 s d'attente, reprise d'un état sauvegardé sinon abandon), redémarrage propre,
+  journal `home-assistant.log`, alerte si VirtualBox repasse par Hyper-V.
+- Appareils : Google Cast (enceinte « salon », télé) ; télé Sony KD-55XF9005 appairée en Android TV Remote (code PIN
+  donné par Timothée) → `media_player.tele_2`, `remote.tele`. Découverts, non ajoutés : Freebox (bouton à presser),
+  Bravia, DLNA, UPnP. Assistant de conversation en français OK (« quelle heure est-il » → « Il est 20:50 »).
+- Reste : appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
   outil `maison` dans Wilson ; ouverture de session Windows automatique (sinon la machine ne redémarre qu'après connexion).
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
