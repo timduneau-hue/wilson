@@ -15,9 +15,10 @@ import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
 import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
+import { Maison, MAISON_TOOL } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.15.0';
+const VERSION = '1.16.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -48,6 +49,7 @@ class App {
     }
     this.remote = new RemoteLog(this);           // journal à distance (feuille Google lue par Claude)
     this.crm = new Crm(this);                    // CRM à la voix (PLAN 2 quater)
+    this.maison = new Maison({ settings: this.settings, log: (m, imp) => this.log(m, imp) });   // la maison (PLAN 7 bis)
     this._heard = []; this._turnN = 0;           // ce que Timothée a dit, horodaté (verrou des écritures dans le CRM)
     this.car = null;                             // mode voiture (PLAN 2 quater, C5)
     this.oreille = new Oreille();                // reconnaît « Wilson » en voiture (empreintes de la voix de Timothée)
@@ -547,7 +549,7 @@ class App {
     const ms = (t) => ((t - (req.endAt || tSend)) / 1000).toFixed(1);
     try {
       // R6 : aucune photo d'office ; si Wilson doit regarder, il le dit (« regarder ») et une 2e requête part avec la photo.
-      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, text: req.text, hint: req.hint, onPartial, signal: req.ctl.signal, crm: this.crm.on });
+      const out = await this.eco.ask({ key: this.settings.apiKey, system: this._system('eco'), audio: req.audio, text: req.text, hint: req.hint, onPartial, signal: req.ctl.signal, crm: this.crm.on, maison: this.maison.on });
       if (gate) await gate;                                  // envoi anticipé : fin de phrase confirmée (sinon : annulé)
       if (conv !== this.convId) return;
       if (this.netWait) this._netBack();                     // Google a répondu : le réseau est revenu
@@ -645,6 +647,17 @@ class App {
               said = [said, out4.reponse].filter(Boolean).join(' '); last = out4; out.fin = out.fin || out4.fin;
             }
           }
+        }
+        // La maison (PLAN 7 bis) : Home Assistant agit et répond ; sa phrase est dite telle quelle.
+        if (out.maison && this.maison.on && conv === this.convId) {
+          tSearch = tSearch || performance.now();
+          let res;
+          try { res = await this.maison.dire(out.maison, req.ctl.signal); }
+          catch (e) { if (e.name === 'AbortError') throw e; res = { ok: false, dire: 'Home Assistant ne répond pas.' }; }
+          if (conv !== this.convId) return;
+          if (res.ok) this.face.play('nod');
+          speakChunk(res.dire); said = [said, res.dire].filter(Boolean).join(' ');
+          this.eco.commit({ raw: { reponse: res.dire }, entendu: '' }, `[Maison : ${out.maison}]`);
         }
         this.log(`« ${out.entendu.slice(0, 90)} » → ${said.slice(0, 110)}`, true);
         // Délais mesurés depuis la fin de la phrase (dernier son de voix) : où part le temps.
@@ -794,8 +807,8 @@ class App {
     if (bat) this._batTold = true;
     const eco = mode === 'eco' || mode === 'eco-search';
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
-    const crm = this.crm.on, car = !!this.car;
-    const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch, crm }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
+    const crm = this.crm.on, car = !!this.car, maison = this.maison.on;
+    const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch, crm, maison }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
 Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, la ville où vous habitez, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
 La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
 L'heure et la date : appelle date_et_heure.`;
@@ -810,6 +823,9 @@ Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat 
 - Ne dis jamais « c'est noté » ou « c'est enregistré » si l'enregistrement n'a pas été confirmé par le CRM.
 - Si un nom de client, un chiffre ou une date que tu as entendu te semble douteux, ne devine pas : dis ce que tu as compris et demande si c'est bien ça (« Tu parles de Franck Monvoisin, chez AD2M ? »), surtout avant de préparer une écriture.
 - Tu ne sais que ce que disent les réponses du CRM : si un détail demandé n'y est pas (le contenu d'une commande, par exemple), ${eco ? 'utilise l\'outil "question"' : 'appelle crm_question pour le chercher'} au lieu de le reconstituer.
+`;
+    const maisonTxt = !maison ? '' : `
+La maison : tu pilotes les lumières, les prises, la télé et l'enceinte par Home Assistant (éclairage balcon, lumière jaune salon, grande lumière salon, télé). Quand on te demande d'allumer, d'éteindre, de régler ou si quelque chose est allumé, ${eco ? 'remplis le champ "maison"' : 'appelle maison avec la demande complète, sans phrase d\'attente'}, puis dis le résultat en quelques mots. Ne dis jamais que c'est fait avant la réponse de Home Assistant.
 `;
     const voiture = !car ? '' : `
 En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (caméra coupée en voiture).
@@ -830,7 +846,7 @@ ${car ? `- Timothée t'a appelé par ton prénom : ce que tu entends maintenant 
 
 Ta vue : tu ne vois rien tant que tu n'as pas pris de photo. ${eco ? 'Si une photo est jointe, sers-t\'en pour répondre ; sinon, quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), mets "regarder" à true et dis seulement une très courte phrase d\'attente.' : 'Quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), dis une très courte phrase (« Je regarde… ») puis appelle regarder.'} Ne prétends jamais voir quelque chose sans photo.
 ${tools}
-${travail}${voiture}${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (météo, actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
+${travail}${maisonTxt}${voiture}${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (météo, actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
 Langue : parle toujours en français, y compris pour une phrase d'attente. La transcription de ce qu'on te dit sort parfois en anglais, en espagnol ou en russe par erreur : c'est du français mal compris. Réponds toujours en français ; si tu n'as pas compris, demande simplement de répéter.`}
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
@@ -1141,6 +1157,7 @@ Nous sommes ${fmtDate()}.${bat}`;
         case 'date_et_heure': out = { result: fmtDate() }; silent = false; break;
         case 'terminer_conversation': { this.endAfterSpeech = true; const id = this.convId; setTimeout(() => { if (id === this.convId && this.endAfterSpeech && !this.audio.playing) this.endConversation('au revoir'); }, 4000); break; }
         case 'chercher': this._search(c, a.question || ''); continue;      // réponse envoyée à la fin de la recherche
+        case 'maison': this._maisonTool(c, a.demande || ''); continue;    // réponse envoyée quand Home Assistant a répondu
         case 'regarder': {                                                  // R6 : photo seulement quand on la demande
           const img = this._photo();
           if (img) { this.brain.sendImage(img); this.log(`Photo prise à la demande${a.quoi ? ` (« ${String(a.quoi).slice(0, 80)} »)` : ''}`, true); this.face.play('tilt'); }
@@ -1334,7 +1351,7 @@ Nous sommes ${fmtDate()}.${bat}`;
   }
 
   // ---------- CRM à la voix (PLAN 2 quater) ----------
-  _extraTools() { return this.crm.on ? CRM_TOOLS : []; }
+  _extraTools() { return [...(this.crm.on ? CRM_TOOLS : []), ...(this.maison.on ? [MAISON_TOOL] : [])]; }
 
   // Ce que Timothée dit, horodaté, avec le numéro du tour : le verrou n'accepte qu'un « oui » d'un tour APRÈS la relecture (C2).
   _noteHeard(text, whole = false) {
@@ -1421,6 +1438,19 @@ Nous sommes ${fmtDate()}.${bat}`;
   }
 
   // Outil du CRM en mode direct : Wilson a dit « je regarde dans le CRM », il répond quand le CRM a répondu (filet : 40 s).
+  // La maison (PLAN 7 bis) : la demande part à Home Assistant, sa réponse revient à Gemini qui la dit.
+  async _maisonTool(call, demande) {
+    const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
+    this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
+    let res;
+    try { res = await this.maison.dire(demande, ctl.signal); }
+    catch (e) { if (!this._searches.has(call.id)) return; res = { ok: false, dire: 'Home Assistant ne répond pas.' }; }
+    if (conv !== this.convId || !this._searches.has(call.id)) return;
+    this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
+    if (res.ok) this.face.play('nod');
+    this.brain.respond([{ id: call.id, name: call.name, response: { result: `${res.ok ? 'Fait' : 'Échec'} — Home Assistant : « ${res.dire} ». Dis-le en quelques mots.` } }]);
+  }
+
   async _crmTool(call) {
     if (call.name === 'crm_question') return this._analyse(call);
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();

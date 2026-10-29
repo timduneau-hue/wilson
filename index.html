@@ -127,6 +127,15 @@
       </section>
 
       <section class="group">
+        <h3>Maison</h3>
+        <p class="fine" style="margin:0 0 10px">Wilson pilote la maison par Home Assistant (lumières, prises, télé). L'appli Tailscale doit être allumée sur cet appareil.</p>
+        <label class="row"><span>Adresse de Home Assistant</span><input id="s-haurl" class="field" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://homeassistant.….ts.net"></label>
+        <label class="row"><span>Jeton d'accès</span><input id="s-hatoken" class="field" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <p id="s-maisonstatus" class="status" hidden></p>
+        <div class="buttons wrap"><button id="t-maison" class="btn">Vérifier la maison</button></div>
+      </section>
+
+      <section class="group">
         <h3>CRM et voiture</h3>
         <label class="row check"><input id="s-crm" type="checkbox"><span>Relier Wilson à mon CRM : questions sur les clients, appels, tâches et brouillons (rien n'est écrit sans ton accord)</span></label>
         <p id="s-crmstatus" class="status" hidden></p>

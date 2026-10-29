@@ -25,6 +25,7 @@ export const DEFAULTS = {
   camera: true, mirror: false, subtitles: false, face: 'lumiere', brainMode: 'auto', ecoVoice: '', ecoSpeed: 'rapide',
   logUrl: '', logContent: true,
   crm: false, voitureAuto: true, oreilleSens: 'normal',      // CRM à la voix et mode voiture (PLAN 2 quater)
+  haUrl: '', haToken: '',                                    // la maison par Home Assistant (PLAN 7 bis)
 };
 export const VOICES = [
   ['Puck', 'enjoué'], ['Achird', 'amical'], ['Charon', 'posé'], ['Fenrir', 'énergique'], ['Umbriel', 'décontracté'],
@@ -77,6 +78,13 @@ export class SettingsUI {
     };
     bind('s-voice', 'voice'); bind('s-face', 'face'); bind('s-brain', 'brainMode'); bind('s-ecospeed', 'ecoSpeed'); bind('s-ecovoice', 'ecoVoice'); bind('s-listen', 'listenMode');
     bind('s-timeout', 'convTimeout', Number); bind('s-barge', 'bargeIn');
+    bind('s-haurl', 'haUrl', (v) => v.trim().replace(/\/+$/, '')); bind('s-hatoken', 'haToken', (v) => v.trim());
+    $('t-maison').onclick = async () => {
+      const st = $('s-maisonstatus'); st.hidden = false; st.className = 'status'; st.textContent = 'Vérification…';
+      this.s.haUrl = $('s-haurl').value.trim().replace(/\/+$/, ''); this.s.haToken = $('s-hatoken').value.trim(); saveSettings(this.s); app.applySettings('haUrl');
+      const r = await app.maison.verifier();
+      st.className = 'status ' + (r.ok ? 'ok' : 'err'); st.textContent = r.msg; app.log('Vérification maison : ' + r.msg);
+    };
     bind('s-home', 'home'); bind('s-city', 'city'); bind('s-night1', 'nightStart', Number); bind('s-night2', 'nightEnd', Number);
     bind('s-cam', 'camera', Boolean, 'checked'); bind('s-mirror', 'mirror', Boolean, 'checked'); bind('s-subs', 'subtitles', Boolean, 'checked');
 
@@ -205,6 +213,7 @@ export class SettingsUI {
 
   fill() {
     const s = this.s;
+    $('s-haurl').value = s.haUrl || ''; $('s-hatoken').value = s.haToken || '';
     $('s-key').value = s.apiKey; $('s-model').value = s.model; $('s-voice').value = s.voice; $('s-face').value = s.face;
     $('s-brain').value = s.brainMode; $('s-ecospeed').value = s.ecoSpeed; this.fillVoices();
     $('s-listen').value = s.listenMode; $('s-timeout').value = String(s.convTimeout);
