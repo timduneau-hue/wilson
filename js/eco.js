@@ -49,18 +49,22 @@ export const ECO_SCHEMA = {
 const CRM_OUTILS = ['aucun', 'client', 'agenda', 'bilan', 'produit', 'question', 'itineraire', 'appeler', 'noter', 'confirmer'];
 const CRM_ORDER = ['outil', 'client', 'contact', 'jour', 'produit', 'question', 'demande', 'type', 'texte', 'date', 'heure', 'echange'];
 const ORDER_CRM = ['pour_moi', 'chercher', 'regarder', 'crm', 'emotion', 'reponse', 'geste', 'memoriser', 'oublier', 'fin', 'entendu'];
-export function ecoSchema(crm = false) {
-  if (!crm) return ECO_SCHEMA;
+// La maison (PLAN 7 bis) : un champ « maison » (la demande pour Home Assistant), seulement quand la maison est reliée.
+export function ecoSchema(crm = false, maison = false) {
+  if (!crm && !maison) return ECO_SCHEMA;
   const S = (d) => ({ type: 'STRING', ...(d ? { enum: d } : {}) });
-  return { ...ECO_SCHEMA,
-    properties: { ...ECO_SCHEMA.properties, crm: { type: 'OBJECT', required: ['outil'], propertyOrdering: CRM_ORDER, properties: {
-      outil: S(CRM_OUTILS), client: S(), contact: S(), jour: S(), produit: S(), question: S(['qui_achete', 'infos']), demande: S(),
-      type: S(['tache', 'compte_rendu', 'rdv', 'note']), texte: S(), date: S(), heure: S(), echange: S(['visite', 'appel']) } } },
-    propertyOrdering: ORDER_CRM };
+  const props = { ...ECO_SCHEMA.properties };
+  if (crm) props.crm = { type: 'OBJECT', required: ['outil'], propertyOrdering: CRM_ORDER, properties: {
+    outil: S(CRM_OUTILS), client: S(), contact: S(), jour: S(), produit: S(), question: S(['qui_achete', 'infos']), demande: S(),
+    type: S(['tache', 'compte_rendu', 'rdv', 'note']), texte: S(), date: S(), heure: S(), echange: S(['visite', 'appel']) } };
+  if (maison) props.maison = S();
+  const order = (crm ? ORDER_CRM : ORDER).slice();
+  if (maison) order.splice(order.indexOf('emotion'), 0, 'maison');
+  return { ...ECO_SCHEMA, properties: props, required: order.filter((k) => k !== 'crm'), propertyOrdering: order };
 }
 
 // Consigne de format. search : 2e requête (recherche Google) ; canSearch : la recherche est-elle possible ? crm : CRM relié.
-export function ecoFormat({ search = false, canSearch = true, crm = false } = {}) {
+export function ecoFormat({ search = false, canSearch = true, crm = false, maison = false } = {}) {
   const head = search
     ? `MODE ÉCONOMIQUE — RECHERCHE : fais une recherche Google pour répondre à la dernière question de la conversation, puis réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs DANS CET ORDRE EXACT :`
     : `MODE ÉCONOMIQUE — tu reçois l'enregistrement audio de ce qui vient d'être dit dans le salon (et parfois une photo de ce que tu vois, ou une consigne écrite entre crochets).
@@ -74,7 +78,7 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs
       + (canSearch ? ' ; si chercher n\'est pas vide : SEULEMENT une courte phrase d\'attente naturelle (par exemple « Attends, je regarde. »), sans inventer la réponse' : '');
   return `${head}
 {"pour_moi": ${search ? 'true' : 'true si la phrase s\'adresse à toi (on te regardait en la disant : c\'est en général le cas, ou la suite évidente de votre conversation), false si c\'est la télé, un bruit, une phrase coupée ou visiblement adressée à quelqu\'un d\'autre'},
-${chercher}${search ? '' : ` "regarder": true SEULEMENT si on te demande de regarder ou de décrire quelque chose (ce que tu vois, une couleur, lire, un objet montré, une tenue…) et qu'aucune photo n'est jointe ; alors "reponse" = une très courte phrase d'attente (« Je regarde… »). Sinon false,\n`}${crm && !search ? ` "crm": {"outil": "aucun", sauf si la phrase porte sur le CRM de Timothée (ses clients, rendez-vous, tâches, devis, chiffres, articles), s'il faut appeler un client ou noter quelque chose : "client" (fiche d'un client : remplis "client" avec le nom dit), "agenda" ("jour" : aujourd'hui, demain, jeudi…), "bilan" (son chiffre d'affaires global), "produit" ("produit" et "question" qui_achete ou infos), "question" (TOUTE autre question sur ses données : chiffre passé, total, liste, détail, « qui », « combien », « quand », devis à relancer… ; "demande" = la question complète avec le client et la période ; un analyste cherche dans tout le CRM, "reponse" = « Je cherche l'information… »), "itineraire" ("client" : aller chez lui, un bouton GPS s'affiche), "appeler" ("client", "contact"), "noter" ("type" tache, compte_rendu, rdv ou note, "client", "texte" = ses mots mis au propre, "date", "heure", "echange" visite ou appel : RIEN n'est écrit, tu recevras la phrase à lui relire), "confirmer" (SEULEMENT s'il vient de répondre oui à ta relecture)} ; quand "outil" n'est pas "aucun", "reponse" = une très courte phrase d'attente (« Je regarde dans le CRM… »), ou vide pour noter et confirmer. Ne devine jamais un nom, un chiffre ou une date du CRM,\n` : ''} "emotion": "une émotion parmi ${EMOTIONS.join(', ')}",
+${chercher}${search ? '' : ` "regarder": true SEULEMENT si on te demande de regarder ou de décrire quelque chose (ce que tu vois, une couleur, lire, un objet montré, une tenue…) et qu'aucune photo n'est jointe ; alors "reponse" = une très courte phrase d'attente (« Je regarde… »). Sinon false,\n`}${crm && !search ? ` "crm": {"outil": "aucun", sauf si la phrase porte sur le CRM de Timothée (ses clients, rendez-vous, tâches, devis, chiffres, articles), s'il faut appeler un client ou noter quelque chose : "client" (fiche d'un client : remplis "client" avec le nom dit), "agenda" ("jour" : aujourd'hui, demain, jeudi…), "bilan" (son chiffre d'affaires global), "produit" ("produit" et "question" qui_achete ou infos), "question" (TOUTE autre question sur ses données : chiffre passé, total, liste, détail, « qui », « combien », « quand », devis à relancer… ; "demande" = la question complète avec le client et la période ; un analyste cherche dans tout le CRM, "reponse" = « Je cherche l'information… »), "itineraire" ("client" : aller chez lui, un bouton GPS s'affiche), "appeler" ("client", "contact"), "noter" ("type" tache, compte_rendu, rdv ou note, "client", "texte" = ses mots mis au propre, "date", "heure", "echange" visite ou appel : RIEN n'est écrit, tu recevras la phrase à lui relire), "confirmer" (SEULEMENT s'il vient de répondre oui à ta relecture)} ; quand "outil" n'est pas "aucun", "reponse" = une très courte phrase d'attente (« Je regarde dans le CRM… »), ou vide pour noter et confirmer. Ne devine jamais un nom, un chiffre ou une date du CRM,\n` : ''}${maison && !search ? ` "maison": "vide, sauf si on te demande d'agir sur la maison ou son état (allumer, éteindre, lumières, prises, télé, son, « est-ce que … est allumé ») : alors la demande complète en français pour Home Assistant (« allume la grande lumière du salon ») ; "reponse" = vide (Home Assistant répondra)",\n` : ''} "emotion": "une émotion parmi ${EMOTIONS.join(', ')}",
  "reponse": "${reponse}",
  "geste": "${GESTES.join(', ')}",
  "memoriser": ["informations durables à retenir, phrases courtes et autonomes avec les prénoms"],
@@ -141,7 +145,7 @@ export class EcoBrain {
   _thinkOrder() { return [this.thinking, 'minimal', 'low', null].filter((v, i, a) => a.indexOf(v) === i); }
 
   // web : outil Google Search joint (2e requête « recherche ») ; false = même format, sans Internet (quota de recherche épuisé, météo fournie…).
-  _body({ system, contents, think, search, web = search, model = '', crm = false }) {
+  _body({ system, contents, think, search, web = search, model = '', crm = false, maison = false }) {
     const schema = !search && !this.noSchema;
     return {
       systemInstruction: { parts: [{ text: system }] },
@@ -149,7 +153,7 @@ export class EcoBrain {
       ...(web && !this.noSearch ? { tools: [{ googleSearch: {} }] } : {}),
       generationConfig: {
         temperature: 0.85, maxOutputTokens: 1024,
-        ...(schema ? { responseMimeType: 'application/json', responseSchema: ecoSchema(crm) } : {}),
+        ...(schema ? { responseMimeType: 'application/json', responseSchema: ecoSchema(crm, maison) } : {}),
         // Gemini 2.5 : « thinkingBudget » (0 = pas de réflexion) ; Gemini 3 : « thinkingLevel ».
         ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: think } } : {}),
       },
@@ -158,7 +162,7 @@ export class EcoBrain {
 
   // req : { audio: Int16Array 16 kHz, image: base64 jpeg, text, hint } ; onPartial({pourMoi, emotion, reponse, closed}) pendant l'écriture.
   // search : 2e requête, avec Google Search (texte seul). La réponse n'entre dans l'historique que par commit().
-  async ask({ key, system, audio, image, text, hint, signal, onPartial, search = false, web = search, fresh = false, crm = false }) {
+  async ask({ key, system, audio, image, text, hint, signal, onPartial, search = false, web = search, fresh = false, crm = false, maison = false }) {
     const parts = [];
     if (audio && audio.length) parts.push({ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio) } });
     if (image) parts.push({ inlineData: { mimeType: 'image/jpeg', data: image } });
@@ -175,7 +179,7 @@ export class EcoBrain {
       const thinks = this._thinkOrder(); let ti = 0;
       while (ti < thinks.length) {
         const think = thinks[ti];
-        const res = await this._race(model, this._body({ system, contents, think, search, web, model, crm }), key, signal, onText, hedge);
+        const res = await this._race(model, this._body({ system, contents, think, search, web, model, crm, maison }), key, signal, onText, hedge);
         if (res.ok) {
           if (this.refused[model]) { delete this.refused[model]; try { localStorage.setItem('wilson.eco.refus', JSON.stringify(this.refused)); } catch (_) {} }
           const out = res.txt != null ? parseText(res.txt) : parseReply(res.json);
@@ -367,6 +371,7 @@ export function parseReply(j) {
     oublier: String(o.oublier || '').trim(),
     fin: o.fin === true || o.fin === 'true',
     crm: o.crm && typeof o.crm === 'object' && o.crm.outil && o.crm.outil !== 'aucun' ? o.crm : null,
+    maison: String(o.maison || '').trim(),
   };
 }
 

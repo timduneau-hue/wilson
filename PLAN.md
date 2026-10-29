@@ -221,12 +221,22 @@ Avancement (25/10/26, 14h55) :
   (Tuya/Smart Life, ESP 192.168.1.108, réinitialisée puis réinstallée par Timothée) ajoutée par l'intégration Tuya
   (code utilisateur + QR code) : `switch.grande_lumiere_salon` (alias « Grande lumière salon »). Noms = ceux de
   Google Home ; toutes exposées à l'assistant, questions d'état OK.
+- Accès sécurisé (29/10/26) : compte Tailscale de Timothée ; module Tailscale installé dans Home Assistant, « share
+  Home Assistant : serve » (privé, réservé aux appareils de Timothée qui ont l'appli Tailscale) → **adresse
+  https://homeassistant.tail531e59.ts.net** (certificat obtenu). Réglages HTTP de Home Assistant (désormais dans
+  Paramètres → Réseau → Serveur HTTP, plus dans configuration.yaml) : X-Forwarded-For + proxy de confiance 127.0.0.1,
+  origine CORS https://timduneau-hue.github.io. Module « File editor » installé (lecture/écriture de la configuration).
+- **Wilson 1.16.0** : outil `maison` (js/maison.js) → `POST /api/conversation/process` (fr, jeton) ; réglages « Maison »
+  (adresse + jeton d'accès, synchronisés entre appareils comme la clé, jamais dans le dépôt) + bouton « Vérifier la
+  maison » ; mode économique : champ « maison ». Tests `e2e_maison.py` (13/13), `maison_unit.mjs` (12/12).
+- Reste : jeton d'accès créé par Timothée (profil → Sécurité → Jetons d'accès longue durée) et collé dans Wilson avec
+  l'adresse ; Tailscale allumé sur le téléphone et la tablette (VPN permanent) ; essai réel.
 - Reste : appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
   outil `maison` dans Wilson ; ouverture de session Windows automatique (sinon la machine ne redémarre qu'après connexion).
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 25/10/26 : **version 1.15.0** en ligne (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 29/10/26 : **version 1.16.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
