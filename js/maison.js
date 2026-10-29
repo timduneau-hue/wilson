@@ -124,6 +124,16 @@ export class Maison {
     return inv.find((e) => norm(e.nom) === n) || inv.find((e) => norm(e.nom).includes(n) || n.includes(norm(e.nom))) || null;
   }
 
+  // Ce qu'on affiche pendant l'action (E1) : « Grande lumière salon : j'allume… ».
+  enCours({ appareil, action, valeur } = {}) {
+    const e = this.inv && this._trouver(this.inv, appareil), nom = e ? e.nom : String(appareil || '').replace(/^[a-z_]+\./, '').replace(/_/g, ' ');
+    const v = String(valeur || '').trim();
+    const VERBE = { allumer: "j'allume", eteindre: "j'éteins", basculer: 'je bascule', luminosite: `luminosité ${v || '50'} %`, volume: `volume ${v || '30'} %`,
+      volume_plus: 'je monte le son', volume_moins: 'je baisse le son', muet: 'je coupe le son', son: 'je remets le son', lecture: 'lecture', pause: 'pause',
+      stop: 'stop', suivant: 'suivant', precedent: 'précédent', appli: `j'ouvre ${v}`, radio: `je mets ${v}`, source: `entrée ${v}`, clignoter: 'je fais clignoter' };
+    return `${nom} : ${VERBE[action] || action}…`;
+  }
+
   // ---------- Outils ----------
   async etat(appareils = [], signal) {
     const inv = await this._inv(signal, 3000);

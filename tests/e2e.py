@@ -79,7 +79,7 @@ async def main():
         s = conn['setup']
         check('Setup Gemini : modèle, voix, outils, VAD', s['model'] == 'models/gemini-3.8-live' and s['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']['voiceName'] == 'Puck'
               and any('functionDeclarations' in t for t in s['tools']) and 'realtimeInputConfig' in s, s['model'])
-        check('Consigne système contient les règles et la date', ('TOUJOURS pour toi' in s['systemInstruction']['parts'][0]['text'] or 'ne dis rien du tout' in s['systemInstruction']['parts'][0]['text']) and 'Nous sommes' in s['systemInstruction']['parts'][0]['text'])
+        check('Consigne système contient les règles et la date', ('d\'habitude c\'est pour toi' in s['systemInstruction']['parts'][0]['text'] or 'ne dis rien du tout' in s['systemInstruction']['parts'][0]['text']) and 'Nous sommes' in s['systemInstruction']['parts'][0]['text'])
         await page.wait_for_timeout(1200)
         check('Tampon envoyé (≥ 3 s d\'audio avant/pendant le prénom)', conn['audio_bytes'] >= 16000 * 3, f"{conn['audio_bytes'] / 16000:.1f}s, 1er bloc {conn['first_audio_len']} éch.")
         check('Aucune image envoyée au réveil (photo seulement à la demande)', conn['images'] == 0, f"{conn['images']} image(s)")

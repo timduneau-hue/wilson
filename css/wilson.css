@@ -131,3 +131,18 @@ body.car canvas#face { opacity: .6; }
 body.car .subtitle { bottom: calc(4vh + env(safe-area-inset-bottom)); font-size: 22px; max-width: 94vw; opacity: 1; line-height: 1.35; }
 body.car .badge { top: calc(64px + env(safe-area-inset-top)); right: auto; left: 50%; transform: translateX(-50%); max-width: 92vw; }
 .sheet { z-index: 10; }
+
+/* ---- Action en cours (PLAN 7 ter, E1) ---- */
+.pill { position: fixed; left: 50%; bottom: calc(5vh + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 6; max-width: 92vw;
+  display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; font-size: 19px; font-weight: 600;
+  background: rgba(20,22,30,.86); border: 1px solid var(--line); color: var(--ink); box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .25s, background-color .25s; }
+.pill[hidden] { display: none; }
+.pill .pi { flex: none; width: 18px; height: 18px; border-radius: 50%; }
+.pill.run .pi { border: 3px solid rgba(255,255,255,.25); border-top-color: var(--amber-2); animation: pillspin .8s linear infinite; }
+.pill.ok { background: rgba(26,110,58,.92); border-color: rgba(120,230,160,.5); }
+.pill.ko { background: rgba(140,36,36,.92); border-color: rgba(255,150,150,.5); }
+.pill.ok .pi::before { content: '✓'; } .pill.ko .pi::before { content: '✗'; }
+.pill.ok .pi, .pill.ko .pi { width: auto; height: auto; font-size: 20px; line-height: 1; }
+.pill .pt { overflow: hidden; text-overflow: ellipsis; }
+@keyframes pillspin { to { transform: rotate(360deg); } }

@@ -259,6 +259,24 @@ Avancement (25/10/26, 14h55) :
 - Reste : appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
   outil `maison` dans Wilson ; ouverture de session Windows automatique (sinon la machine ne redémarre qu'après connexion).
 
+## 7 ter. Voir ce qu'il fait, savoir à qui on parle (demande de Timothée, 29/10/26)
+
+« Quand Wilson fait quelque chose, qu'on puisse le voir […] parfois on regarde à côté et d'autres personnes parlent […] et
+il répond […] parfois nous dans le canapé, pas en face de Wilson […] sans ôter la réactivité : qu'il réponde du tac au tac. »
+
+| # | Règle | Comment |
+|---|-------|---------|
+| E1 | On voit l'action en cours et son résultat. | Pastille sous le visage dès que l'outil part (« Grande lumière salon : j'allume… », « Je cherche dans le CRM… »), puis ✓ vert (résultat) ou ✗ rouge (problème) quelques secondes ; visage « réflexion » pendant, oui de la tête si c'est fait, non sinon. Même chose en mode économique. |
+| E2 | Regardé, il ne répond pas à ce qui ne lui est pas adressé. | Rien ne change dans la réactivité (le regard ouvre toujours l'écoute tout de suite) ; c'est la décision de répondre qui devient plus fine : consigne « d'habitude c'est pour toi, mais pas si la phrase commence par le prénom d'un autre (« Louis, viens manger »), si les gens se parlent entre eux, au téléphone » ; la relance « on te parlait » n'est plus envoyée que pour une vraie demande (question, verbe à l'impératif, « Wilson », « tu ») et jamais quand plusieurs visages sont devant la tablette. |
+| E3 | Du canapé, sans le regarder : « Wilson, baisse le son ». | L'oreille du mode voiture (son prénom, appris sur la voix de Timothée) écoute aussi à la maison quand personne ne le regarde ; « presque » → second avis de Gemini (20 par heure au plus). La réponse est retenue tant que « Wilson » n'est pas confirmé dans la transcription (même verrou qu'en voiture). Une discussion ouverte par le prénom ne demande pas de le regarder : elle se ferme après le silence habituel. En veille faute de regard, « Wilson » la reprend. |
+
+Fait le 29/10/26 (**1.18.0**) : pastille `#pill` (maison, CRM, recherche, analyste ; mode économique compris) ; consigne
+« d'habitude c'est pour toi… tais-toi complètement si… » ; relance limitée par `_semblePourMoi` (prénom de Wilson, « tu »,
+question, salutation, verbe de demande ; jamais si la phrase commence par un autre prénom — prénoms tirés de « Qui vit
+ici ») et jamais avec plusieurs visages ; oreille à la maison quand personne ne le regarde, verrou du prénom, `_byName`
+(pas de veille faute de regard), « Wilson » reprend une discussion en veille. Il faut que l'oreille soit apprise
+(Réglages → CRM et voiture → 5 fois « Wilson »). Tests `e2e_adresse.py` 15/15.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
