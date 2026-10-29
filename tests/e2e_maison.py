@@ -41,6 +41,7 @@ async def main():
             elif req.url.endswith('/api/states'): body = [{'entity_id': 'light.grande_lumiere_salon', 'state': 'off', 'attributes': {'friendly_name': 'Grande lumière salon'}},
                 {'entity_id': 'media_player.television', 'state': 'on', 'attributes': {'friendly_name': 'Télé'}}, {'entity_id': 'script.netflix', 'state': 'off', 'attributes': {'friendly_name': 'Netflix'}},
                 {'entity_id': 'switch.prise_led', 'state': 'on', 'attributes': {'friendly_name': 'Prise LED'}}]
+            elif req.url.endswith('/api/services/script/turn_on'): st['script'] = json.loads(req.post_data or '{}'); body = []
             else:
                 t = json.loads(req.post_data or '{}').get('text', '')
                 if 'grande lumière' in t:
@@ -87,6 +88,12 @@ async def main():
         resp = json.dumps(c['tool'], ensure_ascii=False)
         check('Appareil inconnu : échec expliqué (redire avec le nom exact)', '"m2"' in resp and 'Échec' in resp and 'nom exact' in resp, resp[-300:])
         check('… avec la liste des appareils et leur état (Gemini réessaie seul, sans harceler)', 'Grande lumière salon : éteint' in resp and 'Télé : allumé' in resp and 'allume Netflix' in resp and 'Prise LED' not in resp and 'sans lui redemander' in resp, resp[-500:])
+        await page.evaluate("wilson._tools([{ id: 'm4', name: 'maison', args: { demande: 'lance Netflix sur la télé' } }])"); await page.wait_for_timeout(800)
+        resp = json.dumps(c['tool'], ensure_ascii=False)
+        check('« Lance Netflix » refusé par l\'assistant : Wilson lance lui-même le script Netflix', st.get('script') == {'entity_id': 'script.netflix'} and '"m4"' in resp and 'lancé : Netflix' in resp, str(st.get('script')) + resp[-200:])
+        st.pop('script', None)
+        await page.evaluate("wilson._tools([{ id: 'm5', name: 'maison', args: { demande: 'éteins Netflix' } }])"); await page.wait_for_timeout(800)
+        check('… mais « éteins Netflix » ne relance rien', 'script' not in st)
         st['down'] = True
         await page.evaluate("wilson._tools([{ id: 'm3', name: 'maison', args: { demande: 'allume la grande lumière' } }])"); await page.wait_for_timeout(1200)
         resp = json.dumps(c['tool'], ensure_ascii=False); st['down'] = False

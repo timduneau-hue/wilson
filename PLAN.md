@@ -240,6 +240,11 @@ Avancement (25/10/26, 14h55) :
   `script.youtube`, `script.prime_video` (remote.turn_on activité sur `remote.tele`) → « allume Netflix ». **1.16.1** :
   en cas d'échec, l'outil renvoie la liste des appareils et leur état (Gemini réessaie seul, répond aux questions d'état) ;
   consigne « ne harcèle pas pour un nom exact ».
+- Essai 29/10/26 23h10 (1.16.1) : lumières et télé (allumer/éteindre) OK ; « allume Netflix » refusé (l'assistant de Home
+  Assistant ne trouve pas les scripts par leur nom) ; nom « Grande lumière salon Prise 1 » corrigé. **1.16.2** : si
+  l'assistant échoue et que la demande nomme un script (Netflix, YouTube, Prime Video), Wilson le lance lui-même
+  (`/api/services/script/turn_on`), jamais sur « éteins / arrête ». Faire clignoter une lumière : pas fait (abandonné par
+  Timothée).
 - Reste : Tailscale sur le téléphone (VPN permanent) ; nouvel essai à la voix ; Freebox et Google Home (enceinte) en
   option ; message « proactivity » refusé par gemini-3.8-live (déjà réessayé 24 h plus tard, sans gêne).
 - Reste : appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
