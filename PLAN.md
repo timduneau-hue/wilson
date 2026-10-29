@@ -229,8 +229,11 @@ Avancement (25/10/26, 14h55) :
 - **Wilson 1.16.0** : outil `maison` (js/maison.js) → `POST /api/conversation/process` (fr, jeton) ; réglages « Maison »
   (adresse + jeton d'accès, synchronisés entre appareils comme la clé, jamais dans le dépôt) + bouton « Vérifier la
   maison » ; mode économique : champ « maison ». Tests `e2e_maison.py` (13/13), `maison_unit.mjs` (12/12).
-- Reste : jeton d'accès créé par Timothée (profil → Sécurité → Jetons d'accès longue durée) et collé dans Wilson avec
-  l'adresse ; Tailscale allumé sur le téléphone et la tablette (VPN permanent) ; essai réel.
+- 29/10/26 22h55 : **maison reliée sur la tablette** (Tailscale sur la tablette, jeton « Wilson » créé et collé par
+  Timothée ; identifiant Home Assistant `tim49`, mot de passe changé par lui). Les réglages Maison se recopient sur les
+  autres appareils par la synchronisation.
+- Reste : Tailscale sur le téléphone (VPN permanent) ; essai réel à la voix ; Freebox et Google Home (enceinte) en
+  option ; message « proactivity » refusé par gemini-3.8-live (déjà réessayé 24 h plus tard, sans gêne).
 - Reste : appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
   outil `maison` dans Wilson ; ouverture de session Windows automatique (sinon la machine ne redémarre qu'après connexion).
 
