@@ -213,6 +213,8 @@ Avancement (25/10/26, 14h55) :
   éteinte → nouveau script `VirtualBox VMs\HomeAssistant\home-assistant.ps1` (+ `Redemarrer Home Assistant.bat`) :
   démarrage auto à l'ouverture de session (30 s d'attente, reprise d'un état sauvegardé sinon abandon), redémarrage propre,
   journal `home-assistant.log`, alerte si VirtualBox repasse par Hyper-V.
+  29/10/26 : lanceur de démarrage remplacé par `Démarrage\Home Assistant.vbs` (aucune fenêtre) ; l'ancien `.cmd` est
+  supprimé par le script au démarrage suivant (la fenêtre noire apparaît une dernière fois).
 - Appareils : Google Cast (enceinte « salon », télé) ; télé Sony KD-55XF9005 appairée en Android TV Remote (code PIN
   donné par Timothée) → `media_player.tele_2`, `remote.tele`. Découverts, non ajoutés : Freebox (bouton à presser),
   Bravia, DLNA, UPnP. Assistant de conversation en français OK (« quelle heure est-il » → « Il est 20:50 »).
