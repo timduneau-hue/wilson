@@ -46,6 +46,8 @@ export class Maison {
       const cibles = ((res.data || {}).success || []).map((x) => x.name).filter(Boolean);
       this.log(`Maison : « ${demande} » → ${type} « ${speech} »${cibles.length ? ' [' + cibles.join(', ') + ']' : ''} (${((performance.now() - t0) / 1000).toFixed(1)} s)`, true);
       if (type === 'error') {
+        const raccourci = await this._raccourci(demande, signal).catch(() => null);      // « lance Netflix » : le script du même nom
+        if (raccourci) return raccourci;
         const code = (res.data || {}).code || '';
         const appareils = await this.appareils(signal).catch(() => '');
         if (/no_valid_targets|no_intent_match/.test(code)) return { ok: false, dire: `Home Assistant n'a pas compris : « ${speech || 'demande inconnue'} ». Redis-le avec le nom exact de l'appareil.`, appareils };
@@ -58,6 +60,22 @@ export class Maison {
       if (e.name === 'AbortError') return { ok: false, dire: 'Home Assistant ne répond pas.' };
       return { ok: false, dire: netErr(e) ? "Je n'arrive pas à joindre la maison : vérifie que Tailscale est allumé sur cet appareil." : 'Home Assistant ne répond pas.' };
     }
+  }
+
+  // Raccourcis (scripts de Home Assistant : Netflix, YouTube…) que l'assistant de Home Assistant ne trouve pas toujours :
+  // si la demande nomme un script (sans « éteins / arrête »), Wilson le lance lui-même.
+  async _raccourci(demande, signal) {
+    const n = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+    const d = ' ' + n(demande) + ' ';
+    if (/ (eteins|eteint|arrete|coupe|stop) /.test(d)) return null;
+    const r = await this._fetch('/api/states', { signal });
+    if (!r.ok || !Array.isArray(r.json)) return null;
+    const sc = r.json.filter((e) => e.entity_id.startsWith('script.')).map((e) => ({ id: e.entity_id, nom: (e.attributes || {}).friendly_name || e.entity_id.slice(7) }))
+      .filter((x) => n(x.nom) && d.includes(' ' + n(x.nom) + ' ')).sort((a, b) => n(b.nom).length - n(a.nom).length)[0];
+    if (!sc) return null;
+    const t = await this._fetch('/api/services/script/turn_on', { method: 'POST', signal, body: { entity_id: sc.id } });
+    this.log(`Maison : « ${demande} » → raccourci ${sc.id} (${t.status})`, true);
+    return t.ok ? { ok: true, dire: `C'est lancé : ${sc.nom}.` } : { ok: false, dire: `Je n'ai pas pu lancer ${sc.nom} (erreur ${t.status}).` };
   }
 
   // Les appareils pilotables et leur état (pour réessayer avec le bon nom, ou répondre « la télé est allumée »).

@@ -43,4 +43,4 @@ node maison_unit.mjs                                     # module maison (faux H
 
 Les suites autres que `e2e_gaze.py`, `vision_run.py` et `jank.py` bloquent les modèles de vision (trop lents
 sans carte graphique) : le regard y est simulé (`listenMode: 'toujours'` ou `vision.forceLook`).
-| `e2e_maison.py`, `maison_unit.mjs` | La maison (PLAN 7 bis) : outil « maison » seulement si adresse + jeton, demande envoyée à l'assistant de Home Assistant (français, jeton), réponse rendue à Gemini, appareil inconnu / jeton refusé / Tailscale éteint expliqués, champ « maison » du mode économique, bouton « Vérifier la maison » |
+| `e2e_maison.py`, `maison_unit.mjs` | La maison (PLAN 7 bis) : outil « maison » seulement si adresse + jeton, demande envoyée à l'assistant de Home Assistant (français, jeton), réponse rendue à Gemini, raccourcis Netflix… lancés par Wilson, appareil inconnu (liste des appareils) / jeton refusé / Tailscale éteint expliqués, champ « maison » du mode économique, bouton « Vérifier la maison » |
