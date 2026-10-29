@@ -15,10 +15,10 @@ import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
 import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
-import { Maison, MAISON_TOOL } from './maison.js';
+import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.16.2';
+const VERSION = '1.17.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -50,6 +50,8 @@ class App {
     this.remote = new RemoteLog(this);           // journal à distance (feuille Google lue par Claude)
     this.crm = new Crm(this);                    // CRM à la voix (PLAN 2 quater)
     this.maison = new Maison({ settings: this.settings, log: (m, imp) => this.log(m, imp) });   // la maison (PLAN 7 bis)
+    const majMaison = () => { if (this.maison.on) this.maison.rafraichir().catch((e) => this.log('Maison : inventaire impossible (' + e.message + ')')); };
+    setTimeout(majMaison, 3000); setInterval(majMaison, 10 * 60000);                // inventaire de la maison, relu toutes les 10 min
     this._heard = []; this._turnN = 0;           // ce que Timothée a dit, horodaté (verrou des écritures dans le CRM)
     this.car = null;                             // mode voiture (PLAN 2 quater, C5)
     this.oreille = new Oreille();                // reconnaît « Wilson » en voiture (empreintes de la voix de Timothée)
@@ -248,6 +250,7 @@ class App {
     }
     if (s.face !== this.face.styleName) this.face.setStyle(s.face);
     this.eco.setSpeed(s.ecoSpeed);
+    if ((key === 'haUrl' || key === 'haToken') && this.maison.on) this.maison.rafraichir().catch(() => {});
     if (key === 'apiKey' || key === 'model') {          // nouvelle clé : nouveau quota, on repart de zéro
       this.quotaUntil = 0; this.ecoQuotaUntil = 0; this.brain.authMode = this.brain.modelUsed = this.brain.level = null; this.brain.refused = {}; this.brain.think = false; this.brain.proactive = false; this.brain._save(); this.eco.modelUsed = null; this.log('Clé ou modèle changé');
     }
@@ -824,8 +827,17 @@ Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat 
 - Si un nom de client, un chiffre ou une date que tu as entendu te semble douteux, ne devine pas : dis ce que tu as compris et demande si c'est bien ça (« Tu parles de Franck Monvoisin, chez AD2M ? »), surtout avant de préparer une écriture.
 - Tu ne sais que ce que disent les réponses du CRM : si un détail demandé n'y est pas (le contenu d'une commande, par exemple), ${eco ? 'utilise l\'outil "question"' : 'appelle crm_question pour le chercher'} au lieu de le reconstituer.
 `;
-    const maisonTxt = !maison ? '' : `
-La maison : tu pilotes les lumières, la télé et l'enceinte par Home Assistant (grande lumière salon, lumière jaune salon, éclairage balcon, télé ; applis de la télé : Netflix, YouTube, Prime Video). Quand on te demande d'allumer, d'éteindre, de régler ou si quelque chose est allumé, ${eco ? 'remplis le champ "maison"' : 'appelle maison avec la demande complète, sans phrase d\'attente'}, puis dis le résultat en quelques mots. Pour une appli sur la télé, la demande est « allume Netflix » (ou YouTube, Prime Video). Ne dis jamais que c'est fait avant la réponse de Home Assistant. Si Home Assistant ne trouve pas, ne harcèle pas Timothée pour un nom exact : réessaie toi-même avec la liste reçue, et s'il demande une chose impossible (un programme précis), dis simplement ce que tu peux faire.
+    const inv = maison && !eco ? this.maison.texteInventaire() : '';
+    const maisonTxt = !maison ? '' : eco ? `
+La maison : tu pilotes les lumières, la télé et l'enceinte par Home Assistant. Quand on te demande d'agir sur la maison ou son état, remplis le champ "maison". Ne dis jamais que c'est fait avant la réponse de Home Assistant.
+` : `
+La maison (Home Assistant) : tu comprends ce que Timothée veut, même dit à sa façon (« mets un peu de lumière », « coupe tout au salon », « mets la radio », « je veux regarder Netflix », « baisse un peu »), et tu agis avec maison_commande (un appel par appareil), ou maison_etat pour savoir ce qui est allumé.
+Appareils${inv ? ' (état au début de la conversation)' : ''} :
+${inv || '(inventaire pas encore lu : appelle maison_etat)'}
+- Demande claire : agis tout de suite, sans phrase d'attente ni confirmation, puis dis le résultat en quelques mots (« C'est allumé. »). Ne dis jamais que c'est fait avant la réponse.
+- Demande floue (quelle lampe, quelle radio, quel appareil, « mets de la musique ») : pose UNE question courte avec les choix possibles (« La grande lumière ou la lampe jaune ? »). Utilise le contexte : « éteins-la » = l'appareil dont on vient de parler ; « le salon » = tous les appareils de la pièce.
+- Télé : pour une appli (Netflix, YouTube…) allume d'abord la télé si elle est éteinte, puis action appli sur la Télé. Radio : action radio avec le nom de la station, sur l'enceinte par défaut (sur la télé s'il le demande). Tu ne peux pas choisir un film ou une émission précise : dis-le simplement.
+- Si une action échoue, explique simplement pourquoi et propose ce qui est possible.
 `;
     const voiture = !car ? '' : `
 En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (caméra coupée en voiture).
@@ -1144,6 +1156,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     for (const c of calls) {
       const a = c.args || {};
       if (CRM_TOOL_NAMES.includes(c.name)) { this._crmTool(c); continue; }     // réponse envoyée quand le CRM a répondu
+      if (MAISON_TOOL_NAMES.includes(c.name)) { this._maisonCmd(c); continue; } // réponse envoyée quand Home Assistant a agi
       let out = { result: 'ok' }, silent = true;
       switch (c.name) {
         case 'exprimer_emotion': {
@@ -1351,7 +1364,7 @@ Nous sommes ${fmtDate()}.${bat}`;
   }
 
   // ---------- CRM à la voix (PLAN 2 quater) ----------
-  _extraTools() { return [...(this.crm.on ? CRM_TOOLS : []), ...(this.maison.on ? [MAISON_TOOL] : [])]; }
+  _extraTools() { return [...(this.crm.on ? CRM_TOOLS : []), ...(this.maison.on ? MAISON_TOOLS : [])]; }
 
   // Ce que Timothée dit, horodaté, avec le numéro du tour : le verrou n'accepte qu'un « oui » d'un tour APRÈS la relecture (C2).
   _noteHeard(text, whole = false) {
@@ -1450,6 +1463,21 @@ Nous sommes ${fmtDate()}.${bat}`;
     if (res.ok) this.face.play('nod');
     const liste = res.appareils ? ` Appareils de la maison et leur état : ${res.appareils}. Si l'un correspond à sa demande, rappelle tout de suite maison avec ce nom exact sans lui redemander ; si c'était une question d'état, réponds avec cette liste.` : '';
     this.brain.respond([{ id: call.id, name: call.name, response: { result: `${res.ok ? 'Fait' : 'Échec'} — Home Assistant : « ${res.dire} ».${liste} ${res.ok ? 'Dis-le en quelques mots.' : ''}`.trim() } }]);
+  }
+
+  // La maison (PLAN 7 bis, D7) : Wilson a compris la demande ; l'appli agit et lui rend le résultat.
+  async _maisonCmd(call) {
+    const conv = this.convId, ctl = new AbortController(), t0 = performance.now(), a = call.args || {};
+    this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
+    let info, ok = false;
+    try {
+      if (call.name === 'maison_etat') { info = await this.maison.etat(a.appareils || [], ctl.signal); ok = true; }
+      else { const r = await this.maison.commande(a, ctl.signal); info = r.info; ok = r.ok; }
+    } catch (e) { if (!this._searches.has(call.id)) return; info = 'Home Assistant ne répond pas.'; }
+    if (conv !== this.convId || !this._searches.has(call.id)) return;
+    this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
+    if (ok && call.name === 'maison_commande') this.face.play('nod');
+    this.brain.respond([{ id: call.id, name: call.name, response: { result: `${ok ? 'OK' : 'Échec'} : ${info}` } }]);
   }
 
   async _crmTool(call) {

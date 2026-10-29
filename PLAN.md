@@ -196,6 +196,7 @@ Constat du 25/10/26 : aucun Home Assistant sur le réseau (box Free, 192.168.1.x
 | D4 | Wilson joint Home Assistant partout (maison, voiture). | Adresse https gratuite par Tailscale (variante à choisir : privée, avec l'appli Tailscale sur téléphone et tablette ; ou publique, protégée par le mot de passe de Home Assistant). Nabu Casa écarté (payant). |
 | D5 | Sécurité. | Compte Home Assistant créé par Timothée ; jeton d'accès créé et collé par lui dans Wilson (jamais dans le dépôt) ; comptes Google Cloud / Tailscale : consentements donnés par lui. |
 | D6 | Accès de Claude au PC. | Extension Claude dans Chrome (en place le 25/10/26) + appli Claude de bureau avec « Computer use » (pour VirtualBox) ; téléchargements seulement avec l'accord de Timothée ; fenêtres d'administrateur Windows validées par lui. |
+| D7 | Wilson comprend la maison (demande du 29/10/26 : « on peut dire à peu près tout et n'importe quoi […] Wilson doit comprendre ou poser des questions »). | C'est Gemini (Wilson) qui comprend, pas les phrases toutes faites de Home Assistant : il reçoit l'inventaire de la maison (noms, pièces, types, possibilités, état) et pilote avec deux outils — `maison_etat` (état détaillé) et `maison_commande` (appareil + action parmi une liste sûre : allumer, éteindre, luminosité, volume, muet, lecture/pause/suivant, appli de la télé, radio, clignoter…). Radio : Radio Browser (gratuit) → diffusée sur l'enceinte ou la télé (Chromecast). Demande floue (quelle lampe, quelle radio, quel appareil) → une question courte ; demande claire → il agit sans demander. Toute nouvelle chose ajoutée dans Home Assistant apparaît seule dans l'inventaire. |
 
 Avancement (25/10/26, 14h55) :
 - Fait : VirtualBox 7.2.22 installé ; image Home Assistant OS 18.3 ; machine virtuelle « HomeAssistant » créée et démarrée par
@@ -245,14 +246,22 @@ Avancement (25/10/26, 14h55) :
   l'assistant échoue et que la demande nomme un script (Netflix, YouTube, Prime Video), Wilson le lance lui-même
   (`/api/services/script/turn_on`), jamais sur « éteins / arrête ». Faire clignoter une lumière : pas fait (abandonné par
   Timothée).
-- Reste : Tailscale sur le téléphone (VPN permanent) ; nouvel essai à la voix ; Freebox et Google Home (enceinte) en
+- **1.17.0 (29/10/26, D7)** : Wilson comprend lui-même la maison. Inventaire lu dans Home Assistant (états + modèle :
+  pièce, caché, Chromecast) au démarrage, toutes les 10 min et après un changement de réglage, mis dans sa consigne ;
+  outils `maison_etat` et `maison_commande` (allumer, éteindre, basculer, luminosité — refusée sur une lampe branchée
+  sur prise —, volume, volume ±, muet, lecture/pause/stop/suivant/précédent, source, appli de la télé par la télécommande
+  Android TV, radio par Radio Browser sur un Chromecast/Google Home, clignoter puis retour à l'état de départ). Consigne :
+  demande claire → agir sans confirmation ; floue → une question courte avec les choix ; contexte (« éteins-la »,
+  « le salon »). Le mode économique garde la voie simple (assistant de Home Assistant + raccourcis). Télé Cast renommée
+  « Télé (Chromecast) », télécommande « Télécommande télé ». Tests `e2e_maison.py` 23/23.
+- Reste : Tailscale sur le téléphone (VPN permanent) ; nouvel essai à la voix (radio, Netflix) ; Freebox et Google Home (enceinte) en
   option ; message « proactivity » refusé par gemini-3.8-live (déjà réessayé 24 h plus tard, sans gêne).
 - Reste : appareils découverts ; Google Assistant SDK ; Tailscale (D4) ; jeton ;
   outil `maison` dans Wilson ; ouverture de session Windows automatique (sinon la machine ne redémarre qu'après connexion).
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 29/10/26 : **version 1.16.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
