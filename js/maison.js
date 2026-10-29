@@ -6,7 +6,7 @@
 
 export const MAISON_TOOL = {
   name: 'maison', behavior: 'BLOCKING',
-  description: "Piloter ou interroger la maison (lumières, prises, télé, enceinte du salon) : transmet la demande telle qu'il l'a dite à Home Assistant, qui agit et répond. Exemples : « allume la grande lumière du salon », « éteins l'éclairage du balcon », « est-ce que la lumière jaune salon est allumée ? », « baisse le son de la télé ».",
+  description: "Piloter ou interroger la maison (lumières, télé, enceinte du salon, applis de la télé) : transmet la demande à Home Assistant, qui agit et répond. Exemples : « allume la grande lumière du salon », « éteins les lumières », « allume l'éclairage du balcon », « est-ce que la lumière jaune salon est allumée ? », « monte le son de la télé », « mets la télé en pause » ; une appli sur la télé : « allume Netflix », « allume YouTube », « allume Prime Video ». En cas d'échec, la réponse donne la liste des appareils : réessaie avec le nom exact.",
   parameters: { type: 'OBJECT', properties: { demande: { type: 'STRING', description: 'la demande en français, complète (appareil et action)' } }, required: ['demande'] },
 };
 
@@ -47,8 +47,9 @@ export class Maison {
       this.log(`Maison : « ${demande} » → ${type} « ${speech} »${cibles.length ? ' [' + cibles.join(', ') + ']' : ''} (${((performance.now() - t0) / 1000).toFixed(1)} s)`, true);
       if (type === 'error') {
         const code = (res.data || {}).code || '';
-        if (/no_valid_targets|no_intent_match/.test(code)) return { ok: false, dire: `Home Assistant n'a pas compris : « ${speech || 'demande inconnue'} ». Redis-le avec le nom exact de l'appareil.` };
-        return { ok: false, dire: speech || 'Home Assistant a rencontré une erreur.' };
+        const appareils = await this.appareils(signal).catch(() => '');
+        if (/no_valid_targets|no_intent_match/.test(code)) return { ok: false, dire: `Home Assistant n'a pas compris : « ${speech || 'demande inconnue'} ». Redis-le avec le nom exact de l'appareil.`, appareils };
+        return { ok: false, dire: speech || 'Home Assistant a rencontré une erreur.', appareils };
       }
       return { ok: true, dire: speech || 'C\'est fait.' };
     } catch (e) {
@@ -57,6 +58,16 @@ export class Maison {
       if (e.name === 'AbortError') return { ok: false, dire: 'Home Assistant ne répond pas.' };
       return { ok: false, dire: netErr(e) ? "Je n'arrive pas à joindre la maison : vérifie que Tailscale est allumé sur cet appareil." : 'Home Assistant ne répond pas.' };
     }
+  }
+
+  // Les appareils pilotables et leur état (pour réessayer avec le bon nom, ou répondre « la télé est allumée »).
+  async appareils(signal) {
+    const r = await this._fetch('/api/states', { signal });
+    if (!r.ok || !Array.isArray(r.json)) return '';
+    const ETAT = { on: 'allumé', off: 'éteint', playing: 'en lecture', paused: 'en pause', idle: 'allumé', standby: 'en veille', unavailable: 'injoignable' };
+    const l = r.json.filter((e) => /^(light|media_player|script|cover|fan|climate)\./.test(e.entity_id) && !/^media_player\.tele$/.test(e.entity_id))
+      .map((e) => `${(e.attributes || {}).friendly_name || e.entity_id}${e.entity_id.startsWith('script.') ? ' (appli de la télé : « allume ' + ((e.attributes || {}).friendly_name || '') + ' »)' : ' : ' + (ETAT[e.state] || e.state)}`);
+    return l.slice(0, 40).join(' ; ');
   }
 
   // Vérification depuis les réglages : { ok, msg }.

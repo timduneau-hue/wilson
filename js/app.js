@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOL } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.16.0';
+const VERSION = '1.16.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -825,7 +825,7 @@ Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat 
 - Tu ne sais que ce que disent les réponses du CRM : si un détail demandé n'y est pas (le contenu d'une commande, par exemple), ${eco ? 'utilise l\'outil "question"' : 'appelle crm_question pour le chercher'} au lieu de le reconstituer.
 `;
     const maisonTxt = !maison ? '' : `
-La maison : tu pilotes les lumières, les prises, la télé et l'enceinte par Home Assistant (éclairage balcon, lumière jaune salon, grande lumière salon, télé). Quand on te demande d'allumer, d'éteindre, de régler ou si quelque chose est allumé, ${eco ? 'remplis le champ "maison"' : 'appelle maison avec la demande complète, sans phrase d\'attente'}, puis dis le résultat en quelques mots. Ne dis jamais que c'est fait avant la réponse de Home Assistant.
+La maison : tu pilotes les lumières, la télé et l'enceinte par Home Assistant (grande lumière salon, lumière jaune salon, éclairage balcon, télé ; applis de la télé : Netflix, YouTube, Prime Video). Quand on te demande d'allumer, d'éteindre, de régler ou si quelque chose est allumé, ${eco ? 'remplis le champ "maison"' : 'appelle maison avec la demande complète, sans phrase d\'attente'}, puis dis le résultat en quelques mots. Pour une appli sur la télé, la demande est « allume Netflix » (ou YouTube, Prime Video). Ne dis jamais que c'est fait avant la réponse de Home Assistant. Si Home Assistant ne trouve pas, ne harcèle pas Timothée pour un nom exact : réessaie toi-même avec la liste reçue, et s'il demande une chose impossible (un programme précis), dis simplement ce que tu peux faire.
 `;
     const voiture = !car ? '' : `
 En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (caméra coupée en voiture).
@@ -1448,7 +1448,8 @@ Nous sommes ${fmtDate()}.${bat}`;
     if (conv !== this.convId || !this._searches.has(call.id)) return;
     this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
     if (res.ok) this.face.play('nod');
-    this.brain.respond([{ id: call.id, name: call.name, response: { result: `${res.ok ? 'Fait' : 'Échec'} — Home Assistant : « ${res.dire} ». Dis-le en quelques mots.` } }]);
+    const liste = res.appareils ? ` Appareils de la maison et leur état : ${res.appareils}. Si l'un correspond à sa demande, rappelle tout de suite maison avec ce nom exact sans lui redemander ; si c'était une question d'état, réponds avec cette liste.` : '';
+    this.brain.respond([{ id: call.id, name: call.name, response: { result: `${res.ok ? 'Fait' : 'Échec'} — Home Assistant : « ${res.dire} ».${liste} ${res.ok ? 'Dis-le en quelques mots.' : ''}`.trim() } }]);
   }
 
   async _crmTool(call) {

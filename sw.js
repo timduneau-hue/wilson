@@ -1,5 +1,5 @@
 // Wilson — service worker : l'appli démarre même sans réseau et les modèles de vision ne sont téléchargés qu'une fois.
-const VERSION = 'wilson-1.16.0';
+const VERSION = 'wilson-1.16.1';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'version.json', 'css/wilson.css',
   'js/app.js', 'js/vision-worker.js', 'js/voice.js', 'js/eco.js', 'js/face.js', 'js/audio.js', 'js/brain.js', 'js/vision.js', 'js/memory.js', 'js/sensors.js', 'js/settings.js', 'js/remote.js', 'js/sync.js', 'js/crm.js', 'js/analyste.js', 'js/maison.js', 'js/oreille.js', 'vendor/qrcode/qrcode.js',
