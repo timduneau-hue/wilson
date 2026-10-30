@@ -182,7 +182,7 @@ export class Oreille {
       if (s < 0.25 || s > 1.6) continue;              // trop court (bruit) ou trop long (phrase entière)
       T.push(vecteurs(tr, bruit(tout)));
     }
-    if (T.length < 3) return { ok: false, why: `${T.length} « Wilson » utilisable(s) sur ${noms.length} : recommence au calme, en disant seulement « Wilson »` };
+    if (T.length < 3) return { ok: false, why: `${T.length} « Wilson » utilisable(s) sur ${noms.length} : recommence en disant seulement « Wilson »` };
     // écarts entre ses propres « Wilson » : chacun comparé aux autres
     const pos = [];
     for (let i = 0; i < T.length; i++) { let m = Infinity; for (let j = 0; j < T.length; j++) if (i !== j) m = Math.min(m, dtw(T[i], T[j])); pos.push(m); }
