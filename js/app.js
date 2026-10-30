@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.18.4';
+const VERSION = '1.18.5';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -347,7 +347,7 @@ class App {
     const dit = this._entenduRecent(), n = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (!dit.trim()) return '';                                                      // pas de transcription : on ne peut pas juger
     const d = n(dit), a = c.args || {};
-    if (c.name === 'regarder') return /regard|vois|voir|montr|couleur|\blis\b|lire|decri|habill|c'est quoi|qu'est-ce que c|ca ressemble|photo|tiens|devant toi|camera/.test(d) ? '' : 'regarder';
+    if (c.name === 'regarder') return /regard|vois|voir|montr|couleur|\blis\b|lire|decri|habill|qu.?est.?ce que|qu.?est.?ce qu|c.?est quoi|quoi ca|\bmain\b|tiens|ressemble|photo|devant toi|camera|doigts|reconnai|qui est|quelle marque|ceci|cela|combien d|objet|porte|tenue|coiffure/.test(d) ? '' : 'regarder';
     if (['crm_client', 'itineraire', 'appeler'].includes(c.name)) {
       const mots = n(a.client || '').split(/[^a-z0-9]+/).filter((m) => m.length >= 3);
       if (mots.some((m) => d.includes(m) || d.includes(m.slice(0, 4)))) return '';
