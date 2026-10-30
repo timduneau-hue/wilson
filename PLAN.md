@@ -349,6 +349,12 @@ Google, Home Assistant ou des services publics sans compte.
 Mode économique : ces outils restent au mode direct (le mode économique est un secours) ; à voir plus tard.
 Fait le 30/10/26 (**1.20.0**) : `js/outils.js`, écran `#ecran`, minuteurs `#minuteurs` ; tests `e2e_outils.py` 19/19.
 
+Journal du 30/10/26, 10h50-10h55 (**1.20.1**) : outils de l'écran utilisés (panda, montgolfière, lave-vaisselle). Prénom
+en veille : « il est quelle heure, Wilson ? » transcrit « … où il sonne ? » → refusé. La consigne de transcription dit
+que le prénom est souvent au début ou à la fin et donne ses déformations ; `prenomDans` reconnaît « où il sonne »,
+« ouil son », « vil son »… ; la demande transmise prévient qu'elle peut être approximative. Images : d'abord l'article
+du même nom (« vaisselle »), puis la recherche (avait donné « Marche en avant »).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 30/10/26 : **version 1.20.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
