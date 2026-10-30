@@ -332,9 +332,26 @@ Journal du 30/10/26, 10h20-10h27 (**1.19.3**) : le prénom du canapé marche («
 réponse, probablement le Wi-Fi du balcon) → l'outil relance la liaison de l'appareil dans Home Assistant (rechargement
 de ses intégrations) et sinon dit de débrancher/rebrancher la prise.
 
+## 7 quater. Plus d'outils (demande de Timothée, 30/10/26)
+
+« Ajoute plus de fonctions à Wilson qui peuvent être utiles […] afficher à l'écran des choses qu'on lui demande, mais pas
+seulement : il faut qu'il soit plus outillé. » Tout reste gratuit, sans nouvelle clé, et rien ne part ailleurs que chez
+Google, Home Assistant ou des services publics sans compte.
+
+| # | Outil | Ce qu'il fait |
+|---|-------|---------------|
+| F1 | `afficher` | Grand écran par-dessus le visage : titre, texte, liste à puces ou étapes numérotées, et une image cherchée sur Wikipédia (« montre-moi un koala », « affiche la recette », « écris-moi la liste »). Fermé d'un toucher, par « ferme l'écran » (`fermer_ecran`) ou au bout de quelques minutes. Wilson dit l'essentiel à voix haute et met le détail à l'écran. |
+| F2 | `minuteur` | « Mets un minuteur de 10 minutes pour les pâtes » : compte à rebours visible en haut de l'écran (plusieurs à la fois), sonnerie et voix de la tablette à la fin, même en veille ; annuler, liste. Gardés si l'appli redémarre. |
+| F3 | `rappel` | « Rappelle-moi à 18h de sortir les poubelles » : à l'heure dite, sonnerie, phrase dite et carte à l'écran (tablette allumée). Annuler, liste. |
+| F4 | `meteo` | Météo actuelle et des prochains jours (Open-Meteo, gratuit, sans clé), ville des réglages par défaut ; carte à l'écran (jours, températures, pluie). Plus besoin de recherche Internet pour la météo. |
+| F5 | `courses` | Liste de courses de Home Assistant (partagée avec son appli) : ajouter, retirer, cocher, lire, afficher. Sans Home Assistant : liste gardée sur l'appareil. |
+
+Mode économique : ces outils restent au mode direct (le mode économique est un secours) ; à voir plus tard.
+Fait le 30/10/26 (**1.20.0**) : `js/outils.js`, écran `#ecran`, minuteurs `#minuteurs` ; tests `e2e_outils.py` 19/19.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 30/10/26 : **version 1.20.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

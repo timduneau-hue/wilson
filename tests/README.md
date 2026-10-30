@@ -8,7 +8,7 @@ pip install playwright && playwright install chromium   # une fois
 ./make_fixtures.sh                                       # fausses vidéos de caméra (.y4m) à partir des photos
 python3 make_voix.py                                     # voix de synthèse pour l'oreille du mode voiture (espeak-ng + mbrola-fr1/fr4)
 cd .. && python3 -m http.server 8765 --bind 127.0.0.1 &  # servir l'appli (dossier racine du dépôt)
-cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py e2e_attention.py e2e_sync.py e2e_vision_health.py e2e_crm.py e2e_car.py e2e_journal_2510.py e2e_route.py e2e_question.py e2e_maison.py e2e_adresse.py; do python3 $t; done
+cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py e2e_attention.py e2e_sync.py e2e_vision_health.py e2e_crm.py e2e_car.py e2e_journal_2510.py e2e_route.py e2e_question.py e2e_maison.py e2e_adresse.py e2e_outils.py; do python3 $t; done
 node apps_script_unit.js                                 # script Apps Script du journal, avec une fausse feuille
 node oreille_unit.mjs                                    # oreille du mode voiture sur les voix de synthèse
 node maison_unit.mjs                                     # module maison (faux Home Assistant)
@@ -45,3 +45,4 @@ Les suites autres que `e2e_gaze.py`, `vision_run.py` et `jank.py` bloquent les m
 sans carte graphique) : le regard y est simulé (`listenMode: 'toujours'` ou `vision.forceLook`).
 | `e2e_maison.py`, `maison_unit.mjs` | La maison (PLAN 7 bis, D7) : outils maison_etat / maison_commande seulement si adresse + jeton, inventaire dans la consigne (sans prises cachées ni réglages), allumer, luminosité refusée sur prise, volume, appli Netflix (télécommande Android TV), radio (Radio Browser → Chromecast, pas de m3u8), clignoter (retour à l'état de départ), appareil introuvable, Tailscale éteint, jeton refusé, voie simple du mode économique |
 | `e2e_adresse.py` | Voir ce qu'il fait, savoir à qui on parle (PLAN 7 ter) : pastille d'action (sablier, ✓, ✗), pas de relance pour « Louis, viens manger », une remarque en l'air ou plusieurs visages ; « Wilson » du canapé (oreille, sans regard) : discussion ouverte, verrou du prénom, pas de veille ; reprise d'une discussion en veille |
+| `e2e_outils.py` | Plus d'outils (PLAN 7 quater) : afficher (puces, étapes, image Wikipédia), fermer l'écran, minuteurs (affichés, sonnerie et voix, annuler), rappels (heure passée refusée, alarme), météo Open-Meteo (texte et carte), liste de courses Home Assistant |
