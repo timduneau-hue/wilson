@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.18.2';
+const VERSION = '1.18.3';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -462,6 +462,7 @@ class App {
     if (reason === 'apres_appel') this.brain.sendText(this._apresAppelTexte());
     if (reason === 'apres_appel_entrant') this.brain.sendText(this._apresAppelEntrantTexte());
     if (reason === 'reponse_tardive' && this._lateText) this.brain.sendText(this._lateText);
+    if (reason === 'prenom' && this._wakeText) { this.brain.sendText(this._wakeText); } this._wakeText = null;
     if (this.netWait && this.netWait.start) this._netBack();          // réveillé sans réseau : c'est reparti
     this.lastActivity = performance.now();
   }
@@ -934,7 +935,7 @@ Nous sommes ${fmtDate()}.${bat}`;
         else this._ecoFrame(i16);
         return;
       }
-      if (this.state === 'conversation' && this.paused && !this.car && this.oreille.ready && !this.speaking && performance.now() - this.playEndAt > 800) this.oreille.feed(f32, this.audio.speaking);
+      if (this.state === 'conversation' && (this.paused || this._byName) && !this.car && this.oreille.ready && !this.speaking && performance.now() - this.playEndAt > 800) this.oreille.feed(f32, this.audio.speaking);
       if (this.state !== 'conversation' || !this.brain.open) return;
       const now = performance.now();
       if (this.voice.speaking) return;                                 // sa voix de secours (réseau…) ne part pas vers Gemini
@@ -1344,37 +1345,44 @@ Nous sommes ${fmtDate()}.${bat}`;
   // L'oreille a reconnu « Wilson » : réveil, avec le début de la phrase.
   _onName(d) {
     if (this.settingsOpen) return;
-    if (!this.car && this.state === 'conversation' && this.paused) {           // E3 : en veille faute de regard, « Wilson » reprend la discussion
-      if (this._nomEnCours || !this.settings.apiKey) return;
-      this._nomEnCours = true; const pcm = this.audio.recent(3500);
-      this.eco.nomDit({ key: this.settings.apiKey, audio: pcm }).then((oui) => {
-        this.log(`Oreille (maison, discussion en veille) : écart ${d.score.toFixed(1)} → Gemini : ${oui ? 'oui' : 'non'}`);
-        if (!oui || this.state !== 'conversation' || !this.paused) return;
-        this._byName = true; this._resume(); if (this.mode === 'live' && this.brain.open) this.brain.sendAudio(this.audio.recent(4500));
-      }).catch(() => {}).finally(() => { this._nomEnCours = false; });
-      return;
-    }
+    if (!this.car) { if (this.state === 'veille' || (this.state === 'conversation' && (this.paused || this._byName))) this._nomMaison(d); return; }
     if (this.state !== 'veille') return;
-    if (!this.car) { this._nomMaison(d); return; }
     this.log(`Entendu « Wilson » (oreille : écart ${d.score.toFixed(1)}, limite ${d.limite.toFixed(1)})`);
     this.face.play('wake');
     this.startConversation('prenom');
   }
-  // E3 corrigé (journal du 30/10/26, 9h : 15 réveils pour rien en 8 min, télé et famille) : à la maison, l'oreille ne fait
-  // que proposer ; Gemini écoute le son et confirme que quelqu'un a dit « Wilson » avant tout réveil (rien à l'écran sinon).
+  // E3 (journal du 30/10/26) : à la maison, l'oreille ne fait que proposer. On attend la fin de la phrase, puis Gemini
+  // Flash-Lite écoute toute la phrase (8 s au plus) : est-ce qu'on appelle « Wilson », et que lui demande-t-on ?
+  // La demande est transmise en texte à la discussion (le son de loin, avec la télé, était souvent mal compris : il
+  // fallait répéter 5 fois) ; rien ne s'affiche si ce n'était pas pour lui. 40 vérifications par heure au plus.
   async _nomMaison(d) {
     if (this._nomEnCours || !navigator.onLine || !this.settings.apiKey) return;
     const now = Date.now(); this._avis = (this._avis || []).filter((t) => now - t < 3600000);
     if (this._avis.length >= 40) { if (!this._avisPlein) { this._avisPlein = true; this.log('Oreille (maison) : 40 vérifications cette heure-ci, j\'arrête jusqu\'à la suivante'); } return; }
     this._avis.push(now); this._avisPlein = false; this._nomEnCours = true;
-    const pcm = this.audio.recent(3500);
     try {
-      const oui = await this.eco.nomDit({ key: this.settings.apiKey, audio: pcm });
-      this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini : ${oui ? 'oui, « Wilson »' : 'non'}`);
-      if (oui && this.state === 'veille' && !this.settingsOpen) { this._wakePcm = this.audio.recent(5000); this.face.play('wake'); this.startConversation('prenom'); }
+      const t0 = performance.now();                                    // fin de la phrase : 0,7 s de silence (4 s au plus)
+      while (performance.now() - t0 < 4000 && (this.audio.speaking || performance.now() - this.audio.lastVoicedAt < 700)) await new Promise((r) => setTimeout(r, 100));
+      const pcm = this.audio.recent(Math.min(8000, performance.now() - t0 + 3000));
+      const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: pcm });
+      this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini : ${r.appel ? `oui, « Wilson »${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non'}`, r.appel);
+      if (!r.appel || this.settingsOpen) return;
+      if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) {      // déjà en discussion : la demande part tout de suite
+        this._byName = true; if (this.paused) this._resume();
+        this.brain.sendText(this._texteDeLoin(r.demande)); this.lastActivity = performance.now();
+        return;
+      }
+      if (this.state !== 'veille') return;
+      this._wakeText = this._texteDeLoin(r.demande); this._wakePcm = new Int16Array(0);
+      this.face.play('wake'); this.startConversation('prenom');
     } catch (e) { this.log('Oreille (maison) : vérification impossible (' + e.message + ')'); }
     finally { this._nomEnCours = false; }
   }
+  _texteDeLoin(demande) {
+    return demande ? `[On vient de te parler de loin, sans te regarder (Wilson, du canapé par exemple) : « ${demande} ». Fais-le ou réponds maintenant, brièvement.]`
+      : '[On vient de t\'appeler « Wilson » de loin, sans te regarder : dis seulement « Oui ? » et écoute.]';
+  }
+
   // Chaque phrase entendue en voiture : son écart avec les empreintes (pour régler l'oreille d'après le journal).
   _oreilleLog(r) {
     if (r.score === Infinity || !this.car) return;                    // à la maison, la vérification par Gemini est notée à la place

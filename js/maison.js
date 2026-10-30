@@ -114,7 +114,7 @@ export class Maison {
   // Pour la consigne de Wilson : une ligne par appareil.
   texteInventaire() {
     if (!this.inv || !this.inv.length) return '';
-    return this.inv.filter((e) => e.domaine !== 'remote').map((e) => `- ${e.nom} [${e.id}] : ${TYPE[e.domaine]}${e.piece ? ', ' + e.piece : ''} ; ${this._possible(e)} ; actuellement ${this._decrire(e)}`).join('\n');
+    return this.inv.filter((e) => e.domaine !== 'remote' && !/^script\.reveil/.test(e.id)).map((e) => `- ${e.nom} [${e.id}] : ${TYPE[e.domaine]}${e.piece ? ', ' + e.piece : ''} ; ${this._possible(e)} ; actuellement ${this._decrire(e)}`).join('\n');
   }
 
   _trouver(inv, q) {
@@ -179,6 +179,7 @@ export class Maison {
       switch (action) {
         case 'allumer':
           if (d === 'script' || d === 'scene') { await svc(d, 'turn_on'); return { ok: true, info: `${e.nom} lancé.` }; }
+          if ((d === 'media_player' || d === 'remote') && !(await this._reveiller(e, inv, svc))) return { ok: false, info: this.TELE_COUPEE };
           if (d === 'cover') { await svc('cover', 'open_cover'); return { ok: true, info: await apres() }; }
           await svc(onoff || 'homeassistant', 'turn_on'); return { ok: true, info: await apres(e, (x) => x !== 'off' && x !== 'unavailable') };
         case 'eteindre':
@@ -224,6 +225,7 @@ export class Maison {
     const remote = e.domaine === 'remote' ? e : inv.find((x) => x.domaine === 'remote' && (!e.piece || x.piece === e.piece)) || inv.find((x) => x.domaine === 'remote');
     if (!app) return { ok: false, info: `L'appli « ${valeur} » n'est pas installée sur la télé, ou je ne sais pas l'ouvrir. Applis possibles : ${APPLIS.map((x) => x[3]).join(', ')}.` };
     if (!remote) return { ok: false, info: 'Je ne trouve pas la télécommande de la télé dans Home Assistant.' };
+    if (!(await this._reveiller(remote, inv, svc))) return { ok: false, info: this.TELE_COUPEE };
     let r = await this._etatDe(remote.id);
     if (!r || r.state !== 'on') {                                                    // télé éteinte : on l'allume, puis on attend qu'elle réponde
       await svc('remote', 'turn_on', { entity_id: remote.id });
@@ -237,6 +239,19 @@ export class Maison {
     const vu = fin && (fin.attributes || {}).current_activity;
     if (vu && vu !== app[2] && !/launcher/.test(vu)) await svc('remote', 'send_command', { entity_id: remote.id, command: 'HOME' }).catch(() => {});
     return { ok: false, info: `La télé n'a pas ouvert ${app[3]} (écran actuel : ${vu || 'inconnu'}).` };
+  }
+  // Télé en veille profonde (réseau coupé, « injoignable ») : réveil par le réseau (script « Réveil télé » de Home Assistant,
+  // paquet Wake-on-LAN), puis on attend qu'elle réponde. false si elle reste injoignable.
+  get TELE_COUPEE() { return "La télé est en veille profonde, coupée du réseau : je ne peux pas l'allumer. Dis-lui de l'allumer à la télécommande ; pour que je puisse le faire la prochaine fois, il faut activer « Démarrage à distance » dans les réglages réseau de la télé."; }
+  async _reveiller(e, inv, svc) {
+    const x = await this._etatDe(e.id).catch(() => null);
+    if (x && x.state !== 'unavailable') return true;
+    const sc = inv.find((y) => y.domaine === 'script' && /^script\.reveil/.test(y.id));
+    if (!sc) return false;
+    this.log(`Maison : ${e.nom} injoignable → ${sc.nom}`);
+    await svc('script', 'turn_on', { entity_id: sc.id }).catch(() => {});
+    const r = await this._attendre(e.id, (y) => y.state !== 'unavailable', 25000);
+    return !!(r && r.state !== 'unavailable');
   }
   async _etatDe(id, signal) { const r = await this._fetch('/api/states/' + id, { signal }); return r.ok ? r.json : null; }
   async _attendre(id, cond, ms) {
