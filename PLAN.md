@@ -292,6 +292,12 @@ Journal du 30/10/26 matin (**1.18.1**) :
 - « Hier, tu m'as dit… » pris pour un prénom (pas de relance) : seuls les prénoms de « Qui vit ici » et les petits noms
   (loulou, maman, papa, chéri…) en tête de phrase comptent.
 
+Journal du 30/10/26, 9h (**1.18.2**) : l'oreille apprise, à la maison, se réveillait sur la télé et la famille (15 réveils
+pour rien en 8 min, écarts 50 à 77 pour une limite de 111) et répondait « Bonjour ! » à « Bon » (verrou ouvert faute de
+transcription). Désormais à la maison l'oreille ne fait que proposer : Gemini Flash-Lite écoute les 3,5 dernières
+secondes et confirme « Wilson » avant tout réveil (40 vérifications par heure au plus) ; rien ne s'affiche sinon.
+Le verrou de transcription reste pour la voiture seulement.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
