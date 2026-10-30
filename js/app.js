@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.18.0';
+const VERSION = '1.18.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -337,14 +337,36 @@ class App {
     if (this.mode === 'live' && this.brain.open && this.audio.speaking) this.brain.sendAudio(this.audio.recent(800));
   }
 
+  // Ce qui a été entendu ces dernières secondes (transcriptions), pour vérifier qu'un outil a bien été demandé.
+  _entenduRecent(ms = 25000) { const now = performance.now(); return (this._heard || []).filter((h) => now - h.t < ms).map((h) => h.text).join(' '); }
+  // Garde-fou (journal du 30/10/26, 08h22 : « avec le siège pupitre, tu sais » → photo + fiche du client « Kevin ») :
+  // Gemini a parfois appelé un outil à partir d'un bruit ou d'une phrase pas pour lui. Pour la photo et les outils qui
+  // portent sur un client, l'outil doit correspondre à ce qu'on a vraiment entendu ; sinon il ne fait rien et se tait.
+  _outilPasDemande(c) {
+    if (this.car && this._gate) return '';
+    const dit = this._entenduRecent(), n = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (!dit.trim()) return '';                                                      // pas de transcription : on ne peut pas juger
+    const d = n(dit), a = c.args || {};
+    if (c.name === 'regarder') return /regard|vois|voir|montr|couleur|\blis\b|lire|decri|habill|c'est quoi|qu'est-ce que c|ca ressemble|photo|tiens|devant toi|camera/.test(d) ? '' : 'regarder';
+    if (['crm_client', 'itineraire', 'appeler'].includes(c.name)) {
+      const mots = n(a.client || '').split(/[^a-z0-9]+/).filter((m) => m.length >= 3);
+      if (mots.some((m) => d.includes(m) || d.includes(m.slice(0, 4)))) return '';
+      if (/client|crm|fiche|commande|devis|appel|chez|rendez|rdv|\blui\b|\belle\b|societe|entreprise|adresse|itineraire|gps|numero/.test(d)) return '';
+      return c.name;
+    }
+    return '';
+  }
+
   // E2 : une phrase restée sans réponse mérite-t-elle une relance ? Seulement une vraie demande pour lui : son prénom, « tu »,
   // une question, un verbe de demande ; jamais si elle commence par le prénom de quelqu'un d'autre (« Louis, viens »).
   _semblePourMoi(t) {
     const x = String(t || '').trim(), low = x.toLowerCase();
     if (/\bwilson\b/i.test(x)) return true;
     const autres = (this.settings.home || '').match(/\b[A-ZÉÈÀÂÎÔ][a-zéèêëàâîïôöûüç-]{2,}\b/g) || [];
-    const prenom = (low.match(/^\s*(?:hé\s+|eh\s+|oh\s+)?([a-zéèêëàâîïôöûüç-]{3,})\s*[,!]/) || [])[1];
-    if (prenom && (autres.some((n) => n.toLowerCase() === prenom) || !/^(oui|non|bon|alors|attends|dis|ok|merci|bonjour|salut|coucou|wilson)$/.test(prenom))) return false;
+    // Un autre prénom (« Qui vit ici ») ou un petit nom (« loulou », « maman »…) en tête de phrase : ce n'est pas pour lui.
+    const tete = (low.match(/^\s*(?:allez\s+|hé\s+|eh\s+|oh\s+)?([a-zéèêëàâîïôöûüç-]{3,})\s*[,!]/) || [])[1];
+    if (tete && (autres.some((n) => n.toLowerCase() === tete) || /^(loulou|maman|papa|chéri|chérie|cheri|cherie|bébé|bebe|mamie|papi|mon cœur|ma puce|doudou|minou)$/.test(tete))) return false;
+    if (/^\s*allez\s+(loulou|maman|papa|chéri|chérie|ma puce|mon cœur)\b/.test(low)) return false;
     if (autres.some((n) => n.toLowerCase() !== 'wilson' && new RegExp('^\\s*' + n.toLowerCase() + '\\b').test(low))) return false;
     if (/^\s*(salut|coucou|bonjour|bonsoir|hello|hey|bonne nuit|merci)\b/.test(low)) return true;      // saluer Wilson en le regardant
     if (/\?/.test(x) || /\b(tu|toi|te|t'|peux-tu|pourrais-tu|sais-tu|est-ce que)\b/.test(low)) return true;
@@ -852,7 +874,7 @@ Appareils${inv ? ' (état au début de la conversation)' : ''} :
 ${inv || '(inventaire pas encore lu : appelle maison_etat)'}
 - Demande claire : agis tout de suite, sans phrase d'attente ni confirmation, puis dis le résultat en quelques mots (« C'est allumé. »). Ne dis jamais que c'est fait avant la réponse.
 - Demande floue (quelle lampe, quelle radio, quel appareil, « mets de la musique ») : pose UNE question courte avec les choix possibles (« La grande lumière ou la lampe jaune ? »). Utilise le contexte : « éteins-la » = l'appareil dont on vient de parler ; « le salon » = tous les appareils de la pièce.
-- Télé : pour une appli (Netflix, YouTube…) allume d'abord la télé si elle est éteinte, puis action appli sur la Télé. Radio : action radio avec le nom de la station, sur l'enceinte par défaut (sur la télé s'il le demande). Tu ne peux pas choisir un film ou une émission précise : dis-le simplement.
+- Télé : pour une appli (Netflix, YouTube, Prime Video, France TV), une seule action appli sur la Télé : elle allume la télé si besoin et vérifie que l'appli s'affiche. Radio : action radio avec le nom de la station, sur l'enceinte par défaut (sur la télé s'il le demande). Tu ne peux pas choisir un film ou une émission précise : dis-le simplement.
 - Si une action échoue, explique simplement pourquoi et propose ce qui est possible.
 `;
     const voiture = !car ? '' : `
@@ -1175,6 +1197,12 @@ Nous sommes ${fmtDate()}.${bat}`;
     if (calls.some((c) => c.name !== 'exprimer_emotion' && c.name !== 'memoriser')) this._toolTurn = this._turnN;
     for (const c of calls) {
       const a = c.args || {};
+      const pasDemande = this._outilPasDemande(c);
+      if (pasDemande) {
+        this.log(`Outil ${c.name} refusé : rien de tel dans ce qui a été dit (« ${this._entenduRecent().slice(-120)} »)`, true);
+        res.push({ id: c.id, name: c.name, response: { result: "Personne ne t'a demandé cela : ce que tu as entendu n'était sans doute pas pour toi (bruit, gens qui parlent entre eux). Ne fais rien et ne dis rien." } });
+        continue;
+      }
       if (CRM_TOOL_NAMES.includes(c.name)) { this._crmTool(c); continue; }     // réponse envoyée quand le CRM a répondu
       if (MAISON_TOOL_NAMES.includes(c.name)) { this._maisonCmd(c); continue; } // réponse envoyée quand Home Assistant a agi
       let out = { result: 'ok' }, silent = true;

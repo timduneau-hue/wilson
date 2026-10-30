@@ -279,6 +279,19 @@ ici ») et jamais avec plusieurs visages ; oreille à la maison quand personne n
 (pas de veille faute de regard), « Wilson » reprend une discussion en veille. Il faut que l'oreille soit apprise
 (Réglages → CRM et voiture → 5 fois « Wilson »). Tests `e2e_adresse.py` 15/15.
 
+Journal du 30/10/26 matin (**1.18.1**) :
+- Netflix ne s'ouvrait pas : la télé Sony n'ouvre pas une appli par son nom de paquet, seulement par son lien
+  (vérifié : Netflix https://www.netflix.com/title, YouTube https://www.youtube.com, Prime Video https://app.primevideo.com,
+  France TV https://www.france.tv ; Disney+, Arte, Canal+, TF1+, Spotify absentes de la télé). L'action appli allume la télé
+  si besoin, attend qu'elle réponde, ouvre le lien et vérifie l'appli à l'écran (sinon échec dit, retour à l'accueil).
+  Scripts Home Assistant netflix/youtube/prime_video passés aux liens. Allumer/éteindre une télé : on attend le
+  changement d'état (jusqu'à 8 s) avant de répondre.
+- « Avec le siège pupitre, tu sais » (famille, pas pour lui) → Gemini avait pris une photo et ouvert la fiche « Kevin ».
+  Garde-fou : photo et outils client (fiche, itinéraire, appel) refusés si rien dans les 25 dernières secondes de
+  transcription ne les demande ; Gemini reçoit « ne fais rien et ne dis rien ».
+- « Hier, tu m'as dit… » pris pour un prénom (pas de relance) : seuls les prénoms de « Qui vit ici » et les petits noms
+  (loulou, maman, papa, chéri…) en tête de phrase comptent.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
