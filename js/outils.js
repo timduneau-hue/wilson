@@ -22,6 +22,9 @@ export const OUTILS = [
   { name: 'courses', behavior: 'BLOCKING',
     description: "Liste de courses de la maison : ajouter (articles), retirer (articles), cocher (articles achetés), lire, afficher (à l'écran), vider (enlève les articles cochés).",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['ajouter', 'retirer', 'cocher', 'lire', 'afficher', 'vider'] }, articles: { type: 'ARRAY', items: S } }, required: ['action'] } },
+  { name: 'idees', behavior: 'BLOCKING',
+    description: "Ses idées (« note cette idée », « écris ça quelque part », « qu'est-ce que j'ai noté ? », « envoie-moi mes idées ») : noter (texte = l'idée mise au propre, sans rien inventer), lire (les dernières), afficher (à l'écran), envoyer (par e-mail à Timothée, avec le lien du document). Elles sont rangées dans le document Google « Wilson — mes idées » de son Drive.",
+    parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['noter', 'lire', 'afficher', 'envoyer'] }, texte: S }, required: ['action'] } },
 ];
 export const OUTILS_NAMES = OUTILS.map((t) => t.name);
 
@@ -29,7 +32,7 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': 
 const $ = (id) => document.getElementById(id);
 const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 const pad = (n) => String(n).padStart(2, '0');
-const KEY_M = 'wilson.minuteurs', KEY_R = 'wilson.rappels', KEY_C = 'wilson.courses';
+const KEY_M = 'wilson.minuteurs', KEY_R = 'wilson.rappels', KEY_C = 'wilson.courses', KEY_I = 'wilson.idees';
 const lire = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch (_) { return d; } };
 const ecrire = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
 
@@ -61,6 +64,7 @@ export class Outils {
       case 'rappel': return this.rappel(a);
       case 'meteo': return this.meteo(a);
       case 'courses': return this.courses(a);
+      case 'idees': return this.idees(a);
       default: return 'Outil inconnu.';
     }
   }
@@ -283,6 +287,41 @@ export class Outils {
     }
     if (!reste.length) return 'La liste de courses est vide.';
     return `Liste de courses (${reste.length}) : ${reste.map((x) => x.name).join(', ')}.${action === 'afficher' || reste.length > 6 ? ' Elle est affichée à l\'écran.' : ''}`;
+  }
+
+  // ---------- F6 : mes idées (document Google par le script de Timothée ; sinon gardées sur l'appareil) ----------
+  async idees({ action, texte = '' }) {
+    const R = this.app.remote, locales = lire(KEY_I, []);
+    const parScript = async (payload) => {
+      if (!R || !R.on) return null;
+      const r = await R.ask(payload);
+      if (r && !r.ok && /action inconnue/.test(r.erreur || '')) return null;               // script pas encore mis à jour
+      return r;
+    };
+    // Les idées gardées sur l'appareil (script pas à jour ou pas de réseau) partent dès que possible.
+    const vider = async () => { const rest = []; for (const x of lire(KEY_I, [])) { const r = await parScript({ action: 'idees_noter', texte: x.texte }).catch(() => null); if (!r || !r.ok) rest.push(x); } ecrire(KEY_I, rest); return rest; };
+    if (action === 'noter') {
+      const t = String(texte).trim(); if (!t) return "Quelle idée ? Demande-lui de la redire.";
+      const r = await parScript({ action: 'idees_noter', texte: t }).catch(() => null);
+      if (r && r.ok) { await vider(); this.log(`Idée notée dans le document : ${t.slice(0, 80)}`, true); return `Idée notée dans le document « Wilson — mes idées » (${r.n} idée(s) en tout). Confirme en une phrase courte.`; }
+      locales.push({ texte: t, t: Date.now() }); ecrire(KEY_I, locales);
+      this.log(`Idée gardée sur la tablette (script pas encore à jour) : ${t.slice(0, 80)}`, true);
+      return `Idée gardée sur la tablette (${locales.length}) : le document Google n'est pas encore relié (le script de Wilson doit être mis à jour). Confirme simplement qu'elle est notée.`;
+    }
+    let liste = locales.map((x) => x.texte), lien = '';
+    const r = await parScript({ action: 'idees_lire', n: 30 }).catch(() => null);
+    if (r && r.ok) { liste = (r.idees || []).map((x) => x.replace(/\s+—\s+\d\d\/\d\d\/\d\d \d\dh\d\d$/, '')).concat(liste); lien = r.lien || ''; }
+    if (action === 'envoyer') {
+      const e = await parScript({ action: 'idees_envoyer' }).catch(() => null);
+      if (e && e.ok) return `E-mail envoyé à Timothée avec ses ${e.n} idée(s) et le lien du document.`;
+      if (!liste.length) return 'Aucune idée notée pour l\'instant.';
+      const corps = encodeURIComponent('Mes idées notées par Wilson :\n\n' + liste.map((x) => '- ' + x).join('\n'));
+      this._montrer(`<ul>${liste.map((x) => `<li>${esc(x)}</li>`).join('')}</ul><p><a class="card-go" style="display:inline-flex;padding:0 22px" href="mailto:?subject=${encodeURIComponent('Mes idées (Wilson)')}&body=${corps}">✉️ Envoyer par e-mail</a></p>`, { titre: '💡 Mes idées' });
+      return "Je ne peux pas encore envoyer l'e-mail moi-même (script de Wilson pas à jour) : un bouton « Envoyer par e-mail » est affiché à l'écran, il appuie dessus. Dis-le-lui.";
+    }
+    if (!liste.length) return 'Aucune idée notée pour l\'instant.';
+    if (action === 'afficher' || liste.length > 5) this._montrer(`<ul>${liste.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${lien ? '<p class="fine">Dans le document Google « Wilson — mes idées ».</p>' : ''}`, { titre: '💡 Mes idées' });
+    return `Ses idées (${liste.length}, la plus récente en dernier) : ${liste.slice(-10).join(' ; ')}.${action === 'afficher' || liste.length > 5 ? ' Affichées à l\'écran.' : ''}`;
   }
 
   // Pour la consigne : ce qui est en cours.

@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.20.1';
+const VERSION = '1.21.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -859,7 +859,7 @@ Ta mémoire : quand on te confie une information durable (prénoms, goûts, anni
 La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
 L'heure et la date : appelle date_et_heure.
 L'écran : quand on te demande de montrer, d'afficher, d'écrire quelque chose, ou quand ta réponse est longue ou pratique à lire (recette, liste, étapes, mot à épeler, chiffres), appelle afficher (avec une image si c'est utile) et ne dis à voix haute que l'essentiel. « Ferme », « enlève ça » : fermer_ecran.
-Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« rappelle-moi à 18h de… » : donne quand au format 2026-10-30T18:00, en calculant la date à partir d'aujourd'hui), meteo (pour la météo, plutôt que chercher), courses (la liste de courses de la maison). Agis sans demander de confirmation quand la demande est claire.${this.outils && this.outils.resume() ? '\n' + this.outils.resume() : ''}`;
+Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« rappelle-moi à 18h de… » : donne quand au format 2026-10-30T18:00, en calculant la date à partir d'aujourd'hui), meteo (pour la météo, plutôt que chercher), courses (la liste de courses de la maison), idees (« note cette idée » : rangée dans son document Google ; « envoie-moi mes idées » : par e-mail). Agis sans demander de confirmation quand la demande est claire.${this.outils && this.outils.resume() ? '\n' + this.outils.resume() : ''}`;
     // CRM à la voix et mode voiture (PLAN 2 quater)
     const travail = !crm ? '' : `
 Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
@@ -880,6 +880,7 @@ La maison (Home Assistant) : tu comprends ce que Timothée veut, même dit à sa
 Appareils${inv ? ' (état au début de la conversation)' : ''} :
 ${inv || '(inventaire pas encore lu : appelle maison_etat)'}
 - Demande claire : agis tout de suite, sans phrase d'attente ni confirmation, puis dis le résultat en quelques mots (« C'est allumé. »). Ne dis jamais que c'est fait avant la réponse.
+- « Éteins la lumière » : si une seule lumière est allumée, c'est celle-là (regarde l'état, ou appelle maison_etat) ; ne demande que s'il y en a plusieurs.
 - Demande floue (quelle lampe, quelle radio, quel appareil, « mets de la musique ») : pose UNE question courte avec les choix possibles (« La grande lumière ou la lampe jaune ? »). Utilise le contexte : « éteins-la » = l'appareil dont on vient de parler ; « le salon » = tous les appareils de la pièce.
 - Télé : pour une appli (Netflix, YouTube, Prime Video, France TV), une seule action appli sur la Télé : elle allume la télé si besoin et vérifie que l'appli s'affiche. Radio : action radio avec le nom de la station, sur l'enceinte par défaut (sur la télé s'il le demande). Tu ne peux pas choisir un film ou une émission précise : dis-le simplement.
 - Si une action échoue, explique simplement pourquoi et propose ce qui est possible.
