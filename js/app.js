@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.22.0';
+const VERSION = '1.22.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -888,6 +888,7 @@ class App {
     const crm = this.crm.on, car = !!this.car, maison = this.maison.on;
     const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch, crm, maison }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
 Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, la ville où vous habitez, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
+Tu parles toujours en français, et tu ne dis jamais à voix haute tes réflexions, ce que tu vas faire avec tes outils ou des remarques sur toi-même (journal du 30/10/26 : « I need to check why the TV… »).
 La fin : si on te dit clairement au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation. Jamais sur un reproche ou une remarque : reste et écoute.
 Tes progrès : quand Timothée fait une remarque sur ta façon de fonctionner (« c'est un bug », « tu devrais… », « j'aimerais que tu… », « ne fais plus ça », une fonction qui manque), appelle remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. Ne prétends pas pouvoir te modifier toi-même sur-le-champ.
 L'heure et la date : appelle date_et_heure.
@@ -1414,23 +1415,36 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       while (performance.now() - t0 < 4000 && (this.audio.speaking || performance.now() - this.audio.lastVoicedAt < 700)) await new Promise((r) => setTimeout(r, 100));
       const pcm = this.audio.recent(Math.min(8000, performance.now() - t0 + 3000));
       const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: pcm });
-      this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini entend « ${(r.texte || '').slice(0, 120)} » → ${r.appel ? `oui, « Wilson »${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non'}`, r.appel);
+      this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini entend « ${(r.texte || '').slice(0, 120)} » → ${r.appel ? `oui, « Wilson »${r.doute ? ' (pas certain)' : ''}${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non' + (r.pourquoi ? ' (' + r.pourquoi + ')' : '')}`, r.appel);
       if (!r.appel) { this._nomCalme = Date.now() + 3000; if (!r.texte && this._nomJetons) this._nomJetons.n = Math.min(10, this._nomJetons.n + 1); return; }   // rien d'intelligible : ne coûte rien
       if (this.settingsOpen) return;
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) {      // déjà en discussion : la demande part tout de suite
         this._byName = true; if (this.paused) this._resume();
-        this.brain.sendText(this._texteDeLoin(r.demande)); this.lastActivity = performance.now();
+        if (r.demande) this.brain.sendText(this._texteDeLoin(r.demande, r.doute)); else this._ecouteSeule();
+        this.lastActivity = performance.now();
         return;
       }
       if (this.state !== 'veille') return;
-      this._wakeText = this._texteDeLoin(r.demande); this._wakePcm = new Int16Array(0);
-      this.face.play('wake'); this.startConversation('prenom');
+      this._wakeText = r.demande ? this._texteDeLoin(r.demande, r.doute) : null; this._wakePcm = new Int16Array(0);
+      this.face.play('wake'); await this.startConversation('prenom');
+      if (!r.demande) this._ecouteSeule();
     } catch (e) { this.log('Oreille (maison) : vérification impossible (' + e.message + ')'); }
     finally { this._nomEnCours = false; }
   }
-  _texteDeLoin(demande) {
-    return demande ? `[On vient de te parler de loin, sans te regarder (« Wilson, … », du canapé par exemple) : « ${demande} ». Fais-le ou réponds maintenant, brièvement. La transcription peut être approximative (de loin) : si elle ne veut rien dire, demande-lui de répéter. Seule exception : si c'est visiblement quelqu'un qui parle de toi à une autre personne, ne dis rien.]`
-      : '[On vient de t\'appeler « Wilson » de loin, sans te regarder : dis seulement « Oui ? » et écoute.]';
+  _texteDeLoin(demande, doute = false) {
+    return `[On vient de te parler de loin, sans te regarder (« Wilson, … », du canapé par exemple) : « ${demande} ». Fais-le ou réponds maintenant, brièvement. La transcription peut être approximative (de loin, télé possible) : si elle ne veut rien dire, demande-lui de répéter. Si la demande est vague sur ce qu'il faut faire (« l'éteindre », « ça », « le mettre ») ou ${doute ? 'si elle est mêlée à d\'autres phrases (on n\'est pas sûr qu\'on t\'ait appelé)' : 'si elle semble venir de la télé'}, n'agis pas sur la maison : demande d'abord de quoi il s'agit (« Tu veux que j'éteigne la grande lumière ? »). Si c'est visiblement quelqu'un qui parle de toi à une autre personne, ne dis rien.]`;
+  }
+  // « Wilson » tout seul (journal du 30/10/26 : 6 « Oui ? » pour rien) : il ne dit plus rien. Une petite note et son
+  // visage qui se réveille ; il écoute la suite, et se rendort sans un mot si personne ne parle dans les 8 s.
+  _ecouteSeule() {
+    const conv = this.convId, t0 = performance.now();
+    try { this.audio.tone('ecoute'); } catch (_) {}
+    this.pill('Je t\'écoute…', 'run', 8000);
+    this.log('« Wilson » tout seul : j\'écoute sans rien dire');
+    setTimeout(() => {
+      if (conv !== this.convId || this.state !== 'conversation' || (this._heardAt || 0) > t0 || this.audio.playing) return;
+      this.log('Appelé sans suite : je me rendors sans rien dire'); this.endConversation('silence');
+    }, 8000);
   }
 
   // Chaque phrase entendue en voiture : son écart avec les empreintes (pour régler l'oreille d'après le journal).
