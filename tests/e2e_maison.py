@@ -54,6 +54,9 @@ async def main():
             if u.endswith('/api/'): body = {'message': 'API running.'}
             elif u.endswith('/api/config'): body = {'location_name': 'Maison', 'version': '2026.10.4'}
             elif u.endswith('/api/states'): body = etats(st)
+            elif '/api/states/' in u:
+                eid = u.split('/api/states/')[1]
+                body = {'entity_id': eid, 'state': 'on', 'attributes': {'current_activity': st.get('activity', 'com.google.android.tvlauncher')}}
             elif u.endswith('/api/template'): await route.fulfill(status=200, headers=H, content_type='text/plain', body=TPL); return
             elif '/api/services/' in u:
                 d = json.loads(req.post_data or '{}'); dom, svc = u.split('/api/services/')[1].split('/')
@@ -63,6 +66,7 @@ async def main():
                     elif svc == 'turn_off': st['grande'] = False
                     elif svc == 'toggle': st['grande'] = not st['grande']
                 if svc == 'volume_set': st['vol'] = d['volume_level']
+                if dom == 'remote' and svc == 'turn_on' and d.get('activity') == 'https://www.netflix.com/title': st['activity'] = 'com.netflix.ninja'
                 body = []
             elif u.endswith('/api/conversation/process'):
                 st['conv'].append(json.loads(req.post_data or '{}'))
@@ -98,6 +102,7 @@ async def main():
         ctx, page, logs = await page_with({**base, 'haUrl': HA, 'haToken': 'jeton-test'})
         await page.wait_for_function('wilson.maison.inv && wilson.maison.inv.length', timeout=8000)
         await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000)
+        await page.evaluate("wilson.continuous = true")               # (pas de fin de conversation pendant les essais)
         c = conns[-1]; fns = [f['name'] for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', [])]
         sysp = c['setup']['systemInstruction']['parts'][0]['text']
         check('Maison reliée : outils maison_etat et maison_commande', 'maison_etat' in fns and 'maison_commande' in fns, str(fns))
@@ -107,7 +112,7 @@ async def main():
 
         async def tool(i, name, args):
             await page.evaluate("([i, n, a]) => wilson._tools([{ id: i, name: n, args: a }])", [i, name, args])
-            for _ in range(40):
+            for _ in range(140):
                 await page.wait_for_timeout(100)
                 for t in c['tool']:
                     for r in t.get('functionResponses', []):
@@ -122,7 +127,11 @@ async def main():
         r = await tool('a4', 'maison_commande', {'appareil': 'media_player.television', 'action': 'volume', 'valeur': '35'})
         check('Volume de la télé : 35 %', any(x[1] == 'volume_set' and abs(x[2]['volume_level'] - 0.35) < 1e-6 for x in st['svc']) and 'volume 35 %' in r, r)
         r = await tool('a5', 'maison_commande', {'appareil': 'Télé', 'action': 'appli', 'valeur': 'Netflix'})
-        check('Appli Netflix : la télécommande Android TV ouvre com.netflix.ninja', ('remote', 'turn_on', {'entity_id': 'remote.tele', 'activity': 'com.netflix.ninja'}) in st['svc'] and 'Netflix' in r, r)
+        check('Appli Netflix : la télécommande ouvre le lien Netflix et vérifie qu\'il est à l\'écran', ('remote', 'turn_on', {'entity_id': 'remote.tele', 'activity': 'https://www.netflix.com/title'}) in st['svc'] and 'Netflix est ouvert' in r, r)
+        r = await tool('a5b', 'maison_commande', {'appareil': 'Télé', 'action': 'appli', 'valeur': 'YouTube'})
+        check('Appli qui ne s\'affiche pas : échec dit honnêtement', r.startswith('Échec') and "n'a pas ouvert YouTube" in r, r)
+        r = await tool('a5c', 'maison_commande', {'appareil': 'Télé', 'action': 'appli', 'valeur': 'Disney+'})
+        check('Appli pas installée (Disney+) : dit tout de suite', r.startswith('Échec') and 'pas installée' in r, r)
         r = await tool('a6', 'maison_commande', {'appareil': 'Enceinte salon', 'action': 'radio', 'valeur': 'France Inter'})
         pm = [x for x in st['svc'] if x[1] == 'play_media']
         check('Radio France Inter : flux AAC (pas le m3u8) joué sur l\'enceinte', pm and pm[-1][2]['entity_id'] == 'media_player.enceinte_salon' and pm[-1][2]['media_content_id'].endswith('.aac') and 'France Inter sur Enceinte salon' in r, str(pm) + r)

@@ -16,7 +16,7 @@ export const MAISON_TOOLS = [
     description: "État actuel de la maison : chaque appareil (lumières, télé, enceinte…) avec sa pièce, s'il est allumé, sa luminosité, son volume, ce qu'il joue. À appeler pour répondre à « qu'est-ce qui est allumé ? », « la télé est allumée ? », ou avant d'agir si tu as un doute.",
     parameters: { type: 'OBJECT', properties: { appareils: { type: 'ARRAY', items: { type: 'STRING' }, description: 'identifiants (light.xxx…) ou noms ; vide = toute la maison' } } } },
   { name: 'maison_commande', behavior: 'BLOCKING',
-    description: "Agit sur UN appareil de la maison. Plusieurs appareils (« les lumières du salon ») : un appel par appareil. Actions : allumer, eteindre, basculer, luminosite (valeur 0 à 100), volume (0 à 100), volume_plus / volume_moins (valeur = nombre de crans, 2 par défaut), muet, son (remettre le son), lecture, pause, stop, suivant, precedent, appli (valeur = Netflix, YouTube, Prime Video, Disney+, Canal+, Arte, France TV, TF1+, Spotify, Molotov… : ouvre l'appli sur la télé), radio (valeur = nom de la station, ex. France Inter, Nostalgie, RTL : la diffuse sur l'enceinte ou sur la télé), source (valeur = entrée), clignoter (valeur = nombre de clignotements, 5 par défaut).",
+    description: "Agit sur UN appareil de la maison. Plusieurs appareils (« les lumières du salon ») : un appel par appareil. Actions : allumer, eteindre, basculer, luminosite (valeur 0 à 100), volume (0 à 100), volume_plus / volume_moins (valeur = nombre de crans, 2 par défaut), muet, son (remettre le son), lecture, pause, stop, suivant, precedent, appli (valeur = Netflix, YouTube, Prime Video ou France TV : allume la télé si besoin et ouvre l'appli), radio (valeur = nom de la station, ex. France Inter, Nostalgie, RTL : la diffuse sur l'enceinte ou sur la télé), source (valeur = entrée), clignoter (valeur = nombre de clignotements, 5 par défaut).",
     parameters: { type: 'OBJECT', properties: {
       appareil: { type: 'STRING', description: "l'identifiant de l'inventaire (light.grande_lumiere_salon…), ou son nom" },
       action: { type: 'STRING', enum: ACTIONS },
@@ -31,13 +31,13 @@ export const MAISON_TOOL = {
   parameters: { type: 'OBJECT', properties: { demande: { type: 'STRING' } }, required: ['demande'] },
 };
 
-// Applis de la télé (Android TV) : nom dit → paquet.
+// Applis de la télé (Android TV) : nom dit → lien qui ouvre l'appli (vérifié sur la télé Sony le 30/10/26) et son paquet.
+// Le nom du paquet seul ne marche pas avec cette télé ; Disney+, Arte, Canal+, TF1+, Spotify n'y sont pas installées.
 const APPLIS = [
-  [/netflix/, 'com.netflix.ninja', 'Netflix'], [/youtube/, 'com.google.android.youtube.tv', 'YouTube'],
-  [/prime|amazon/, 'com.amazon.amazonvideo.livingroom', 'Prime Video'], [/disney/, 'com.disney.disneyplus', 'Disney+'],
-  [/canal/, 'com.canal.android.canal', 'Canal+'], [/arte/, 'tv.arte.plus7', 'Arte'], [/france ?tv|france 2|france 3|francetv/, 'fr.francetv.pluzz', 'France TV'],
-  [/tf1/, 'fr.tf1.mytf1', 'TF1+'], [/spotify/, 'com.spotify.tv.android', 'Spotify'], [/molotov/, 'tv.molotov.app', 'Molotov'],
-  [/plex/, 'com.plexapp.android', 'Plex'], [/twitch/, 'tv.twitch.android.app', 'Twitch'], [/m6/, 'fr.m6.m6replay.by', 'M6+'],
+  [/netflix/, 'https://www.netflix.com/title', 'com.netflix.ninja', 'Netflix'],
+  [/youtube/, 'https://www.youtube.com', 'com.google.android.youtube.tv', 'YouTube'],
+  [/prime|amazon/, 'https://app.primevideo.com', 'com.amazon.amazonvideo.livingroom', 'Prime Video'],
+  [/france ?tv|france ?2|france ?3|francetv|france ?5/, 'https://www.france.tv', 'fr.francetv.pluzz', 'France TV'],
 ];
 const TYPE = { light: 'lumière', switch: 'prise', media_player: 'lecteur', remote: 'télécommande', script: 'raccourci', scene: 'ambiance', cover: 'volet', fan: 'ventilateur', input_boolean: 'interrupteur' };
 const ETAT = { on: 'allumé', off: 'éteint', playing: 'en lecture', paused: 'en pause', idle: 'allumé (rien en cours)', standby: 'en veille', unavailable: 'injoignable', unknown: 'inconnu', buffering: 'chargement', open: 'ouvert', closed: 'fermé' };
@@ -169,18 +169,22 @@ export class Maison {
       if (!r.ok) throw Object.assign(new Error(`Home Assistant a refusé (${r.status}${r.json && r.json.message ? ' : ' + r.json.message : ''})`), { refus: true });
       return r;
     };
-    const apres = async (cible = e) => { await sleep(900); await this.rafraichir(signal).catch(() => {}); const n = (this.inv || []).find((x) => x.id === cible.id) || cible; return `${n.nom} : ${this._decrire(n, true)}`; };
+    const apres = async (cible = e, attendu) => {
+      if (attendu && cible.domaine === 'media_player') await this._attendre(cible.id, (x) => attendu(x.state), 8000);   // une télé met quelques secondes
+      else await sleep(900);
+      await this.rafraichir(signal).catch(() => {}); const n = (this.inv || []).find((x) => x.id === cible.id) || cible; return `${n.nom} : ${this._decrire(n, true)}`;
+    };
     const onoff = ['light', 'switch', 'media_player', 'fan', 'input_boolean', 'remote'].includes(d) ? d : null;
     try {
       switch (action) {
         case 'allumer':
           if (d === 'script' || d === 'scene') { await svc(d, 'turn_on'); return { ok: true, info: `${e.nom} lancé.` }; }
           if (d === 'cover') { await svc('cover', 'open_cover'); return { ok: true, info: await apres() }; }
-          await svc(onoff || 'homeassistant', 'turn_on'); return { ok: true, info: await apres() };
+          await svc(onoff || 'homeassistant', 'turn_on'); return { ok: true, info: await apres(e, (x) => x !== 'off' && x !== 'unavailable') };
         case 'eteindre':
           if (d === 'cover') { await svc('cover', 'close_cover'); return { ok: true, info: await apres() }; }
           if (d === 'script') { await svc('script', 'turn_off'); return { ok: true, info: `${e.nom} arrêté.` }; }
-          await svc(onoff || 'homeassistant', 'turn_off'); return { ok: true, info: await apres() };
+          await svc(onoff || 'homeassistant', 'turn_off'); return { ok: true, info: await apres(e, (x) => x === 'off' || x === 'standby') };
         case 'basculer': await svc(onoff || 'homeassistant', 'toggle'); return { ok: true, info: await apres() };
         case 'luminosite':
           if (d !== 'light') return { ok: false, info: `${e.nom} n'est pas une lumière.` };
@@ -213,16 +217,32 @@ export class Maison {
     }
   }
 
-  // Appli sur la télé : la télécommande Android TV (remote.*) ouvre le paquet ; sinon un raccourci (script) du même nom.
+  // Appli sur la télé : la télécommande Android TV ouvre le lien de l'appli ; on vérifie que l'appli est bien à l'écran.
   async _appli(e, valeur, inv, svc) {
     const v = norm(valeur);
-    const sc = inv.find((x) => x.domaine === 'script' && norm(x.nom) && v.includes(norm(x.nom)));
     const app = APPLIS.find(([re]) => re.test(v));
     const remote = e.domaine === 'remote' ? e : inv.find((x) => x.domaine === 'remote' && (!e.piece || x.piece === e.piece)) || inv.find((x) => x.domaine === 'remote');
-    if (app && remote) { await svc('remote', 'turn_on', { entity_id: remote.id, activity: app[1] }); return { ok: true, info: `${app[2]} s'ouvre sur la télé.` }; }
-    if (sc) { await svc('script', 'turn_on', { entity_id: sc.id }); return { ok: true, info: `${sc.nom} lancé.` }; }
-    if (remote && /^[a-z0-9]+(\.[a-z0-9_]+)+$/i.test(valeur)) { await svc('remote', 'turn_on', { entity_id: remote.id, activity: valeur }); return { ok: true, info: `Appli ${valeur} ouverte.` }; }
-    return { ok: false, info: `Je ne connais pas l'appli « ${valeur} ». Applis connues : ${APPLIS.map((x) => x[2]).join(', ')}.` };
+    if (!app) return { ok: false, info: `L'appli « ${valeur} » n'est pas installée sur la télé, ou je ne sais pas l'ouvrir. Applis possibles : ${APPLIS.map((x) => x[3]).join(', ')}.` };
+    if (!remote) return { ok: false, info: 'Je ne trouve pas la télécommande de la télé dans Home Assistant.' };
+    let r = await this._etatDe(remote.id);
+    if (!r || r.state !== 'on') {                                                    // télé éteinte : on l'allume, puis on attend qu'elle réponde
+      await svc('remote', 'turn_on', { entity_id: remote.id });
+      r = await this._attendre(remote.id, (x) => x.state === 'on', 15000);
+      if (!r || r.state !== 'on') return { ok: false, info: "La télé ne s'est pas allumée à temps : réessaie dans quelques secondes." };
+      await sleep(3000);                                                             // elle vient de démarrer : laisser l'accueil s'afficher
+    }
+    await svc('remote', 'turn_on', { entity_id: remote.id, activity: app[1] });
+    const fin = await this._attendre(remote.id, (x) => (x.attributes || {}).current_activity === app[2], 8000);
+    if (fin && (fin.attributes || {}).current_activity === app[2]) return { ok: true, info: `${app[3]} est ouvert sur la télé.` };
+    const vu = fin && (fin.attributes || {}).current_activity;
+    if (vu && vu !== app[2] && !/launcher/.test(vu)) await svc('remote', 'send_command', { entity_id: remote.id, command: 'HOME' }).catch(() => {});
+    return { ok: false, info: `La télé n'a pas ouvert ${app[3]} (écran actuel : ${vu || 'inconnu'}).` };
+  }
+  async _etatDe(id, signal) { const r = await this._fetch('/api/states/' + id, { signal }); return r.ok ? r.json : null; }
+  async _attendre(id, cond, ms) {
+    const fin = Date.now() + ms; let x = null;
+    while (Date.now() < fin) { x = await this._etatDe(id).catch(() => null); if (x && cond(x)) return x; await sleep(700); }
+    return x;
   }
 
   // Radio : Radio Browser (annuaire libre et gratuit) → flux diffusé sur un lecteur qui sait jouer un lien (enceinte, Chromecast).
@@ -298,7 +318,7 @@ export class Maison {
     const sc = inv.filter((x) => x.domaine === 'script' && norm(x.nom) && d.includes(' ' + norm(x.nom) + ' ')).sort((a, b) => norm(b.nom).length - norm(a.nom).length)[0];
     if (!sc && !(app && remote)) return null;
     const t = sc ? await this._service('script', 'turn_on', { entity_id: sc.id }, signal) : await this._service('remote', 'turn_on', { entity_id: remote.id, activity: app[1] }, signal);
-    const nom = sc ? sc.nom : app[2];
+    const nom = sc ? sc.nom : app[3];
     this.log(`Maison : « ${demande} » → raccourci ${nom} (${t.status})`, true);
     return t.ok ? { ok: true, dire: `C'est lancé : ${nom}.` } : { ok: false, dire: `Je n'ai pas pu lancer ${nom} (erreur ${t.status}).` };
   }
