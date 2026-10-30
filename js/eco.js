@@ -227,7 +227,7 @@ export class EcoBrain {
         if (res.ok) {
           const t = ((((res.json.candidates || [])[0] || {}).content || {}).parts || []).filter((x) => x.text && !x.thought).map((x) => x.text).join(' ');
           let o = null; try { o = JSON.parse(t.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) {}
-          return prenomDans(String((o && o.texte) || t || '').trim());
+          return prenomDans(String(o ? (o.texte || '') : t).trim());
         }
         last = res;
         if (res.status === 400 && /think/i.test(res.msg || '')) continue;
@@ -434,6 +434,6 @@ const PRENOM = /\b(wilson+e?|willson|wil+ ?son|ouil+son+e?|vil+son|whil?son|wils
 export function prenomDans(texte) {
   const t = String(texte || '').trim();
   if (!PRENOM.test(t)) return { appel: false, demande: '', texte: t };
-  const demande = t.replace(new RegExp(PRENOM.source, 'gi'), ' ').replace(/^[\s,.!?;:-]*(hé|eh|oh|dis|allez)?[\s,.!?;:-]*/i, '').replace(/\s*,\s*([.!?]?)\s*$/, '$1').replace(/\s+/g, ' ').trim();
+  const demande = t.replace(new RegExp(PRENOM.source, 'gi'), ' ').replace(/^[\s,.!?;:-]*(hé|eh|oh|dis|allez)?[\s,.!?;:-]*/i, '').replace(/\s*,\s*([.!?]?)\s*$/, '$1').replace(/^(euh|bah|ben|bon)\s*[, ]\s*/i, '').replace(/\s+([.,!?])/g, '$1').replace(/\s+/g, ' ').trim();
   return { appel: true, demande: /[a-zà-ÿ]{2,}/i.test(demande) ? demande : '', texte: t };
 }

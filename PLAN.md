@@ -325,6 +325,13 @@ seulement la phrase ; l'appli cherche le prénom (et ses déformations : Ouilson
 (`prenomDans`, eco.js) ; le journal note ce que Gemini a entendu ; calme de 3 s après un « non » (8 s empêchait de
 répéter).
 
+Journal du 30/10/26, 10h20-10h27 (**1.19.3**) : le prénom du canapé marche (« Allume la lumière du balcon, Wilson »,
+« Euh Wilson, il est quelle heure ? » compris du premier coup). Reste : réserve vidée par des sons sans paroles
+(transcription vide → ne coûte plus) et par l'oreille pendant les discussions (coupée : le direct entend déjà tout) ;
+« texte » vide mal relu ; prise du balcon (192.168.1.187) injoignable depuis 10h26 (Tapo : erreur interne puis plus de
+réponse, probablement le Wi-Fi du balcon) → l'outil relance la liaison de l'appareil dans Home Assistant (rechargement
+de ses intégrations) et sinon dit de débrancher/rebrancher la prise.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).

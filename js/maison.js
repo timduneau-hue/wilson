@@ -175,6 +175,12 @@ export class Maison {
       await this.rafraichir(signal).catch(() => {}); const n = (this.inv || []).find((x) => x.id === cible.id) || cible; return `${n.nom} : ${this._decrire(n, true)}`;
     };
     const onoff = ['light', 'switch', 'media_player', 'fan', 'input_boolean', 'remote'].includes(d) ? d : null;
+    // Prise ou lumière « injoignable » (journal du 30/10/26 : la prise du balcon ne répondait plus) : on relance sa
+    // liaison dans Home Assistant, une fois, avant de dire qu'elle ne répond pas.
+    if ((d === 'light' || d === 'switch') && action !== 'clignoter') {
+      const x = await this._etatDe(id).catch(() => null);
+      if (x && x.state === 'unavailable' && !(await this._relancer(e))) return { ok: false, info: `${e.nom} ne répond pas : la prise a sans doute perdu le Wi-Fi. Il faut la débrancher puis la rebrancher ; si ça revient souvent, elle est trop loin de la box.` };
+    }
     try {
       switch (action) {
         case 'allumer':
@@ -251,6 +257,16 @@ export class Maison {
     this.log(`Maison : ${e.nom} injoignable → ${sc.nom}`);
     await svc('script', 'turn_on', { entity_id: sc.id }).catch(() => {});
     const r = await this._attendre(e.id, (y) => y.state !== 'unavailable', 25000);
+    return !!(r && r.state !== 'unavailable');
+  }
+  async _relancer(e) {
+    const t = await this._fetch('/api/template', { method: 'POST', text: true, body: { template:
+      `{% set l = namespace(v=[]) %}{% for x in device_entities(device_id('${e.id}')) or [] %}{% set c = config_entry_id(x) %}{% if c and c not in l.v %}{% set l.v = l.v + [c] %}{% endif %}{% endfor %}{{ l.v | join(',') }}` } }).catch(() => null);
+    const ids = String((t && t.json) || '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (!ids.length) return false;
+    this.log(`Maison : ${e.nom} injoignable → je relance sa liaison`);
+    for (const c of ids) await this._fetch(`/api/config/config_entries/entry/${c}/reload`, { method: 'POST' }).catch(() => {});
+    const r = await this._attendre(e.id, (y) => y.state !== 'unavailable', 12000);
     return !!(r && r.state !== 'unavailable');
   }
   async _etatDe(id, signal) { const r = await this._fetch('/api/states/' + id, { signal }); return r.ok ? r.json : null; }

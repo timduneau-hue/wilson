@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.19.2';
+const VERSION = '1.19.3';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -935,7 +935,7 @@ Nous sommes ${fmtDate()}.${bat}`;
         else this._ecoFrame(i16);
         return;
       }
-      if (this.state === 'conversation' && (this.paused || this._byName) && !this.car && this.oreille.ready && !this.speaking && performance.now() - this.playEndAt > 800) this.oreille.feed(f32, this.audio.speaking);
+      if (this.state === 'conversation' && this.paused && !this.car && this.oreille.ready && !this.speaking && performance.now() - this.playEndAt > 800) this.oreille.feed(f32, this.audio.speaking);
       if (this.state !== 'conversation' || !this.brain.open) return;
       const now = performance.now();
       if (this.voice.speaking) return;                                 // sa voix de secours (réseau…) ne part pas vers Gemini
@@ -1345,7 +1345,7 @@ Nous sommes ${fmtDate()}.${bat}`;
   // L'oreille a reconnu « Wilson » : réveil, avec le début de la phrase.
   _onName(d) {
     if (this.settingsOpen) return;
-    if (!this.car) { if (this.state === 'veille' || (this.state === 'conversation' && (this.paused || this._byName))) this._nomMaison(d); return; }
+    if (!this.car) { if (this.state === 'veille' || (this.state === 'conversation' && this.paused)) this._nomMaison(d); return; }
     if (this.state !== 'veille') return;
     this.log(`Entendu « Wilson » (oreille : écart ${d.score.toFixed(1)}, limite ${d.limite.toFixed(1)})`);
     this.face.play('wake');
@@ -1373,7 +1373,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       const pcm = this.audio.recent(Math.min(8000, performance.now() - t0 + 3000));
       const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: pcm });
       this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini entend « ${(r.texte || '').slice(0, 120)} » → ${r.appel ? `oui, « Wilson »${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non'}`, r.appel);
-      if (!r.appel) { this._nomCalme = Date.now() + 3000; return; }
+      if (!r.appel) { this._nomCalme = Date.now() + 3000; if (!r.texte && this._nomJetons) this._nomJetons.n = Math.min(10, this._nomJetons.n + 1); return; }   // rien d'intelligible : ne coûte rien
       if (this.settingsOpen) return;
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) {      // déjà en discussion : la demande part tout de suite
         this._byName = true; if (this.paused) this._resume();
