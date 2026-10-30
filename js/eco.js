@@ -209,6 +209,33 @@ export class EcoBrain {
   }
 
   // Second avis de l'oreille du mode voiture : la phrase commence-t-elle par « Wilson » ? (true / false ; requête courte)
+  // À la maison (E3) : appelle-t-on « Wilson » de loin, et que lui demande-t-on ? → { appel, demande }.
+  async appelDeLoin({ key, audio, signal }) {
+    const order = ECO_MODELS.rapide, now = Date.now();
+    const models = [...order.filter((m) => !(this.refused[m] > now)), ...order.filter((m) => this.refused[m] > now)].slice(0, 3);
+    const question = "Enregistrement d'un salon (télé possible en fond, personne parfois loin du micro). Quelqu'un s'adresse-t-il à l'assistant « Wilson » en l'appelant par son prénom (au début ou à la fin de la phrase, même prononcé de loin ou un peu déformé : Wilson, Willson, Ouilsonne) ? Ne compte pas la télé ni une phrase où l'on parle de Wilson à quelqu'un d'autre. Réponds en JSON : {\"appel\": true|false, \"demande\": \"ce qu'on lui demande, en français, sans le prénom (vide s'il n'y a que le prénom)\"}.";
+    const schema = { type: 'OBJECT', properties: { appel: { type: 'BOOLEAN' }, demande: { type: 'STRING' } }, required: ['appel', 'demande'] };
+    let last = null;
+    for (const model of models) {
+      for (const think of [true, false]) {
+        const body = { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio) } }, { text: question }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 120, responseMimeType: 'application/json', responseSchema: schema, ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' } } : {}) } };
+        this.sent.push(performance.now());
+        const res = await this._one(API + model + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, signal);
+        if (res.ok) {
+          const t = ((((res.json.candidates || [])[0] || {}).content || {}).parts || []).filter((x) => x.text && !x.thought).map((x) => x.text).join(' ');
+          let o = null; try { o = JSON.parse(t.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) {}
+          if (o) return { appel: o.appel === true || o.appel === 'true', demande: String(o.demande || '').trim() };
+          return { appel: /"appel"\s*:\s*true|\boui\b/i.test(t), demande: '' };
+        }
+        last = res;
+        if (res.status === 400 && /think/i.test(res.msg || '')) continue;
+        break;
+      }
+    }
+    throw new Error((last && last.msg) || 'pas de réponse');
+  }
+
   async nomDit({ key, audio, signal }) {
     const order = ECO_MODELS.rapide, now = Date.now();
     const models = [...order.filter((m) => !(this.refused[m] > now)), ...order.filter((m) => this.refused[m] > now)].slice(0, 3);

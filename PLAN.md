@@ -298,6 +298,16 @@ transcription). Désormais à la maison l'oreille ne fait que proposer : Gemini 
 secondes et confirme « Wilson » avant tout réveil (40 vérifications par heure au plus) ; rien ne s'affiche sinon.
 Le verrou de transcription reste pour la voiture seulement.
 
+Journal du 30/10/26, 9h20 (**1.18.3**) :
+- « Allumer la lumière jaune » répété 5 fois du canapé : Gemini refusait des appels réels (« non ») et le son de loin,
+  envoyé à la discussion, était mal transcrit (« elle est le meilleur genou Wilson »). Désormais on attend la fin de la
+  phrase, Gemini Flash-Lite écoute toute la phrase (8 s au plus) et rend { appel, demande } ; la demande part en texte à la
+  discussion (« On vient de te parler de loin : … »). Pendant une discussion ouverte par le prénom, l'oreille continue
+  d'écouter : « Wilson, éteins… » repart aussitôt en texte.
+- Télé « injoignable » : la Sony coupe son réseau en veille (Wi-Fi) ; le Wake-on-LAN (intégration `wake_on_lan` ajoutée,
+  script `script.reveil_tele`, MAC 48:5F:99:16:00:AF) ne la réveille pas. Il faut activer **« Démarrage à distance »**
+  sur la télé (Timothée). Wilson l'explique au lieu de dire seulement « injoignable ».
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).

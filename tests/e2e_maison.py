@@ -56,7 +56,7 @@ async def main():
             elif u.endswith('/api/states'): body = etats(st)
             elif '/api/states/' in u:
                 eid = u.split('/api/states/')[1]
-                body = {'entity_id': eid, 'state': 'on', 'attributes': {'current_activity': st.get('activity', 'com.google.android.tvlauncher')}}
+                body = {'entity_id': eid, 'state': 'unavailable' if st.get('tele_coupee') else 'on', 'attributes': {'current_activity': st.get('activity', 'com.google.android.tvlauncher')}}
             elif u.endswith('/api/template'): await route.fulfill(status=200, headers=H, content_type='text/plain', body=TPL); return
             elif '/api/services/' in u:
                 d = json.loads(req.post_data or '{}'); dom, svc = u.split('/api/services/')[1].split('/')
@@ -130,6 +130,10 @@ async def main():
         check('Appli Netflix : la télécommande ouvre le lien Netflix et vérifie qu\'il est à l\'écran', ('remote', 'turn_on', {'entity_id': 'remote.tele', 'activity': 'https://www.netflix.com/title'}) in st['svc'] and 'Netflix est ouvert' in r, r)
         r = await tool('a5b', 'maison_commande', {'appareil': 'Télé', 'action': 'appli', 'valeur': 'YouTube'})
         check('Appli qui ne s\'affiche pas : échec dit honnêtement', r.startswith('Échec') and "n'a pas ouvert YouTube" in r, r)
+        st['tele_coupee'] = True
+        r = await tool('a5t', 'maison_commande', {'appareil': 'Télé', 'action': 'allumer'})
+        st['tele_coupee'] = False
+        check('Télé coupée du réseau : explication (télécommande, « Démarrage à distance »)', r.startswith('Échec') and 'Démarrage à distance' in r, r)
         r = await tool('a5c', 'maison_commande', {'appareil': 'Télé', 'action': 'appli', 'valeur': 'Disney+'})
         check('Appli pas installée (Disney+) : dit tout de suite', r.startswith('Échec') and 'pas installée' in r, r)
         r = await tool('a6', 'maison_commande', {'appareil': 'Enceinte salon', 'action': 'radio', 'valeur': 'France Inter'})
