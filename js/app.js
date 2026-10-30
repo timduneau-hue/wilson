@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.18.3';
+const VERSION = '1.18.4';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -1357,16 +1357,24 @@ Nous sommes ${fmtDate()}.${bat}`;
   // fallait répéter 5 fois) ; rien ne s'affiche si ce n'était pas pour lui. 40 vérifications par heure au plus.
   async _nomMaison(d) {
     if (this._nomEnCours || !navigator.onLine || !this.settings.apiKey) return;
-    const now = Date.now(); this._avis = (this._avis || []).filter((t) => now - t < 3600000);
-    if (this._avis.length >= 40) { if (!this._avisPlein) { this._avisPlein = true; this.log('Oreille (maison) : 40 vérifications cette heure-ci, j\'arrête jusqu\'à la suivante'); } return; }
-    this._avis.push(now); this._avisPlein = false; this._nomEnCours = true;
+    // Économie (journal du 30/10/26 : 40 vérifications épuisées en 15 min de discussions en famille, plus rien ensuite) :
+    // après un « non », on laisse passer 8 s (une conversation enchaîne les faux candidats) ; et une réserve de 6
+    // vérifications qui se recharge d'une par minute (60 par heure au plus, 400 par jour).
+    const now = Date.now();
+    if (now < (this._nomCalme || 0)) return;
+    const B = this._nomJetons || (this._nomJetons = { n: 6, t: now, jour: new Date().toDateString(), total: 0 });
+    B.n = Math.min(6, B.n + (now - B.t) / 60000); B.t = now;
+    if (B.jour !== new Date().toDateString()) { B.jour = new Date().toDateString(); B.total = 0; }
+    if (B.n < 1 || B.total >= 400) { if (!this._avisPlein) { this._avisPlein = true; this.log('Oreille (maison) : réserve de vérifications vide, j\'attends (le regard marche toujours)'); } return; }
+    B.n -= 1; B.total++; this._avisPlein = false; this._nomEnCours = true;
     try {
       const t0 = performance.now();                                    // fin de la phrase : 0,7 s de silence (4 s au plus)
       while (performance.now() - t0 < 4000 && (this.audio.speaking || performance.now() - this.audio.lastVoicedAt < 700)) await new Promise((r) => setTimeout(r, 100));
       const pcm = this.audio.recent(Math.min(8000, performance.now() - t0 + 3000));
       const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: pcm });
       this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini : ${r.appel ? `oui, « Wilson »${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non'}`, r.appel);
-      if (!r.appel || this.settingsOpen) return;
+      if (!r.appel) { this._nomCalme = Date.now() + 8000; return; }
+      if (this.settingsOpen) return;
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) {      // déjà en discussion : la demande part tout de suite
         this._byName = true; if (this.paused) this._resume();
         this.brain.sendText(this._texteDeLoin(r.demande)); this.lastActivity = performance.now();

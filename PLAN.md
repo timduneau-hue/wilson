@@ -308,6 +308,12 @@ Journal du 30/10/26, 9h20 (**1.18.3**) :
   script `script.reveil_tele`, MAC 48:5F:99:16:00:AF) ne la réveille pas. Il faut activer **« Démarrage à distance »**
   sur la télé (Timothée). Wilson l'explique au lieu de dire seulement « injoignable ».
 
+Journal du 30/10/26, 9h40 (**1.18.4**) : à la maison, l'oreille propose un faux « Wilson » toutes les quelques secondes
+pendant les discussions en famille (écarts 40 à 98, comme les vrais appels : elle ne sait pas trier seule) ; les 40
+vérifications de l'heure étaient épuisées en 15 min. Désormais : 8 s de calme après un « non » de Gemini, réserve de 6
+vérifications rechargée d'une par minute (60/h, 400/jour au plus). La tablette était encore en 1.18.2 (mise à jour à
+l'arrêt suivant).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).

@@ -106,7 +106,9 @@ async def main():
         await page.evaluate("window.__nom = false; window.__dem = 'allume la lumière jaune'; wilson.eco.appelDeLoin = async () => ({ appel: window.__nom, demande: window.__dem }); wilson.eco.nomDit = async () => window.__nom")
         await page.evaluate("wilson.oreille.onDetect({ score: 1.2, limite: 2 })"); await page.wait_for_timeout(1200)
         check('E3 corrigé : l\'oreille propose, Gemini dit « non » (télé, famille) → aucun réveil', await page.evaluate("wilson.state === 'veille'") and has('Gemini : non'))
-        await page.evaluate("window.__nom = true; wilson.oreille.onDetect({ score: 1.2, limite: 2 })")
+        await page.evaluate("wilson.oreille.onDetect({ score: 1.2, limite: 2 })"); await page.wait_for_timeout(300)
+        check('… et pendant 8 s après un « non », les faux candidats suivants ne coûtent rien', len([l for l in logs if 'Gemini : non' in l]) == 1)
+        await page.evaluate("window.__nom = true; wilson._nomCalme = 0; wilson.oreille.onDetect({ score: 1.2, limite: 2 })")
         await page.wait_for_function("wilson.state === 'conversation' && wilson.brain.open", timeout=8000); c = conns[-1]
         check('« Wilson » confirmé par Gemini : discussion ouverte sans le regarder, sans verrou de transcription', await page.evaluate("wilson._byName && !wilson._gate && wilson._addressed()") and has('Gemini : oui'))
         await page.wait_for_timeout(300)
