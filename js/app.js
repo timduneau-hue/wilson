@@ -16,9 +16,10 @@ import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
 import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
+import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.19.3';
+const VERSION = '1.20.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -60,6 +61,7 @@ class App {
     this.oreille.onPresque = (d) => this._secondAvis(d);
     this.oreille.onSegment = (r) => this._oreilleLog(r);
     this.sync = new SettingsSync(this);          // mêmes réglages sur tous les appareils
+    this.outils = null;                          // écran, minuteurs, rappels, météo, courses (PLAN 7 quater) : créé au démarrage
     this._catchErrors();
     this.face = new Face($('face'), { style: this.settings.face });
     this.face.setMood('somnolent'); this.face.setBrightness(0.35);
@@ -73,6 +75,7 @@ class App {
     this.discard = false; this.endAfterSpeech = false; this.barge = { n: 0, echo: -60 };
     this.presenceAt = performance.now(); this.battery = null; this.settingsOpen = false;
     this._wireSensors(); this._wireBrain(); this._wireAudio();
+    this.outils = new Outils(this);
     if ('serviceWorker' in navigator) {
       const hadController = !!navigator.serviceWorker.controller;
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => { this.swReg = r; }).catch((e) => this.log('SW : ' + e.message));
@@ -395,6 +398,7 @@ class App {
 
   // opts.handle : reprendre une session de Gemini (même fil), après un appel ou une coupure de réseau.
   async startConversation(reason, opts = {}) {
+    if (this.outils && this.outils.sonne) this.outils._arreterSonnerie();
     if (this.state === 'eveil' || this.state === 'conversation') return;
     if (this.phone) { if (reason === 'toucher') this.badge('Appel en cours : je ne t\'entends pas pendant l\'appel', 5000); return; }
     if (!this.settings.apiKey) { this.ui.showWelcome(); return; }
@@ -853,7 +857,9 @@ class App {
     const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch, crm, maison }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
 Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, la ville où vous habitez, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
 La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
-L'heure et la date : appelle date_et_heure.`;
+L'heure et la date : appelle date_et_heure.
+L'écran : quand on te demande de montrer, d'afficher, d'écrire quelque chose, ou quand ta réponse est longue ou pratique à lire (recette, liste, étapes, mot à épeler, chiffres), appelle afficher (avec une image si c'est utile) et ne dis à voix haute que l'essentiel. « Ferme », « enlève ça » : fermer_ecran.
+Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« rappelle-moi à 18h de… » : donne quand au format 2026-10-30T18:00, en calculant la date à partir d'aujourd'hui), meteo (pour la météo, plutôt que chercher), courses (la liste de courses de la maison). Agis sans demander de confirmation quand la demande est claire.${this.outils && this.outils.resume() ? '\n' + this.outils.resume() : ''}`;
     // CRM à la voix et mode voiture (PLAN 2 quater)
     const travail = !crm ? '' : `
 Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
@@ -897,7 +903,7 @@ ${car ? `- Timothée t'a appelé par ton prénom : ce que tu entends maintenant 
 
 Ta vue : tu ne vois rien tant que tu n'as pas pris de photo. ${eco ? 'Si une photo est jointe, sers-t\'en pour répondre ; sinon, quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), mets "regarder" à true et dis seulement une très courte phrase d\'attente.' : 'Quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), dis une très courte phrase (« Je regarde… ») puis appelle regarder.'} Ne prétends jamais voir quelque chose sans photo.
 ${tools}
-${travail}${maisonTxt}${voiture}${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (météo, actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
+${travail}${maisonTxt}${voiture}${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
 Langue : parle toujours en français, y compris pour une phrase d'attente. La transcription de ce qu'on te dit sort parfois en anglais, en espagnol ou en russe par erreur : c'est du français mal compris. Réponds toujours en français ; si tu n'as pas compris, demande simplement de répéter.`}
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
@@ -1207,6 +1213,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       }
       if (CRM_TOOL_NAMES.includes(c.name)) { this._crmTool(c); continue; }     // réponse envoyée quand le CRM a répondu
       if (MAISON_TOOL_NAMES.includes(c.name)) { this._maisonCmd(c); continue; } // réponse envoyée quand Home Assistant a agi
+      if (OUTILS_NAMES.includes(c.name)) { this._outil(c); continue; }        // écran, minuteur, rappel, météo, courses
       let out = { result: 'ok' }, silent = true;
       switch (c.name) {
         case 'exprimer_emotion': {
@@ -1457,7 +1464,7 @@ Nous sommes ${fmtDate()}.${bat}`;
   }
 
   // ---------- CRM à la voix (PLAN 2 quater) ----------
-  _extraTools() { return [...(this.crm.on ? CRM_TOOLS : []), ...(this.maison.on ? MAISON_TOOLS : [])]; }
+  _extraTools() { return [...OUTILS, ...(this.crm.on ? CRM_TOOLS : []), ...(this.maison.on ? MAISON_TOOLS : [])]; }
 
   // Ce que Timothée dit, horodaté, avec le numéro du tour : le verrou n'accepte qu'un « oui » d'un tour APRÈS la relecture (C2).
   _noteHeard(text, whole = false) {
@@ -1556,6 +1563,19 @@ Nous sommes ${fmtDate()}.${bat}`;
     if (res.ok) this.face.play('nod');
     const liste = res.appareils ? ` Appareils de la maison et leur état : ${res.appareils}. Si l'un correspond à sa demande, rappelle tout de suite maison avec ce nom exact sans lui redemander ; si c'était une question d'état, réponds avec cette liste.` : '';
     this.brain.respond([{ id: call.id, name: call.name, response: { result: `${res.ok ? 'Fait' : 'Échec'} — Home Assistant : « ${res.dire} ».${liste} ${res.ok ? 'Dis-le en quelques mots.' : ''}`.trim() } }]);
+  }
+
+  // Plus d'outils (PLAN 7 quater).
+  async _outil(call) {
+    const conv = this.convId, t0 = performance.now(), lent = call.name === 'meteo' || (call.name === 'afficher' && (call.args || {}).image) || call.name === 'courses';
+    const pid = lent ? this.pill({ meteo: 'Je regarde la météo…', afficher: 'Je cherche une image…', courses: 'Liste de courses…' }[call.name]) : 0;
+    let info, ok = true;
+    try { info = await this.outils.run(call.name, call.args || {}); }
+    catch (e) { ok = false; info = `Impossible pour l'instant (${e.message || 'erreur'}). Dis-le simplement.`; this.log(`Outil ${call.name} : ${e.message}`); }
+    if (pid) this.pillEnd(pid, ok, '');
+    if (conv !== this.convId) return;
+    this._noteToolMs(performance.now() - t0);
+    this.brain.respond([{ id: call.id, name: call.name, response: { result: info } }]);
   }
 
   // La maison (PLAN 7 bis, D7) : Wilson a compris la demande ; l'appli agit et lui rend le résultat.

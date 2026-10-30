@@ -146,3 +146,28 @@ body.car .badge { top: calc(64px + env(safe-area-inset-top)); right: auto; left:
 .pill.ok .pi, .pill.ko .pi { width: auto; height: auto; font-size: 20px; line-height: 1; }
 .pill .pt { overflow: hidden; text-overflow: ellipsis; }
 @keyframes pillspin { to { transform: rotate(360deg); } }
+
+/* ---- Plus d'outils (PLAN 7 quater) : écran, minuteurs, météo, courses ---- */
+.ecran { position: fixed; inset: 0; z-index: 7; display: flex; align-items: center; justify-content: center; padding: 3vh 3vw;
+  background: rgba(6,8,14,.72); backdrop-filter: blur(6px); }
+.ecran[hidden], .minuteurs[hidden] { display: none; }
+.ecran-in { width: min(900px, 96vw); max-height: 92vh; overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 22px;
+  padding: 18px 24px 22px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+.ecran-in.large { width: min(1100px, 96vw); }
+.ecran-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ecran-t { font-size: 28px; font-weight: 700; color: var(--amber-2); }
+.ecran-x { flex: none; width: 52px; height: 52px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--ink); font-size: 30px; cursor: pointer; }
+.ecran-b { font-size: 24px; line-height: 1.45; color: var(--ink); margin-top: 8px; }
+.ecran-b p { margin: 8px 0; } .ecran-b ul, .ecran-b ol { margin: 8px 0; padding-left: 1.3em; } .ecran-b li { margin: 6px 0; }
+.ecran-b .fine { font-size: 16px; color: var(--ink-2); }
+.ecran-img { margin: 6px 0 10px; text-align: center; } .ecran-img img { max-width: 100%; max-height: 62vh; border-radius: 14px; }
+.ecran-img figcaption { font-size: 14px; color: var(--ink-2); margin-top: 4px; }
+.alarme { font-size: 40px; font-weight: 700; text-align: center; }
+.minuteurs { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: 12px; z-index: 6; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.mn { display: flex; align-items: baseline; gap: 8px; padding: 6px 14px; border-radius: 14px; background: rgba(20,22,30,.86); border: 1px solid var(--line); }
+.mn-t { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--amber-2); } .mn-n { font-size: 16px; color: var(--ink-2); }
+.meteo-now { display: flex; align-items: center; gap: 18px; } .meteo-ico { font-size: 70px; } .meteo-t { font-size: 64px; font-weight: 700; } .meteo-m small { color: var(--ink-2); font-size: 17px; }
+.meteo-j { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 14px; }
+.mj { background: rgba(255,255,255,.05); border-radius: 14px; padding: 10px; text-align: center; } .mj-n { font-size: 17px; color: var(--ink-2); } .mj-i { font-size: 40px; }
+.mj-t { font-size: 24px; font-weight: 650; } .mj-t small { color: var(--ink-2); font-weight: 400; } .mj-p { font-size: 16px; color: var(--ink-2); }
+.courses { list-style: none; padding: 0; columns: 2; } .courses li::before { content: '☐ '; } .courses li.fait { color: var(--ink-2); text-decoration: line-through; } .courses li.fait::before { content: '☑ '; }
