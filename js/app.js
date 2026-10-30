@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.18.1';
+const VERSION = '1.18.2';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -418,7 +418,7 @@ class App {
     const preroll = this._wakePcm ? [this._wakePcm] : reason === 'prenom' ? [this.audio.recent(4000)] : reason === 'regard' ? [this.audio.recent(PREROLL_MS)] : [];
     this._wakePcm = null;
     // Mode voiture : la 1re phrase doit contenir « Wilson » (transcription de Gemini) ; sinon il se tait et se rendort (C6).
-    this._gate = reason === 'prenom' ? { ok: false, buf: [], until: performance.now() + NAME_GATE_MS } : null;
+    this._gate = this.car && reason === 'prenom' ? { ok: false, buf: [], until: performance.now() + NAME_GATE_MS } : null;   // maison : le prénom est déjà vérifié par Gemini
     this._byName = reason === 'prenom' && !this.car;                    // E3 : ouverte par le prénom → pas besoin de le regarder
     if (mode === 'eco') return this._startEco(reason, preroll);
     this.mode = 'live';
@@ -1001,6 +1001,7 @@ Nous sommes ${fmtDate()}.${bat}`;
       const G = this._gate;
       if (G && !G.ok) {
         if (performance.now() < G.until) { G.buf.push([i16, rate]); return; }   // réponse retenue : le nom n'est pas encore vérifié
+        if (!this.car) { this.log('Pas de transcription du prénom à temps : je me tais et je me rendors', true); this._gate = null; this.endConversation('pas mon nom'); return; }
         this._gateOpen('pas de transcription à temps');
       }
       if (!this.audio.playing) { this.barge.n = 0; this.barge.echo = Math.max(-60, this.audio.db); }
@@ -1344,23 +1345,44 @@ Nous sommes ${fmtDate()}.${bat}`;
   _onName(d) {
     if (this.settingsOpen) return;
     if (!this.car && this.state === 'conversation' && this.paused) {           // E3 : en veille faute de regard, « Wilson » reprend la discussion
-      this.log(`Entendu « Wilson » sans regard (oreille : écart ${d.score.toFixed(1)}) : je reprends`);
-      this._byName = true; this._resume(); if (this.mode === 'live' && this.brain.open) this.brain.sendAudio(this.audio.recent(3000));
+      if (this._nomEnCours || !this.settings.apiKey) return;
+      this._nomEnCours = true; const pcm = this.audio.recent(3500);
+      this.eco.nomDit({ key: this.settings.apiKey, audio: pcm }).then((oui) => {
+        this.log(`Oreille (maison, discussion en veille) : écart ${d.score.toFixed(1)} → Gemini : ${oui ? 'oui' : 'non'}`);
+        if (!oui || this.state !== 'conversation' || !this.paused) return;
+        this._byName = true; this._resume(); if (this.mode === 'live' && this.brain.open) this.brain.sendAudio(this.audio.recent(4500));
+      }).catch(() => {}).finally(() => { this._nomEnCours = false; });
       return;
     }
     if (this.state !== 'veille') return;
-    this.log(`Entendu « Wilson »${this.car ? '' : ' sans regard'} (oreille : écart ${d.score.toFixed(1)}, limite ${d.limite.toFixed(1)})`);
+    if (!this.car) { this._nomMaison(d); return; }
+    this.log(`Entendu « Wilson » (oreille : écart ${d.score.toFixed(1)}, limite ${d.limite.toFixed(1)})`);
     this.face.play('wake');
     this.startConversation('prenom');
   }
+  // E3 corrigé (journal du 30/10/26, 9h : 15 réveils pour rien en 8 min, télé et famille) : à la maison, l'oreille ne fait
+  // que proposer ; Gemini écoute le son et confirme que quelqu'un a dit « Wilson » avant tout réveil (rien à l'écran sinon).
+  async _nomMaison(d) {
+    if (this._nomEnCours || !navigator.onLine || !this.settings.apiKey) return;
+    const now = Date.now(); this._avis = (this._avis || []).filter((t) => now - t < 3600000);
+    if (this._avis.length >= 40) { if (!this._avisPlein) { this._avisPlein = true; this.log('Oreille (maison) : 40 vérifications cette heure-ci, j\'arrête jusqu\'à la suivante'); } return; }
+    this._avis.push(now); this._avisPlein = false; this._nomEnCours = true;
+    const pcm = this.audio.recent(3500);
+    try {
+      const oui = await this.eco.nomDit({ key: this.settings.apiKey, audio: pcm });
+      this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini : ${oui ? 'oui, « Wilson »' : 'non'}`);
+      if (oui && this.state === 'veille' && !this.settingsOpen) { this._wakePcm = this.audio.recent(5000); this.face.play('wake'); this.startConversation('prenom'); }
+    } catch (e) { this.log('Oreille (maison) : vérification impossible (' + e.message + ')'); }
+    finally { this._nomEnCours = false; }
+  }
   // Chaque phrase entendue en voiture : son écart avec les empreintes (pour régler l'oreille d'après le journal).
   _oreilleLog(r) {
-    if (r.score === Infinity || (!this.car && r.score >= this.oreille.presque)) return;   // à la maison : seulement les « presque » et les réveils
+    if (r.score === Infinity || !this.car) return;                    // à la maison, la vérification par Gemini est notée à la place
     this.log(`Oreille : phrase de ${r.duree.toFixed(1)} s, écart ${r.score.toFixed(1)} (limite ${this.oreille.limite.toFixed(1)})${r.oui ? ' → réveil' : r.score < this.oreille.presque ? ' → presque' : ''}`);
   }
   // Presque reconnu (bruit, voix fatiguée…) : second avis de Gemini Flash-Lite sur la phrase, 20 fois par heure au plus.
   async _secondAvis(d) {
-    if (this.state !== 'veille' || !navigator.onLine || !this.settings.apiKey) return;
+    if (!this.car || this.state !== 'veille' || !navigator.onLine || !this.settings.apiKey) return;
     const now = Date.now(); this._avis = (this._avis || []).filter((t) => now - t < 3600000);
     if (this._avis.length >= 20) return;
     this._avis.push(now);
@@ -1368,7 +1390,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     try {
       const oui = await this.eco.nomDit({ key: this.settings.apiKey, audio: pcm });
       this.log(`Oreille : presque (écart ${d.score.toFixed(1)}, limite ${d.limite.toFixed(1)}) → avis de Gemini : ${oui ? 'oui, mon nom' : 'non'}`);
-      if (oui && this.state === 'veille') { this._wakePcm = pcm; this.face.play('wake'); this.startConversation('prenom'); }
+      if (oui && this.car && this.state === 'veille') { this._wakePcm = pcm; this.face.play('wake'); this.startConversation('prenom'); }
     } catch (e) { this.log('Second avis impossible : ' + e.message); }
   }
   // Le nom est vérifié : la réponse retenue est jouée.
