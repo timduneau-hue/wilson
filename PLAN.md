@@ -314,6 +314,10 @@ vérifications de l'heure étaient épuisées en 15 min. Désormais : 8 s de cal
 vérifications rechargée d'une par minute (60/h, 400/jour au plus). La tablette était encore en 1.18.2 (mise à jour à
 l'arrêt suivant).
 
+**1.19.0 (30/10/26)** : apprentissage du prénom guidé à la voix (demande de Timothée) : Wilson dit « Dis Wilson », écoute,
+« Merci, change de place », patiente 5 s, 8 fois ; puis 15 s sans son nom (conversation, télé) découpées en morceaux de
+2 s pour placer la limite au-dessus des bruits de la maison (Réglages → CRM et voiture → Apprendre mon nom).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).

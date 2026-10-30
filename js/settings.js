@@ -288,28 +288,44 @@ export class SettingsUI {
       A.on('speechstart', on); A.on('speechend', off);
     });
   }
-  // Apprendre mon nom : 5 fois « Wilson », puis une phrase sans le nom (pour placer le seuil).
+  // Apprendre mon nom, guidé par Wilson (demande du 30/10/26) : il demande « Dis Wilson », écoute, dit « Change de place »,
+  // patiente 5 s, et recommence (8 fois : près, loin, canapé, debout…). Puis 15 s sans son nom (conversation, télé) pour
+  // placer la limite au-dessus des bruits de la maison.
   async apprendreNom() {
-    const app = this.app;
+    const app = this.app, N = 8, POSE = 5;
     if (this._ear) { this._ear.abort = true; if (this._ear.stop) this._ear.stop(); return; }
     if (app.state === 'conversation' || app.state === 'eveil') app.endConversation('apprentissage du nom');
     await app.audio.resume();
     const job = this._ear = { abort: false }, noms = [];
+    const dire = async (t) => { if (job.abort) return; try { await app.voice.speak(t); } catch (_) {} await new Promise((r) => setTimeout(r, 450)); };
+    const attendre = async (sec, msg) => { for (let k = sec; k > 0 && !job.abort; k--) { this.oreilleStatus(msg(k)); await new Promise((r) => setTimeout(r, 1000)); } };
     $('t-ear').textContent = 'Arrêter';
     try {
-      for (let i = 0, rate = 0; i < 5 && !job.abort; i++) {
-        this.oreilleStatus(`<b>Dis « Wilson »</b>, seul, naturellement (${i + 1}/5)…`);
+      this.oreilleStatus('Je vais te demander de dire « Wilson » 8 fois. Entre chaque fois, change de place : près, loin, dans le canapé, debout, dos tourné…');
+      await dire('On apprend mon prénom. Je vais te demander huit fois de dire Wilson. Entre chaque fois, change de place.');
+      for (let i = 0, rate = 0; i < N && !job.abort; i++) {
+        this.oreilleStatus(`<b>Dis « Wilson »</b>, naturellement, comme si tu m'appelais (${i + 1}/${N})…`);
+        await dire(i === 0 ? 'Dis Wilson.' : ['Vas-y : Wilson.', 'Encore : Wilson.', 'Dis Wilson.', 'Appelle-moi.'][i % 4]);
+        if (job.abort) break;
         const pcm = await this._capturer(job);
         if (job.abort) break;
-        if (!pcm || pcm.length < 16000 * 0.4) { i--; if (++rate > 4) throw new Error('je n\'entends rien'); this.oreilleStatus('Je n\'ai rien entendu : recommence…'); await new Promise((r) => setTimeout(r, 900)); continue; }
+        if (!pcm || pcm.length < 16000 * 0.3) {
+          if (++rate > 4) throw new Error('je n\'entends rien');
+          i--; await dire('Je n\'ai rien entendu. On recommence.'); continue;
+        }
         noms.push(pcm);
+        if (i < N - 1) { await dire('Merci. Change de place.'); await attendre(POSE, (k) => `Change de place… (${k} s) — ${i + 1}/${N} enregistré(s)`); }
       }
       if (job.abort) { this.oreilleStatus('Apprentissage arrêté.'); return; }
-      this.oreilleStatus('Maintenant <b>une phrase sans mon nom</b>, par exemple : « Je vais chez un client à Cholet. »');
-      const autre = await this._capturer(job);
-      const r = app.oreille.apprendre(noms, autre ? [autre] : []);
-      app.log(r.ok ? `Oreille apprise : ${r.n} « Wilson », seuil ${r.seuil.toFixed(1)} (écarts ${r.pos.map((x) => x.toFixed(1)).join(' ')}, phrase sans le nom ${r.neg == null ? '—' : r.neg.toFixed(1)})` : 'Oreille : ' + r.why);
-      this.oreilleStatus(r.ok ? 'Oreille prête ✓ — dis « Wilson, … » en voiture. Tu peux la tester ci-dessous.' : 'Raté : ' + r.why + '.');
+      await dire('Parfait. Maintenant, ne dis plus mon nom pendant quinze secondes : parle normalement, ou laisse la télé.');
+      await attendre(15, (k) => `<b>Ne dis pas « Wilson »</b> : parle normalement, télé allumée si tu veux… (${k} s)`);
+      if (job.abort) { this.oreilleStatus('Apprentissage arrêté.'); return; }
+      const fond = app.audio.recent(15000), autres = [];
+      for (let o = 0; o + 32000 <= fond.length; o += 16000) autres.push(fond.subarray(o, o + 32000));   // morceaux de 2 s
+      const r = app.oreille.apprendre(noms, autres);
+      app.log(r.ok ? `Oreille apprise (guidée) : ${r.n}/${noms.length} « Wilson », seuil ${r.seuil.toFixed(1)} (écarts ${r.pos.map((x) => x.toFixed(1)).join(' ')}, bruits de la maison ${r.neg == null ? '—' : r.neg.toFixed(1)})` : 'Oreille : ' + r.why);
+      this.oreilleStatus(r.ok ? `Oreille prête ✓ — ${r.n} « Wilson » retenus. Tu peux la tester ci-dessous.` : 'Raté : ' + r.why + '.');
+      await dire(r.ok ? 'C\'est appris. Merci !' : 'Ça n\'a pas marché, on pourra recommencer.');
       if (app.car) app._carHint();
     } catch (e) { this.oreilleStatus('Raté : ' + e.message + '.'); }
     finally { this._ear = null; $('t-ear').textContent = 'Apprendre mon nom'; }
