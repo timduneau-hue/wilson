@@ -361,9 +361,32 @@ Journal du 30/10/26, 11h (**1.21.0**) : demande « noter des idées dans un fich
 « Éteins la lumière » avec une seule lumière allumée : il demandait laquelle → consigne : si une seule est allumée, c'est
 elle.
 
+Journal du 30/10/26, 11h20-11h33 (**1.22.0**) : « ne me parle plus ainsi, tu ne réponds plus à mes questions » → il s'est
+mis en veille (terminer_conversation) : désormais seulement sur un vrai au revoir, jamais sur un reproche. « Oui, il va
+faire chaud. » juste après sa question était bloqué (« pas une demande pour lui ») → dans les 20 s qui suivent sa réponse,
+tout est pour lui (sauf une phrase qui commence par le prénom de quelqu'un d'autre). Écran : s'efface tout seul après
+90 s (4 min pour un long texte, 45 s pour une simple image).
+
+## 7 quinquies. Wilson s'améliore tout seul (demande de Timothée, 30/10/26)
+
+« Je voudrais que Wilson s'améliore au fur et à mesure des discussions et des remarques qu'on lui fait, et se mette à jour
+tout seul. » Wilson ne peut pas réécrire son propre programme pendant qu'il tourne (et ce serait dangereux) ; c'est Claude
+qui le fait, automatiquement, chaque nuit :
+
+| # | Quoi | Comment |
+|---|------|---------|
+| G1 | Remarques | Outil `remarque` : quand Timothée dit « c'est un bug », « tu devrais… », « ne fais plus ça », Wilson la met au propre et l'écrit dans le journal (ligne « REMARQUE DE TIMOTHÉE : … », gardée aussi sur la tablette). Il dit que c'est noté pour sa prochaine mise à jour. |
+| G2 | Maintenance de nuit | Tâche planifiée Claude, chaque nuit vers 2h47 (heure de Paris) : lit le journal des dernières 24 h (remarques en premier, puis erreurs, silences, relances, échecs d'outils), corrige le code de ce dépôt, ajoute un test pour chaque correction, lance tous les tests, monte la version, note la correction ici, publie. La tablette se met à jour toute seule en veille. |
+| G3 | Ce qui a changé | `version.json` porte `date` et `nouveautes` (phrase à la 2e personne pour Wilson). À la 1re discussion après la mise à jour, Wilson le dit en une phrase ; ensuite seulement si on le lui demande. |
+
+Garde-fous de la maintenance de nuit : rien publié si un test échoue ; pas de nouvelle grosse fonction, pas de changement
+du CRM (écriture), des clés, des jetons ni de l'adresse du script sans l'accord de Timothée (proposé dans le résumé à la
+place) ; jamais de clé, adresse de script, e-mail ou donnée client dans le dépôt public ; le script Apps Script et Home
+Assistant ne sont pas modifiés la nuit ; nuit sans rien de nouveau dans le journal → rien publié.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 30/10/26 : **version 1.20.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 30/10/26 : **version 1.22.0** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

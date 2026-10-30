@@ -74,7 +74,7 @@ async def main():
         await page.evaluate("wilson.continuous = true"); c = conns[-1]
         fns = [f['name'] for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', [])]
         sysp = c['setup']['systemInstruction']['parts'][0]['text']
-        check('Outils proposés à Gemini : afficher, fermer_ecran, minuteur, rappel, meteo, courses', all(x in fns for x in ['afficher', 'fermer_ecran', 'minuteur', 'rappel', 'meteo', 'courses', 'idees']), str(fns))
+        check('Outils proposés à Gemini : afficher, fermer_ecran, minuteur, rappel, meteo, courses', all(x in fns for x in ['afficher', 'fermer_ecran', 'minuteur', 'rappel', 'meteo', 'courses', 'idees', 'remarque']), str(fns))
         check('Consigne : afficher les réponses longues, météo par l\'outil meteo', 'appelle afficher' in sysp and 'meteo (pour la météo' in sysp and '(météo, actualités' not in sysp)
         async def tool(i, name, args):
             await page.evaluate("([i, n, a]) => wilson._tools([{ id: i, name: n, args: a }])", [i, name, args])
@@ -139,6 +139,15 @@ async def main():
         check('… lire (sans les dates)', 'Un support de tablette' in r and '11h10' not in r, r)
         r = await page.evaluate("wilson.outils.idees({ action: 'envoyer' })")
         check('… envoyer : e-mail par le script', st['mail'] == 1 and 'E-mail envoyé' in r, r)
+        r = await page.evaluate("wilson.outils.remarque({ texte: 'Ne te mets pas en veille quand je te fais un reproche' })")
+        journal = await page.evaluate("localStorage.getItem('wilson.remarques') || ''") + ' '.join(logs[-30:])
+        check('Remarque (F7) : notée pour la prochaine mise à jour, gardée dans le journal', 'prochaine mise à jour' in r and 'reproche' in journal, r + journal[-200:])
+        e0 = await page.evaluate("wilson.outils.afficher({ titre: 'Court', texte: 'Une ligne' }).then(() => wilson.outils._ecranMs)")
+        e1 = await page.evaluate("wilson.outils.afficher({ titre: 'Long', texte: Array.from({length: 12}, (_, i) => 'ligne ' + i).join('\\n') }).then(() => wilson.outils._ecranMs)")
+        check('Écran : s\'efface tout seul (90 s pour un texte court, 4 min pour un long)', e0 == 90000 and e1 == 240000, f'{e0} {e1}')
+        await page.evaluate("wilson.outils.fermer()")
+        nv = await page.evaluate("(localStorage.removeItem('wilson.nouveautesDites'), wilson._lireNouveautes()).then(() => [wilson._system(), wilson._system()])")
+        check('Nouveautés de version.json dans la consigne, à dire une seule fois (G3)', 'Ta dernière mise à jour' in nv[0] and 'première discussion depuis' in nv[0] and 'première discussion depuis' not in nv[1], nv[0][-400:])
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await ctx.close(); await b.close()
     print(f'\n{sum(results)}/{len(results)} OK'); raise SystemExit(0 if all(results) else 1)

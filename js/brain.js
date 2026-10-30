@@ -113,7 +113,7 @@ export const TOOLS = [{
     { name: 'date_et_heure', behavior: 'BLOCKING',
       description: 'Donne la date et l\'heure exactes maintenant.' },
     { name: 'terminer_conversation', behavior: 'NON_BLOCKING',
-      description: 'À appeler quand on te dit au revoir, bonne nuit, ou « merci, c\'est tout » : tu retournes en veille après ta réponse.' },
+      description: 'À appeler SEULEMENT quand on te dit clairement au revoir, bonne nuit, ou « merci, c\'est tout » : tu retournes en veille après ta réponse. Jamais sur un reproche ni une remarque (« tu ne réponds plus », « ne me parle pas comme ça ») : là, tu restes et tu écoutes.' },
     { name: 'regarder', behavior: 'BLOCKING',
       description: "Prend une photo nette avec la caméra quand on te demande de regarder : ce que tu vois, une couleur, lire un texte, un objet qu'on te montre, une tenue… Avant de l'appeler, dis « Je regarde… ». Tu ne vois RIEN sans cet outil.",
       parameters: { type: 'OBJECT', properties: { quoi: { type: 'STRING', description: 'ce qu\'on te demande de regarder' } } } },

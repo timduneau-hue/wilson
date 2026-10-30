@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.21.0';
+const VERSION = '1.22.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -83,6 +83,7 @@ class App {
       navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) this._reloadWhenIdle('nouvelle version installée'); });
     }
     setTimeout(() => this._checkUpdate(), 15000);
+    this._lireNouveautes();
     setInterval(() => this._checkUpdate(), 20 * 60000);
     setInterval(() => this._tick(), 50);
     // Surveillance de la charge : si la tablette prend du retard, on allège l'animation (jamais de file d'attente qui s'allonge).
@@ -209,6 +210,28 @@ class App {
       this.vision.onInfo = (m) => this.log(m);
       await this.vision.start(); this.log('Caméra prête');
     } catch (e) { this.vision = null; this.log('Caméra indisponible : ' + e.message); }
+  }
+
+  // G3 : ce qui a changé à la dernière mise à jour (champ « nouveautes » de version.json, écrit à chaque publication).
+  // Dit une seule fois, en une phrase, à la première discussion qui suit ; ensuite seulement si on le lui demande.
+  async _lireNouveautes() {
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
+      const j = await r.json(); if (j.version !== VERSION || !j.nouveautes) return;
+      this._nv = { texte: String(j.nouveautes).slice(0, 600), date: j.date || '' };
+      let dit = ''; try { dit = localStorage.getItem('wilson.nouveautesDites') || ''; } catch (_) {}
+      this._nv.aDire = dit !== VERSION;
+      this.log(`Mise à jour ${VERSION}${j.date ? ' du ' + j.date : ''} : ${this._nv.texte.slice(0, 200)}`, true);
+    } catch (_) {}
+  }
+  _nouveautes(mode) {
+    const n = this._nv; if (!n) return '';
+    let t = `\nTa dernière mise à jour (version ${VERSION}${n.date ? ', ' + n.date : ''}), faite d'après les remarques de Timothée et ton journal : ${n.texte} Si on te demande ce qui a changé, dis-le simplement.`;
+    if (n.aDire && mode === 'live') {
+      t += ' C\'est ta première discussion depuis : après avoir répondu à ce qu\'on te demande, dis en une phrase courte ce qui a changé (une seule fois).';
+      n.aDire = false; try { localStorage.setItem('wilson.nouveautesDites', VERSION); } catch (_) {}
+    }
+    return t;
   }
 
   // Mise à jour automatique : la tablette reste allumée en permanence, Wilson se met donc à jour tout seul.
@@ -358,6 +381,14 @@ class App {
       return c.name;
     }
     return '';
+  }
+
+  // Wilson vient de parler (moins de 20 s) : un « oui », « non », « il va faire chaud ? » est sa réponse (journal du 30/10/26, 11h26).
+  _dialogueEnCours() { return !!(this.playEndAt && performance.now() - this.playEndAt < 20000); }
+  _autrePrenom(t) {
+    const low = String(t || '').toLowerCase(), autres = (this.settings.home || '').match(/\b[A-ZÉÈÀÂÎÔ][a-zéèêëàâîïôöûüç-]{2,}\b/g) || [];
+    const tete = (low.match(/^\s*(?:allez\s+|hé\s+|eh\s+|oh\s+)?([a-zéèêëàâîïôöûüç-]{3,})\s*[,!]/) || [])[1];
+    return !!(tete && (autres.some((n) => n.toLowerCase() === tete && n.toLowerCase() !== 'wilson') || /^(loulou|maman|papa|chéri|chérie|bébé|mamie|papi|doudou|minou)$/.test(tete)));
   }
 
   // E2 : une phrase restée sans réponse mérite-t-elle une relance ? Seulement une vraie demande pour lui : son prénom, « tu »,
@@ -851,12 +882,14 @@ class App {
     const s = this.settings, m = this.memory.forPrompt();
     const bat = this.battery && !this.battery.charging && !this._batTold && !/Mobile/.test(navigator.userAgent) ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le une seule fois, brièvement, puis n'en reparle plus.` : '';
     if (bat) this._batTold = true;
+    const nv = this._nouveautes(mode);
     const eco = mode === 'eco' || mode === 'eco-search';
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
     const crm = this.crm.on, car = !!this.car, maison = this.maison.on;
     const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch, crm, maison }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
 Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, la ville où vous habitez, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
-La fin : si on te dit au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation.
+La fin : si on te dit clairement au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation. Jamais sur un reproche ou une remarque : reste et écoute.
+Tes progrès : quand Timothée fait une remarque sur ta façon de fonctionner (« c'est un bug », « tu devrais… », « j'aimerais que tu… », « ne fais plus ça », une fonction qui manque), appelle remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. Ne prétends pas pouvoir te modifier toi-même sur-le-champ.
 L'heure et la date : appelle date_et_heure.
 L'écran : quand on te demande de montrer, d'afficher, d'écrire quelque chose, ou quand ta réponse est longue ou pratique à lire (recette, liste, étapes, mot à épeler, chiffres), appelle afficher (avec une image si c'est utile) et ne dis à voix haute que l'essentiel. « Ferme », « enlève ça » : fermer_ecran.
 Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« rappelle-moi à 18h de… » : donne quand au format 2026-10-30T18:00, en calculant la date à partir d'aujourd'hui), meteo (pour la météo, plutôt que chercher), courses (la liste de courses de la maison), idees (« note cette idée » : rangée dans son document Google ; « envoie-moi mes idées » : par e-mail). Agis sans demander de confirmation quand la demande est claire.${this.outils && this.outils.resume() ? '\n' + this.outils.resume() : ''}`;
@@ -916,7 +949,7 @@ ${m.facts}
 Derniers échanges (pour la continuité, n'y fais allusion que si c'est utile) :
 ${m.recent || '(aucun)'}
 
-Nous sommes ${fmtDate()}.${bat}`;
+Nous sommes ${fmtDate()}.${bat}${nv}`;
   }
 
   // ---------- son ----------
@@ -1061,14 +1094,15 @@ Nous sommes ${fmtDate()}.${bat}`;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
       // (pas de relance pendant qu'un outil travaille : CRM ou recherche en cours, il répondra avec le résultat — journal du 25/10/26, 10h21)
-      else if (user && realPhrase(user) && this._gazeMode && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)
-        && this._semblePourMoi(user) && !(this.vision && this.vision.faces > 1)) {
+      else if (user && realPhrase(user) && (this._gazeMode || this._byName) && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)
+        && (this._dialogueEnCours() || this._semblePourMoi(user)) && !this._autrePrenom(user) && !(this.vision && this.vision.faces > 1)) {
         // Écoute au regard : tout ce qu'il entend lui est adressé. Une vraie phrase restée sans réponse (souvent la 1re
         // d'une discussion, journal du 24/10/26) → on lui demande de répondre, une seule fois.
         this._nudgedFor = user;
-        this.log('Wilson s\'est tu alors qu\'on lui parlait en le regardant : relance');
-        this.brain.sendText('[On te parlait en te regardant : réponds maintenant, à voix haute, à ce qui vient d\'être dit.]');
-      } else this.log(`Wilson se tait (il pense que la phrase n'était pas pour lui${user && this._gazeMode && !this._semblePourMoi(user) ? ' : pas une demande pour lui' : this.vision && this.vision.faces > 1 ? ' : plusieurs personnes devant lui' : ''})`);
+        const deLoin = this._byName && !this._gazing();
+        this.log(`Wilson s'est tu alors qu'on lui parlait${deLoin ? ' (appelé par son prénom)' : ' en le regardant'}${this._dialogueEnCours() ? ', juste après sa réponse' : ''} : relance`);
+        this.brain.sendText(`[On te parlait${deLoin ? '' : ' en te regardant'} : réponds maintenant, à voix haute, à ce qui vient d'être dit.]`);
+      } else this.log(`Wilson se tait (il pense que la phrase n'était pas pour lui${user && this._gazeMode && !this._dialogueEnCours() && !this._semblePourMoi(user) ? ' : pas une demande pour lui' : this.vision && this.vision.faces > 1 ? ' : plusieurs personnes devant lui' : ''})`);
       setTimeout(() => { if (!this.audio.playing) $('subtitle').textContent = ''; }, 5000);
     });
     b.on('heard', (t) => {
@@ -1569,11 +1603,11 @@ Nous sommes ${fmtDate()}.${bat}`;
   // Plus d'outils (PLAN 7 quater).
   async _outil(call) {
     const conv = this.convId, t0 = performance.now(), lent = call.name === 'meteo' || (call.name === 'afficher' && (call.args || {}).image) || call.name === 'courses';
-    const pid = lent ? this.pill({ meteo: 'Je regarde la météo…', afficher: 'Je cherche une image…', courses: 'Liste de courses…' }[call.name]) : 0;
+    const pid = lent || call.name === 'remarque' ? this.pill({ meteo: 'Je regarde la météo…', afficher: 'Je cherche une image…', courses: 'Liste de courses…', remarque: 'Je note ta remarque…' }[call.name]) : 0;
     let info, ok = true;
     try { info = await this.outils.run(call.name, call.args || {}); }
     catch (e) { ok = false; info = `Impossible pour l'instant (${e.message || 'erreur'}). Dis-le simplement.`; this.log(`Outil ${call.name} : ${e.message}`); }
-    if (pid) this.pillEnd(pid, ok, '');
+    if (pid) this.pillEnd(pid, ok, call.name === 'remarque' ? 'Noté pour ma mise à jour' : '');
     if (conv !== this.convId) return;
     this._noteToolMs(performance.now() - t0);
     this.brain.respond([{ id: call.id, name: call.name, response: { result: info } }]);

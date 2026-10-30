@@ -60,6 +60,8 @@ async def main():
         await page.evaluate("window.__look = true"); await page.evaluate("wilson.startConversation('toucher')")
         await page.wait_for_function('wilson.brain.open', timeout=8000); c = conns[-1]
         sysp = c['setup']['systemInstruction']['parts'][0]['text']
+        check('Fin de discussion seulement sur un vrai au revoir, jamais sur un reproche (journal 30/10/26, 11h21)', 'Jamais sur un reproche' in sysp and any('Jamais sur un reproche' in json.dumps(t, ensure_ascii=False) for t in [c['setup']]))
+        check('Consigne « remarque » : noter ce qu\'on lui reproche pour sa prochaine mise à jour', 'appelle remarque' in sysp)
         check('E2 consigne : se taire si la phrase commence par le prénom de quelqu\'un d\'autre', '« Louis, viens manger »' in sysp and 'tais-toi complètement' in sysp)
         await page.wait_for_function('wilson.maison.inv', timeout=6000)
         await page.evaluate("wilson._tools([{ id: 'p1', name: 'maison_commande', args: { appareil: 'light.grande_lumiere_salon', action: 'allumer' } }])")
@@ -86,6 +88,13 @@ async def main():
         check('… une vraie question restée sans réponse : relance', len(c['texts']) == n0 + 1 and 'On te parlait' in c['texts'][-1], str(c['texts'][n0:]))
         await page.evaluate("wilson.brain._emit('turn', { user: 'Hier, tu m\\'as dit que tu regardais Kevin dans le CRM, c\\'est un bug.', wilson: '' })"); await page.wait_for_timeout(200)
         check('… « Hier, tu m\'as dit… » (Hier n\'est pas un prénom) : relance', len(c['texts']) == n0 + 2, str(c['texts'][n0:]))
+        # Journal du 30/10/26, 11h26 : Wilson pose une question, « Oui, il va faire chaud. » était bloqué
+        await page.evaluate("wilson.playEndAt = performance.now() - 3000; wilson._nudgedFor = null"); n2 = len(c['texts'])
+        await page.evaluate("wilson.brain._emit('turn', { user: 'Oui, il va faire chaud.', wilson: '' })"); await page.wait_for_timeout(200)
+        check('Juste après sa réponse, « Oui, il va faire chaud. » est pour lui : relance', len(c['texts']) == n2 + 1 and has('juste après sa réponse'), str(c['texts'][n2:]))
+        await page.evaluate("wilson.brain._emit('turn', { user: 'Louis, range ta chambre.', wilson: '' })"); await page.wait_for_timeout(200)
+        check('… sauf si la phrase commence par le prénom de quelqu\'un d\'autre', len(c['texts']) == n2 + 1, str(c['texts'][n2:]))
+        await page.evaluate("wilson.playEndAt = performance.now() - 60000")
         await page.evaluate("window.__faces = 2"); await page.wait_for_timeout(100); n1 = len(c['texts'])
         await page.evaluate("wilson.brain._emit('turn', { user: 'Tu peux allumer la télé ?', wilson: '' })"); await page.wait_for_timeout(200)
         check('… plusieurs visages devant la tablette : pas de relance', len(c['texts']) == n1 and has('plusieurs personnes devant lui'), str(c['texts'][n1:]))

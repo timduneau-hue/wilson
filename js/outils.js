@@ -25,6 +25,9 @@ export const OUTILS = [
   { name: 'idees', behavior: 'BLOCKING',
     description: "Ses idées (« note cette idée », « écris ça quelque part », « qu'est-ce que j'ai noté ? », « envoie-moi mes idées ») : noter (texte = l'idée mise au propre, sans rien inventer), lire (les dernières), afficher (à l'écran), envoyer (par e-mail à Timothée, avec le lien du document). Elles sont rangées dans le document Google « Wilson — mes idées » de son Drive.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['noter', 'lire', 'afficher', 'envoyer'] }, texte: S }, required: ['action'] } },
+  { name: 'remarque', behavior: 'BLOCKING',
+    description: "Remarque de Timothée sur ton fonctionnement, pour ta prochaine mise à jour (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile.",
+    parameters: { type: 'OBJECT', properties: { texte: S }, required: ['texte'] } },
 ];
 export const OUTILS_NAMES = OUTILS.map((t) => t.name);
 
@@ -65,17 +68,18 @@ export class Outils {
       case 'meteo': return this.meteo(a);
       case 'courses': return this.courses(a);
       case 'idees': return this.idees(a);
+      case 'remarque': return this.remarque(a);
       default: return 'Outil inconnu.';
     }
   }
 
   // ---------- F1 : l'écran ----------
-  _montrer(html, { titre = '', large = false, ms = 5 * 60000 } = {}) {
+  _montrer(html, { titre = '', large = false, ms = 90000 } = {}) {   // demande du 30/10/26 : l'écran s'efface tout seul
     const el = $('ecran'); if (!el) return;
     el.innerHTML = `<div class="ecran-in${large ? ' large' : ''}"><div class="ecran-h"><div class="ecran-t">${esc(titre)}</div><button class="ecran-x" type="button" aria-label="Fermer">×</button></div><div class="ecran-b">${html}</div></div>`;
     el.hidden = false;
     el.querySelector('.ecran-x').addEventListener('click', () => this.fermer());
-    clearTimeout(this._ecranT); this._ecranT = setTimeout(() => this.fermer(), ms);
+    clearTimeout(this._ecranT); this._ecranMs = ms; this._ecranT = setTimeout(() => this.fermer(), ms);
   }
   fermer() { const el = $('ecran'); if (el) { el.hidden = true; el.innerHTML = ''; } clearTimeout(this._ecranT); }
   get ouvert() { const el = $('ecran'); return !!(el && !el.hidden); }
@@ -97,7 +101,8 @@ export class Outils {
     if (image) img = await this._image(image).catch(() => null);
     const html = (img ? `<figure class="ecran-img"><img src="${esc(img.src)}" alt="${esc(img.titre)}"><figcaption>${esc(img.titre)} — Wikipédia</figcaption></figure>` : '') + this._texteHtml(texte);
     if (!html) return "Rien à afficher : il faut un texte ou une image.";
-    this._montrer(html, { titre, large: !!img && !texte });
+    const lignes = String(texte || '').split(/\n+/).filter((l) => l.trim()).length;
+    this._montrer(html, { titre, large: !!img && !texte, ms: lignes > 8 ? 4 * 60000 : img && !texte ? 45000 : 90000 });
     this.log(`Écran : « ${String(titre).slice(0, 60)} »${img ? ' + image ' + img.titre : image ? ' (image introuvable)' : ''}`, true);
     return `Affiché à l'écran${image && !img ? ` (sans image : rien trouvé pour « ${image} »)` : img ? ` avec une photo de « ${img.titre} »` : ''}. Ne relis pas tout : dis l'essentiel en une phrase.`;
   }
@@ -322,6 +327,14 @@ export class Outils {
     if (!liste.length) return 'Aucune idée notée pour l\'instant.';
     if (action === 'afficher' || liste.length > 5) this._montrer(`<ul>${liste.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${lien ? '<p class="fine">Dans le document Google « Wilson — mes idées ».</p>' : ''}`, { titre: '💡 Mes idées' });
     return `Ses idées (${liste.length}, la plus récente en dernier) : ${liste.slice(-10).join(' ; ')}.${action === 'afficher' || liste.length > 5 ? ' Affichées à l\'écran.' : ''}`;
+  }
+
+  // ---------- F7 : remarques pour la prochaine mise à jour (lues chaque nuit par Claude dans le journal) ----------
+  remarque({ texte = '' }) {
+    const t = String(texte).trim(); if (!t) return 'Quelle remarque ?';
+    this.log(`REMARQUE DE TIMOTHÉE : ${t}`, true);
+    const l = lire('wilson.remarques', []); l.push({ t: Date.now(), texte: t }); ecrire('wilson.remarques', l.slice(-50));
+    return 'Remarque notée : elle sera lue pour ta prochaine mise à jour (chaque nuit). Dis-le simplement, en une phrase.';
   }
 
   // Pour la consigne : ce qui est en cours.
