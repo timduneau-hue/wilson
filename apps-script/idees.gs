@@ -63,3 +63,9 @@ function ideesEnvoyer_(n) {
   MailApp.sendEmail({ to: moi, subject: 'Wilson — tes idées (' + l.length + ')', htmlBody: html, body: l.map(function (x) { return '- ' + x; }).join('\n') + '\n\n' + doc.getUrl() });
   return { ok: true, n: l.length, lien: doc.getUrl() };
 }
+
+// À lancer une fois dans l'éditeur (menu des fonctions → essaiIdees → Exécuter) pour donner les autorisations Docs et e-mail.
+function essaiIdees() {
+  var doc = ideesDoc_();
+  Logger.log('Document des idées : ' + doc.getUrl() + ' — ' + ideesListe_(1000).length + ' idée(s). E-mail : ' + Session.getEffectiveUser().getEmail() + ' (quota ' + MailApp.getRemainingDailyQuota() + ')');
+}
