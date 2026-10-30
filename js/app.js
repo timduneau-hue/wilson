@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.19.0';
+const VERSION = '1.19.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -1372,8 +1372,8 @@ Nous sommes ${fmtDate()}.${bat}`;
       while (performance.now() - t0 < 4000 && (this.audio.speaking || performance.now() - this.audio.lastVoicedAt < 700)) await new Promise((r) => setTimeout(r, 100));
       const pcm = this.audio.recent(Math.min(8000, performance.now() - t0 + 3000));
       const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: pcm });
-      this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini : ${r.appel ? `oui, « Wilson »${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non'}`, r.appel);
-      if (!r.appel) { this._nomCalme = Date.now() + 8000; return; }
+      this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini entend « ${(r.texte || '').slice(0, 120)} » → ${r.appel ? `oui, « Wilson »${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non'}`, r.appel);
+      if (!r.appel) { this._nomCalme = Date.now() + 3000; return; }
       if (this.settingsOpen) return;
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) {      // déjà en discussion : la demande part tout de suite
         this._byName = true; if (this.paused) this._resume();
@@ -1387,7 +1387,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     finally { this._nomEnCours = false; }
   }
   _texteDeLoin(demande) {
-    return demande ? `[On vient de te parler de loin, sans te regarder (Wilson, du canapé par exemple) : « ${demande} ». Fais-le ou réponds maintenant, brièvement.]`
+    return demande ? `[On vient de te parler de loin, sans te regarder (« Wilson, … », du canapé par exemple) : « ${demande} ». Fais-le ou réponds maintenant, brièvement. Seule exception : si c'est visiblement quelqu'un qui parle de toi à une autre personne, ne dis rien.]`
       : '[On vient de t\'appeler « Wilson » de loin, sans te regarder : dis seulement « Oui ? » et écoute.]';
   }
 

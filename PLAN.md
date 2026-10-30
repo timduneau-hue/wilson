@@ -318,6 +318,13 @@ l'arrêt suivant).
 « Merci, change de place », patiente 5 s, 8 fois ; puis 15 s sans son nom (conversation, télé) découpées en morceaux de
 2 s pour placer la limite au-dessus des bruits de la maison (Réglages → CRM et voiture → Apprendre mon nom).
 
+Apprentissage guidé du 30/10/26 10h08 : écarts de ses « Wilson » 61 à 87, bruits de la maison 62 → l'oreille locale
+(empreintes + DTW) ne sait pas distinguer le prénom des voix de la maison ; elle ne sert qu'à proposer. Et Gemini,
+interrogé « est-ce qu'on appelle Wilson ? », répondait non à de vrais appels (10h11-10h12). **1.19.1** : Gemini transcrit
+seulement la phrase ; l'appli cherche le prénom (et ses déformations : Ouilsonne, Willson…) dans le texte
+(`prenomDans`, eco.js) ; le journal note ce que Gemini a entendu ; calme de 3 s après un « non » (8 s empêchait de
+répéter).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
 État au 29/10/26 : **version 1.17.0** en ligne (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).

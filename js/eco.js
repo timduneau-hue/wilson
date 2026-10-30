@@ -209,24 +209,25 @@ export class EcoBrain {
   }
 
   // Second avis de l'oreille du mode voiture : la phrase commence-t-elle par « Wilson » ? (true / false ; requête courte)
-  // À la maison (E3) : appelle-t-on « Wilson » de loin, et que lui demande-t-on ? → { appel, demande }.
+  // À la maison (E3) : on fait transcrire la phrase (ce que les modèles font bien, même de loin) ; c'est l'appli qui cherche
+  // le prénom dans le texte (journal du 30/10/26, 10h11 : « Gemini, est-ce qu'on appelle Wilson ? » répondait non à de vrais
+  // appels). → { appel, demande, texte }.
   async appelDeLoin({ key, audio, signal }) {
     const order = ECO_MODELS.rapide, now = Date.now();
     const models = [...order.filter((m) => !(this.refused[m] > now)), ...order.filter((m) => this.refused[m] > now)].slice(0, 3);
-    const question = "Enregistrement d'un salon (télé possible en fond, personne parfois loin du micro). Quelqu'un s'adresse-t-il à l'assistant « Wilson » en l'appelant par son prénom (au début ou à la fin de la phrase, même prononcé de loin ou un peu déformé : Wilson, Willson, Ouilsonne) ? Ne compte pas la télé ni une phrase où l'on parle de Wilson à quelqu'un d'autre. Réponds en JSON : {\"appel\": true|false, \"demande\": \"ce qu'on lui demande, en français, sans le prénom (vide s'il n'y a que le prénom)\"}.";
-    const schema = { type: 'OBJECT', properties: { appel: { type: 'BOOLEAN' }, demande: { type: 'STRING' } }, required: ['appel', 'demande'] };
+    const question = "Transcris mot pour mot, en français, ce que dit la voix la plus proche dans cet enregistrement d'un salon (parfois de loin, télé possible en fond). Le prénom de l'assistant de la maison est Wilson : s'il est prononcé, écris-le « Wilson ». Si personne ne parle, réponds une chaîne vide. Réponds en JSON : {\"texte\": \"…\"}.";
+    const schema = { type: 'OBJECT', properties: { texte: { type: 'STRING' } }, required: ['texte'] };
     let last = null;
     for (const model of models) {
       for (const think of [true, false]) {
         const body = { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio) } }, { text: question }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 120, responseMimeType: 'application/json', responseSchema: schema, ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' } } : {}) } };
+          generationConfig: { temperature: 0, maxOutputTokens: 200, responseMimeType: 'application/json', responseSchema: schema, ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' } } : {}) } };
         this.sent.push(performance.now());
         const res = await this._one(API + model + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, signal);
         if (res.ok) {
           const t = ((((res.json.candidates || [])[0] || {}).content || {}).parts || []).filter((x) => x.text && !x.thought).map((x) => x.text).join(' ');
           let o = null; try { o = JSON.parse(t.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) {}
-          if (o) return { appel: o.appel === true || o.appel === 'true', demande: String(o.demande || '').trim() };
-          return { appel: /"appel"\s*:\s*true|\boui\b/i.test(t), demande: '' };
+          return prenomDans(String((o && o.texte) || t || '').trim());
         }
         last = res;
         if (res.status === 400 && /think/i.test(res.msg || '')) continue;
@@ -426,4 +427,13 @@ export function sentenceCut(txt, from) {
     if (txt.length - from > minLen) { const c = txt.lastIndexOf(', '); if (c > from + (from === 0 ? 20 : 40)) cut = c + 1; }
   }
   return cut;
+}
+
+// Le prénom (et ses déformations à l'oreille) dans une phrase transcrite → { appel, demande, texte }.
+const PRENOM = /\b(wilson+e?|willson|wil+ ?son|ouil+son+e?|vil+son|whil?son|wilso|wilsonne|wilzon|uilson|wilsen)\b/i;
+export function prenomDans(texte) {
+  const t = String(texte || '').trim();
+  if (!PRENOM.test(t)) return { appel: false, demande: '', texte: t };
+  const demande = t.replace(new RegExp(PRENOM.source, 'gi'), ' ').replace(/^[\s,.!?;:-]*(hé|eh|oh|dis|allez)?[\s,.!?;:-]*/i, '').replace(/\s*,\s*([.!?]?)\s*$/, '$1').replace(/\s+/g, ' ').trim();
+  return { appel: true, demande: /[a-zà-ÿ]{2,}/i.test(demande) ? demande : '', texte: t };
 }
