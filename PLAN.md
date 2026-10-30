@@ -346,6 +346,8 @@ Google, Home Assistant ou des services publics sans compte.
 | F4 | `meteo` | Météo actuelle et des prochains jours (Open-Meteo, gratuit, sans clé), ville des réglages par défaut ; carte à l'écran (jours, températures, pluie). Plus besoin de recherche Internet pour la météo. |
 | F5 | `courses` | Liste de courses de Home Assistant (partagée avec son appli) : ajouter, retirer, cocher, lire, afficher. Sans Home Assistant : liste gardée sur l'appareil. |
 
+| F6 | `idees` | « Note cette idée », « qu'est-ce que j'ai noté ? », « envoie-moi mes idées » : document Google « Wilson — mes idées » dans son Drive, par le script « Wilson journal » (nouveau fichier `apps-script/idees.gs` + une ligne dans doPost, nouvelle version à déployer, autorisations Docs et e-mail données par Timothée) ; e-mail à son propre compte (aucune adresse dans le code). Tant que le script n'est pas à jour : idées gardées sur la tablette (envoyées au document ensuite) et bouton « Envoyer par e-mail » à l'écran. |
+
 Mode économique : ces outils restent au mode direct (le mode économique est un secours) ; à voir plus tard.
 Fait le 30/10/26 (**1.20.0**) : `js/outils.js`, écran `#ecran`, minuteurs `#minuteurs` ; tests `e2e_outils.py` 19/19.
 
@@ -354,6 +356,10 @@ en veille : « il est quelle heure, Wilson ? » transcrit « … où il sonne ? 
 que le prénom est souvent au début ou à la fin et donne ses déformations ; `prenomDans` reconnaît « où il sonne »,
 « ouil son », « vil son »… ; la demande transmise prévient qu'elle peut être approximative. Images : d'abord l'article
 du même nom (« vaisselle »), puis la recherche (avait donné « Marche en avant »).
+
+Journal du 30/10/26, 11h (**1.21.0**) : demande « noter des idées dans un fichier et me l'envoyer » → outil `idees` (F6).
+« Éteins la lumière » avec une seule lumière allumée : il demandait laquelle → consigne : si une seule est allumée, c'est
+elle.
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 

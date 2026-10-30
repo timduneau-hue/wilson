@@ -11,7 +11,7 @@ FAKE_TTS = open(os.path.join(S, 'e2e_eco.py'), encoding='utf-8').read().split('F
 HA = 'https://homeassistant.exemple.ts.net'
 
 async def main():
-    conns, st = [], {'liste': [{'id': 'a1', 'name': 'Lait', 'complete': False}], 'ha': []}
+    conns, st = [], {'liste': [{'id': 'a1', 'name': 'Lait', 'complete': False}], 'ha': [], 'idees': [], 'script_a_jour': False, 'mail': 0}
     async with async_playwright() as p:
         b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
             f'--use-file-for-fake-audio-capture={S}/fixtures/quiet.wav', '--autoplay-policy=no-user-gesture-required'])
@@ -44,9 +44,20 @@ async def main():
             elif u.endswith('/api/shopping_list/clear_completed'): st['liste'] = [x for x in st['liste'] if not x['complete']]; body = {}
             elif u.endswith('/api/template'): await route.fulfill(status=200, headers=H, body=''); return
             await route.fulfill(status=200, content_type='application/json', headers=H, body=json.dumps(body))
+        async def script(route):
+            req = route.request; H = {'access-control-allow-origin': '*'}
+            if req.method != 'POST': await route.fulfill(status=200, body='ok'); return
+            d = json.loads(req.post_data or '{}'); a = d.get('action', '')
+            if a.startswith('idees_') and not st['script_a_jour']: body = {'ok': False, 'erreur': 'action inconnue : ' + a}
+            elif a == 'idees_noter': st['idees'].append(d['texte']); body = {'ok': True, 'n': len(st['idees']), 'lien': 'https://docs.google.com/document/d/x'}
+            elif a == 'idees_lire': body = {'ok': True, 'idees': [i + '  — 30/10/26 11h10' for i in st['idees']], 'lien': 'https://docs.google.com/document/d/x'}
+            elif a == 'idees_envoyer': st['mail'] += 1; body = {'ok': True, 'n': len(st['idees'])}
+            elif a == 'reglages_lire': body = {'ok': True, 'reglages': None, 't': 0}
+            else: body = {'ok': True}
+            await route.fulfill(status=200, content_type='application/json', headers=H, body=json.dumps(body, ensure_ascii=False))
         ctx = await b.new_context(viewport={'width': 1138, 'height': 712}, permissions=['microphone', 'camera'], service_workers='block')
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps(
-            {'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'camera': False, 'listenMode': 'toujours', 'city': 'Angers', 'haUrl': HA, 'haToken': 'jeton', 'v': 3}))
+            {'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'camera': False, 'listenMode': 'toujours', 'city': 'Angers', 'haUrl': HA, 'haToken': 'jeton', 'logUrl': 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTESTTESTTEST/exec', 'v': 3}))
         await ctx.add_init_script(FAKE_TTS)
         page = await ctx.new_page(); logs = []
         await page.route(re.compile(r'.*/vendor/(face_detection|models|mediapipe)/.*'), lambda r: asyncio.ensure_future(r.abort()))
@@ -54,6 +65,7 @@ async def main():
         await page.route(re.compile(r'https://geocoding-api\.open-meteo\.com/.*'), geo)
         await page.route(re.compile(r'https://api\.open-meteo\.com/.*'), meteo)
         await page.route(re.compile(r'https://homeassistant\.exemple\.ts\.net/.*'), ha)
+        await page.route(re.compile(r'https://script\.google\.com/.*'), script)
         await page.route_web_socket(re.compile(r'.*generativelanguage\.googleapis\.com.*'), handler)
         page.on('console', lambda m: logs.append(m.text)); page.on('pageerror', lambda e: logs.append('PAGEERROR ' + str(e)))
         await page.goto('http://127.0.0.1:8765/index.html')
@@ -62,7 +74,7 @@ async def main():
         await page.evaluate("wilson.continuous = true"); c = conns[-1]
         fns = [f['name'] for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', [])]
         sysp = c['setup']['systemInstruction']['parts'][0]['text']
-        check('Outils proposés à Gemini : afficher, fermer_ecran, minuteur, rappel, meteo, courses', all(x in fns for x in ['afficher', 'fermer_ecran', 'minuteur', 'rappel', 'meteo', 'courses']), str(fns))
+        check('Outils proposés à Gemini : afficher, fermer_ecran, minuteur, rappel, meteo, courses', all(x in fns for x in ['afficher', 'fermer_ecran', 'minuteur', 'rappel', 'meteo', 'courses', 'idees']), str(fns))
         check('Consigne : afficher les réponses longues, météo par l\'outil meteo', 'appelle afficher' in sysp and 'meteo (pour la météo' in sysp and '(météo, actualités' not in sysp)
         async def tool(i, name, args):
             await page.evaluate("([i, n, a]) => wilson._tools([{ id: i, name: n, args: a }])", [i, name, args])
@@ -115,6 +127,18 @@ async def main():
         check('… retirer', 'Retiré' in r and [x['name'] for x in st['liste']] == ['beurre'], str(st['liste']))
         await page.evaluate("wilson.outils.courses({ action: 'afficher' })")
         check('… afficher à l\'écran', '🛒 Liste de courses' in (await ecran())[1])
+        await page.evaluate("wilson.outils.fermer()")
+        r = await page.evaluate("wilson.outils.idees({ action: 'noter', texte: 'Un support de tablette pour la voiture' })")
+        check('Idées, script pas encore à jour : idée gardée sur la tablette', 'gardée sur la tablette' in r and not st['idees'], r)
+        r = await page.evaluate("wilson.outils.idees({ action: 'envoyer' })")
+        check('… « envoie-moi mes idées » : bouton e-mail à l\'écran (mailto, sans adresse dans le code)', 'bouton' in r and await page.evaluate("!!document.querySelector('#ecran a[href^=\"mailto:?subject\"]')"), r)
+        st['script_a_jour'] = True; await page.evaluate("wilson.outils.fermer()")
+        r = await page.evaluate("wilson.outils.idees({ action: 'noter', texte: 'Ajouter un outil pour les idées' })")
+        check('Script à jour : idée notée dans le document, et l\'idée gardée part aussi', 'document' in r and st['idees'] == ['Ajouter un outil pour les idées', 'Un support de tablette pour la voiture'], str(st['idees']) + r)
+        r = await page.evaluate("wilson.outils.idees({ action: 'lire' })")
+        check('… lire (sans les dates)', 'Un support de tablette' in r and '11h10' not in r, r)
+        r = await page.evaluate("wilson.outils.idees({ action: 'envoyer' })")
+        check('… envoyer : e-mail par le script', st['mail'] == 1 and 'E-mail envoyé' in r, r)
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await ctx.close(); await b.close()
     print(f'\n{sum(results)}/{len(results)} OK'); raise SystemExit(0 if all(results) else 1)
