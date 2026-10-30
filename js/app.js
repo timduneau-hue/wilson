@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.19.1';
+const VERSION = '1.19.2';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -1362,8 +1362,8 @@ Nous sommes ${fmtDate()}.${bat}`;
     // vérifications qui se recharge d'une par minute (60 par heure au plus, 400 par jour).
     const now = Date.now();
     if (now < (this._nomCalme || 0)) return;
-    const B = this._nomJetons || (this._nomJetons = { n: 6, t: now, jour: new Date().toDateString(), total: 0 });
-    B.n = Math.min(6, B.n + (now - B.t) / 60000); B.t = now;
+    const B = this._nomJetons || (this._nomJetons = { n: 10, t: now, jour: new Date().toDateString(), total: 0 });
+    B.n = Math.min(10, B.n + (now - B.t) / 40000); B.t = now;          // réserve de 10, une de plus toutes les 40 s (journal 10h12 : 6 vidée en 3 min)
     if (B.jour !== new Date().toDateString()) { B.jour = new Date().toDateString(); B.total = 0; }
     if (B.n < 1 || B.total >= 400) { if (!this._avisPlein) { this._avisPlein = true; this.log('Oreille (maison) : réserve de vérifications vide, j\'attends (le regard marche toujours)'); } return; }
     B.n -= 1; B.total++; this._avisPlein = false; this._nomEnCours = true;
