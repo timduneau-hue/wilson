@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.20.0';
+const VERSION = '1.20.1';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -1394,7 +1394,7 @@ Nous sommes ${fmtDate()}.${bat}`;
     finally { this._nomEnCours = false; }
   }
   _texteDeLoin(demande) {
-    return demande ? `[On vient de te parler de loin, sans te regarder (« Wilson, … », du canapé par exemple) : « ${demande} ». Fais-le ou réponds maintenant, brièvement. Seule exception : si c'est visiblement quelqu'un qui parle de toi à une autre personne, ne dis rien.]`
+    return demande ? `[On vient de te parler de loin, sans te regarder (« Wilson, … », du canapé par exemple) : « ${demande} ». Fais-le ou réponds maintenant, brièvement. La transcription peut être approximative (de loin) : si elle ne veut rien dire, demande-lui de répéter. Seule exception : si c'est visiblement quelqu'un qui parle de toi à une autre personne, ne dis rien.]`
       : '[On vient de t\'appeler « Wilson » de loin, sans te regarder : dis seulement « Oui ? » et écoute.]';
   }
 

@@ -215,7 +215,7 @@ export class EcoBrain {
   async appelDeLoin({ key, audio, signal }) {
     const order = ECO_MODELS.rapide, now = Date.now();
     const models = [...order.filter((m) => !(this.refused[m] > now)), ...order.filter((m) => this.refused[m] > now)].slice(0, 3);
-    const question = "Transcris mot pour mot, en français, ce que dit la voix la plus proche dans cet enregistrement d'un salon (parfois de loin, télé possible en fond). Le prénom de l'assistant de la maison est Wilson : s'il est prononcé, écris-le « Wilson ». Si personne ne parle, réponds une chaîne vide. Réponds en JSON : {\"texte\": \"…\"}.";
+    const question = "Transcris mot pour mot, en français, ce que dit la voix la plus proche dans cet enregistrement d'un salon (parfois de loin, télé possible en fond). On y appelle souvent l'assistant de la maison, Wilson, au début ou à la fin de la phrase (« Wilson, … » ou « … , Wilson ? ») : un mot qui y ressemble (« où il sonne », « ouilsonne », « vilson », « wil son ») est presque toujours « Wilson » : écris-le « Wilson ». Si personne ne parle, réponds une chaîne vide. Réponds en JSON : {\"texte\": \"…\"}.";
     const schema = { type: 'OBJECT', properties: { texte: { type: 'STRING' } }, required: ['texte'] };
     let last = null;
     for (const model of models) {
@@ -430,7 +430,8 @@ export function sentenceCut(txt, from) {
 }
 
 // Le prénom (et ses déformations à l'oreille) dans une phrase transcrite → { appel, demande, texte }.
-const PRENOM = /\b(wilson+e?|willson|wil+ ?son|ouil+son+e?|vil+son|whil?son|wilso|wilsonne|wilzon|uilson|wilsen)\b/i;
+// (journal du 30/10/26, 10h54 : « il est quelle heure, Wilson ? » transcrit « il est quelle heure où il sonne ? »)
+const PRENOM = /(?:^|[^a-zà-ÿ])(wilson+e?|willson|wil+ ?son+e?|ouil+ ?son+e?|vil+ ?son+e?|whil?son|wilso|wilsonne|wilzon|uilson|wilsen|o[uù] il sonne?|oui+l+ ?son+e?)(?=$|[^a-zà-ÿ])/i;
 export function prenomDans(texte) {
   const t = String(texte || '').trim();
   if (!PRENOM.test(t)) return { appel: false, demande: '', texte: t };

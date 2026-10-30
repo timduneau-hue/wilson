@@ -98,7 +98,14 @@ export class Outils {
     return `Affiché à l'écran${image && !img ? ` (sans image : rien trouvé pour « ${image} »)` : img ? ` avec une photo de « ${img.titre} »` : ''}. Ne relis pas tout : dis l'essentiel en une phrase.`;
   }
   async _image(sujet) {
-    const u = `https://fr.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(sujet)}&gsrlimit=5&prop=pageimages&piprop=thumbnail&pithumbsize=900&format=json&origin=*`;
+    // D'abord l'article qui porte ce nom (« vaisselle » → Vaisselle), sinon une recherche (journal du 30/10/26 : « la
+    // vaisselle » avait donné la photo de l'article « Marche en avant »).
+    const nom = String(sujet).trim().replace(/^(une?|la|le|les|l'|des|du)\s+/i, '');
+    try {
+      const r = await fetch(`https://fr.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(nom.charAt(0).toUpperCase() + nom.slice(1))}`);
+      if (r.ok) { const j = await r.json(); if (j.type !== 'disambiguation' && j.thumbnail && j.thumbnail.source) return { src: (j.originalimage && j.originalimage.width <= 1600 ? j.originalimage.source : j.thumbnail.source), titre: j.title }; }
+    } catch (_) {}
+    const u = `https://fr.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(nom)}&gsrlimit=5&prop=pageimages&piprop=thumbnail&pithumbsize=900&format=json&origin=*`;
     const j = await fetch(u).then((r) => r.json());
     const pages = Object.values((j.query && j.query.pages) || {}).sort((a, b) => a.index - b.index);
     const p = pages.find((x) => x.thumbnail && x.thumbnail.source);
