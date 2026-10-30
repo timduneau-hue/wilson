@@ -215,8 +215,11 @@ export class EcoBrain {
   async appelDeLoin({ key, audio, signal }) {
     const order = ECO_MODELS.rapide, now = Date.now();
     const models = [...order.filter((m) => !(this.refused[m] > now)), ...order.filter((m) => this.refused[m] > now)].slice(0, 3);
-    const question = "Transcris mot pour mot, en français, ce que dit la voix la plus proche dans cet enregistrement d'un salon (parfois de loin, télé possible en fond). On y appelle souvent l'assistant de la maison, Wilson, au début ou à la fin de la phrase (« Wilson, … » ou « … , Wilson ? ») : un mot qui y ressemble (« où il sonne », « ouilsonne », « vilson », « wil son ») est presque toujours « Wilson » : écris-le « Wilson ». Si personne ne parle, réponds une chaîne vide. Réponds en JSON : {\"texte\": \"…\"}.";
-    const schema = { type: 'OBJECT', properties: { texte: { type: 'STRING' } }, required: ['texte'] };
+    // Journal du 30/10/26, 11h34-11h48 : la consigne « un mot qui ressemble est presque toujours Wilson » lui faisait
+    // entendre « Wilson » dans le bruit (6 « Oui ? » pour rien) et dans la télé (« … tu peux l'éteindre ? Hélas, pas de
+    // voix de fond… » → lumière éteinte). Il dit maintenant s'il en est sûr et si c'est la télé.
+    const question = "Transcris mot pour mot, en français, ce que dit la voix la plus proche dans cet enregistrement d'un salon (parfois de loin, télé ou radio possibles en fond). L'assistant de la maison s'appelle Wilson ; de loin on entend parfois « où il sonne », « vilson », « wil son » : écris alors « Wilson ». Mais n'écris « Wilson » que si une personne le prononce vraiment : un bruit, un souffle, un mot sans rapport ou un silence ne sont pas « Wilson » (dans le doute, écris ce que tu entends tel quel). Réponds en JSON : {\"texte\": \"…\", \"nom_sur\": true si tu es sûr qu'une personne de la pièce a dit « Wilson » (ou une déformation évidente), sinon false, \"tele\": true si cette voix vient de la télé ou de la radio (présentateur, film, publicité, chanson, plusieurs voix qui ne parlent pas à un assistant), sinon false}. Si personne ne parle : texte vide.";
+    const schema = { type: 'OBJECT', properties: { texte: { type: 'STRING' }, nom_sur: { type: 'BOOLEAN' }, tele: { type: 'BOOLEAN' } }, required: ['texte', 'nom_sur', 'tele'] };
     let last = null;
     for (const model of models) {
       for (const think of [true, false]) {
@@ -227,7 +230,7 @@ export class EcoBrain {
         if (res.ok) {
           const t = ((((res.json.candidates || [])[0] || {}).content || {}).parts || []).filter((x) => x.text && !x.thought).map((x) => x.text).join(' ');
           let o = null; try { o = JSON.parse(t.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) {}
-          return prenomDans(String(o ? (o.texte || '') : t).trim());
+          return jugerAppel(prenomDans(String(o ? (o.texte || '') : t).trim()), o || {});
         }
         last = res;
         if (res.status === 400 && /think/i.test(res.msg || '')) continue;
@@ -432,6 +435,23 @@ export function sentenceCut(txt, from) {
 // Le prénom (et ses déformations à l'oreille) dans une phrase transcrite → { appel, demande, texte }.
 // (journal du 30/10/26, 10h54 : « il est quelle heure, Wilson ? » transcrit « il est quelle heure où il sonne ? »)
 const PRENOM = /(?:^|[^a-zà-ÿ])(wilson+e?|willson|wil+ ?son+e?|ouil+ ?son+e?|vil+ ?son+e?|whil?son|wilso|wilsonne|wilzon|uilson|wilsen|o[uù] il sonne?|oui+l+ ?son+e?)(?=$|[^a-zà-ÿ])/i;
+// Après la transcription : est-ce vraiment un appel ? (journal du 30/10/26, 11h34-11h48)
+//  - la voix vient de la télé → non ;
+//  - « Wilson » tout seul, sans certitude → non (c'était presque toujours du bruit) ;
+//  - un long morceau de phrases enchaînées (plus de 2 phrases ou de 22 mots après le prénom) sans certitude → la télé ;
+//  - sinon oui, avec « doute » si Gemini n'était pas sûr : la demande ne sera pas exécutée sans confirmation.
+export function jugerAppel(r, o = {}) {
+  if (!r.appel) return r;
+  const phrases = (r.demande.match(/[^.!?…]+[.!?…]*/g) || []).filter((x) => /[a-zà-ÿ]{2,}/i.test(x));
+  const mots = r.demande.split(/\s+/).filter(Boolean).length;
+  if (o.tele === true) return { ...r, appel: false, pourquoi: 'la télé' };
+  const sur = o.nom_sur !== false;
+  if (!sur && !r.demande) return { ...r, appel: false, pourquoi: 'pas sûr' };
+  if (!sur && (phrases.length > 2 || mots > 22)) return { ...r, appel: false, pourquoi: 'trop long, sans doute la télé' };
+  const demande = phrases.length > 2 ? phrases.slice(0, 2).join(' ').trim() : r.demande;
+  return { ...r, demande, doute: !sur || phrases.length > 1 };
+}
+
 export function prenomDans(texte) {
   const t = String(texte || '').trim();
   if (!PRENOM.test(t)) return { appel: false, demande: '', texte: t };

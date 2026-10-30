@@ -367,6 +367,17 @@ faire chaud. » juste après sa question était bloqué (« pas une demande pour
 tout est pour lui (sauf une phrase qui commence par le prénom de quelqu'un d'autre). Écran : s'efface tout seul après
 90 s (4 min pour un long texte, 45 s pour une simple image).
 
+Journal du 30/10/26, 11h34-11h48 (**1.22.1**) : « il dit oui sans que j'aie rien demandé, il a éteint la lumière du
+salon alors que je n'ai rien dit ». Six réveils sur un « Wilson » que personne n'avait dit (la consigne de transcription
+« un mot qui ressemble est presque toujours Wilson », ajoutée pour le canapé, le lui faisait entendre dans le bruit),
+suivis d'un « Oui ? » ; et à 11h48, la télé (« … tu peux l'éteindre ? Hélas, pas de voix de fond, nous avons échoué… »)
+a fait éteindre la grande lumière. Désormais : la transcription dit si elle est sûre du prénom (`nom_sur`) et si la voix
+vient de la télé (`tele`) ; `jugerAppel` refuse la télé, « Wilson » tout seul pas sûr, et un long enchaînement de phrases
+pas sûr ; « Wilson » tout seul ne fait plus dire « Oui ? » (petite note, pastille « Je t'écoute… », il se rendort sans un
+mot après 8 s de silence) ; une demande de loin vague (« l'éteindre ») ou douteuse est confirmée avant d'agir sur la
+maison. Vu aussi : réflexion dite en anglais (« I need to check why the TV… ») → consigne : jamais de réflexion à voix
+haute, toujours en français.
+
 ## 7 quinquies. Wilson s'améliore tout seul (demande de Timothée, 30/10/26)
 
 « Je voudrais que Wilson s'améliore au fur et à mesure des discussions et des remarques qu'on lui fait, et se mette à jour
@@ -386,7 +397,7 @@ Assistant ne sont pas modifiés la nuit ; nuit sans rien de nouveau dans le jour
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 30/10/26 : **version 1.22.0** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 30/10/26 : **version 1.22.1** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

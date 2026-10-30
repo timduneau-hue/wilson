@@ -134,6 +134,23 @@ async def main():
         await page.evaluate("window.__look = false"); await page.wait_for_function('wilson.paused', timeout=6000)
         await page.evaluate("window.__dem = ''; wilson.oreille.onDetect({ score: 1.2, limite: 2 })"); await page.wait_for_timeout(1500)
         check('En veille faute de regard, « Wilson » reprend la discussion (sans le regarder)', await page.evaluate("!wilson.paused && wilson._byName && wilson.state === 'conversation'") and has('→ oui, « Wilson »'))
+        # Journal du 30/10/26, 11h34-11h48 : « Wilson » entendu dans le bruit et dans la télé
+        J = await page.evaluate("""import('./js/eco.js').then(({ prenomDans, jugerAppel }) => {
+          const tv = 'Wilson, est-ce que tu peux l\\'éteindre ? Hélas, pas de voix de fond, nous avons échoué. Vous pensez que ça justifie le fa';
+          return [jugerAppel(prenomDans(tv), { nom_sur: false, tele: false }).appel, jugerAppel(prenomDans(tv), { nom_sur: true, tele: true }).appel,
+            jugerAppel(prenomDans('Wilson'), { nom_sur: false, tele: false }).appel, jugerAppel(prenomDans('Wilson'), { nom_sur: true, tele: false }).appel,
+            jugerAppel(prenomDans('Wilson, allume la lumière jaune.'), { nom_sur: true, tele: false }), jugerAppel(prenomDans('il est quelle heure, où il sonne ?'), { nom_sur: false, tele: false })];
+        })""")
+        check('Journal 11h48 : « Wilson, tu peux l\'éteindre ? Hélas, pas de voix de fond… » (télé, ou pas sûr et trop long) → pas d\'appel', J[0] is False and J[1] is False, str(J[:2]))
+        check('Journal 11h34-11h47 : « Wilson » tout seul, pas sûr → pas d\'appel ; sûr → appel', J[2] is False and J[3] is True, str(J[2:4]))
+        check('… une vraie demande nette passe sans doute ; une demande pas sûre passe mais « avec doute » (confirmation avant d\'agir)', J[4]['appel'] and not J[4]['doute'] and J[5]['appel'] and J[5]['doute'], str(J[4:]))
+        await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(400); c = conns[-1] if conns else c
+        await page.evaluate("window.__nom = true; window.__dem = ''; wilson._nomCalme = 0; wilson._nomJetons = null; wilson.oreille.onDetect({ score: 1.2, limite: 2 })")
+        await page.wait_for_function("wilson.state === 'conversation' && wilson.brain.open", timeout=8000); c = conns[-1]; await page.wait_for_timeout(400)
+        check('« Wilson » tout seul : il ne dit plus « Oui ? » (rien envoyé), petite note et « Je t\'écoute… »', not any('Oui ?' in t for t in c['texts']) and has('j\'écoute sans rien dire') and 'écoute' in (await page.evaluate("document.getElementById('pill').textContent")), str(c['texts']))
+        await page.wait_for_timeout(8200)
+        check('… personne ne parle dans les 8 s : il se rendort sans un mot', await page.evaluate("wilson.state === 'veille'") and has('je me rendors sans rien dire'))
+        check('Consigne de loin : demande vague (« l\'éteindre ») ou mêlée à d\'autres phrases → il demande avant d\'agir', await page.evaluate("wilson._texteDeLoin('est-ce que tu peux l\\'éteindre ?', true).includes('demande d\\'abord de quoi il s\\'agit')"))
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await ctx.close(); await b.close()
     print(f'\n{sum(results)}/{len(results)} OK'); raise SystemExit(0 if all(results) else 1)

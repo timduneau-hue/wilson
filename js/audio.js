@@ -102,11 +102,11 @@ export class AudioIO {
   // Deux notes : « perdu » (descendantes, réseau coupé) ou « revenu » (montantes). Marche sans Internet.
   tone(kind) {
     if (!this.ctx) return;
-    const t0 = this.ctx.currentTime + 0.03, f = kind === 'revenu' ? [523.25, 783.99] : [659.25, 440];
+    const t0 = this.ctx.currentTime + 0.03, f = kind === 'ecoute' ? [880] : kind === 'revenu' ? [523.25, 783.99] : [659.25, 440];
     f.forEach((hz, i) => {
       const o = this.ctx.createOscillator(), g = this.ctx.createGain(), t = t0 + i * 0.18;
       o.frequency.value = hz; o.type = 'sine';
-      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.35, t + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(kind === 'ecoute' ? 0.15 : 0.35, t + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t + (kind === 'ecoute' ? 0.18 : 0.3));
       o.connect(g); g.connect(this.out); o.start(t); o.stop(t + 0.32);
     });
   }
