@@ -395,9 +395,29 @@ du CRM (écriture), des clés, des jetons ni de l'adresse du script sans l'accor
 place) ; jamais de clé, adresse de script, e-mail ou donnée client dans le dépôt public ; le script Apps Script et Home
 Assistant ne sont pas modifiés la nuit ; nuit sans rien de nouveau dans le journal → rien publié.
 
+Maintenance de nuit du 31/10/26 (**1.22.2**) : journal du 30/10/26, 18h45-23h22 (pas de ligne « REMARQUE DE TIMOTHÉE »).
+- 22h43-22h45 : « Wilson, c'est bizarre, je vois plus tes pupilles », « bizarre tes yeux tout blancs sans couleur »,
+  « pour les mises à jour de ce soir, tu intègres cette information » → « C'est noté, je prends cela en compte pour ma
+  prochaine mise à jour », mais l'outil `remarque` n'avait pas été appelé (rien dans le journal), et il avait inventé
+  « c'est une mise à jour de mon visage animé ». Désormais : consigne « jamais « c'est noté » sans remarque, pas
+  d'explication inventée sur ton fonctionnement » ; et s'il dit que c'est noté pour sa mise à jour sans l'outil, l'appli
+  note elle-même la remarque avec les dernières phrases entendues (`_remarqueOubliee`). Le visage n'a pas changé depuis
+  la 1.20.0 : cause des yeux blancs pas trouvée (question posée à Timothée).
+- 23h06-23h21 : « Merci Wilson, de rien, voilà » (soirée entre amis) a ouvert une discussion par le prénom, restée
+  ouverte 15 min (les voix autour la prolongeaient) jusqu'à une coupure réseau. Désormais, ouverte par le prénom et pas
+  regardée : 45 s sans qu'il parle ni qu'on le rappelle → veille (`BYNAME_IDLE_MS`).
+- 22h50 et 22h56 : « Gemini entend « Here is the JSON requested: » » → la transcription de loin lit le JSON même précédé
+  d'une phrase ou coupé (`lireAppel` dans `eco.js`) ; une simple phrase d'annonce compte comme « rien entendu ».
+- 22h56-22h58 : 12 vérifications de l'oreille en 90 s malgré « retry in 52s » (quota gratuit, 5 par minute) et « high
+  demand » → l'oreille attend le délai demandé par Google (2 min au plus), ou 20 s s'il est surchargé.
+- Vu en lançant les tests : l'outil `fermer_ecran` avait des paramètres vides (refusés par un serveur strict,
+  `tests/e2e_conn.py` était rouge) → déclaré sans paramètres.
+- Pas corrigé (vu) : une réponse en anglais à 22h39 (« To hear your thoughts… ») malgré la consigne ; reconnexion refusée à
+  23h21 (« session is already connected to an existing client ») après une coupure.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 30/10/26 : **version 1.22.1** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 31/10/26 : **version 1.22.2** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

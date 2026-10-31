@@ -9,7 +9,7 @@ export const OUTILS = [
       titre: S,
       texte: { type: 'STRING', description: 'le contenu ; une ligne par élément ; « - » au début pour une puce, « 1. » pour une étape' },
       image: { type: 'STRING', description: "ce qu'il faut illustrer par une photo (cherchée sur Wikipédia), ex. « koala », « tour Eiffel » ; vide sinon" } }, required: ['titre'] } },
-  { name: 'fermer_ecran', behavior: 'BLOCKING', description: "Ferme ce qui est affiché à l'écran.", parameters: { type: 'OBJECT', properties: {} } },
+  { name: 'fermer_ecran', behavior: 'BLOCKING', description: "Ferme ce qui est affiché à l'écran." },   // sans paramètres : un objet vide est refusé par Google (tests/e2e_conn.py)
   { name: 'minuteur', behavior: 'BLOCKING',
     description: "Minuteurs (compte à rebours visible, sonnerie à la fin) : lancer (duree_sec, nom facultatif : « pâtes »), annuler (nom, ou le dernier), liste.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['lancer', 'annuler', 'liste'] }, duree_sec: N, nom: S }, required: ['action'] } },
