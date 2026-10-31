@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.22.2';
+const VERSION = '1.22.3';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -940,7 +940,7 @@ ${car ? `- Timothée t'a appelé par ton prénom : ce que tu entends maintenant 
 Ta vue : tu ne vois rien tant que tu n'as pas pris de photo. ${eco ? 'Si une photo est jointe, sers-t\'en pour répondre ; sinon, quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), mets "regarder" à true et dis seulement une très courte phrase d\'attente.' : 'Quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), dis une très courte phrase (« Je regarde… ») puis appelle regarder.'} Ne prétends jamais voir quelque chose sans photo.
 ${tools}
 ${travail}${maisonTxt}${voiture}${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.
-Langue : parle toujours en français, y compris pour une phrase d'attente. La transcription de ce qu'on te dit sort parfois en anglais, en espagnol ou en russe par erreur : c'est du français mal compris. Réponds toujours en français ; si tu n'as pas compris, demande simplement de répéter.`}
+Langue : parle toujours en français, y compris pour une phrase d'attente. La transcription de ce qu'on te dit sort parfois en anglais, en espagnol ou en russe par erreur : c'est du français mal compris. Réponds toujours en français, jamais en anglais, même si la phrase entendue est en anglais, en italien ou en portugais ; si tu n'as pas compris, demande simplement de répéter.`}
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
 La maison : ${s.home || 'pas encore précisé — tu peux demander les prénoms et les retenir.'}
@@ -1095,7 +1095,14 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this._liveTurn = null; this._outPeak = 0;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
-      if (wilson) { this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson); }
+      if (wilson) {
+        this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson);
+        // Journal du 30/10/26, 22h39 : « To hear your thoughts on something specific, just let me know. » → il le redit en français.
+        if (enAnglais(wilson) && this.brain.open && performance.now() - (this._anglaisAt || -1e9) > 15000) {
+          this._anglaisAt = performance.now(); this.log('Wilson a répondu en anglais : je lui demande de le redire en français');
+          this.brain.sendText('[Tu viens de répondre en anglais. Redis-le maintenant en français, brièvement, sans t\'excuser. Toujours en français ensuite.]');
+        }
+      }
       // (pas de relance pendant qu'un outil travaille : CRM ou recherche en cours, il répondra avec le résultat — journal du 25/10/26, 10h21)
       else if (user && realPhrase(user) && (this._gazeMode || this._byName) && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)
         && (this._dialogueEnCours() || this._semblePourMoi(user)) && !this._autrePrenom(user) && !(this.vision && this.vision.faces > 1)) {
@@ -2039,6 +2046,16 @@ function trimSilence(i16, floorDb) {
 }
 
 // Retire les marques techniques que Gemini Live met parfois dans sa transcription (« <no speech>{pause} »).
+// Réponse en anglais ? (plusieurs mots anglais courants, presque aucun mot français)
+const MOTS_EN = new Set(['the', 'you', 'your', 'to', 'is', 'are', 'i', "i'm", 'it', "it's", 'just', 'let', 'know', 'what', 'this', 'that', 'with', 'for', 'can', 'of', 'and', 'check', 'need', 'hear', 'thoughts', 'something', 'specific', 'will', 'have', 'do', 'sure', 'here', 'there', 'how', 'help', 'please', 'sorry', 'right', 'now', 'be', 'my', 'about', 'if', 'would', 'like', 'want']);
+const MOTS_FR = new Set(['le', 'la', 'les', 'de', 'des', 'du', 'un', 'une', 'je', 'tu', 'il', 'elle', 'est', 'et', 'à', 'que', 'qui', 'pas', 'ne', 'pour', 'en', "c'est", 'ça', 'oui', 'non', 'mais', 'avec', 'sur', 'dans', 'te', 'ton', 'ta', 'tes', 'mon', 'ma', 'au', 'bien', 'fait', 'voilà', "j'ai", 'peux', 'veux']);
+function enAnglais(t) {
+  const w = String(t || '').toLowerCase().replace(/[’]/g, "'").match(/[a-zàâçéèêëîïôûùüÿœ']+/g) || [];
+  if (w.length < 4) return false;
+  const en = w.filter((x) => MOTS_EN.has(x)).length, fr = w.filter((x) => MOTS_FR.has(x)).length;
+  return en >= 3 && en > 2 * fr;
+}
+
 function cleanSpeech(t) {
   t = String(t || '').replace(/<[^>]{0,40}>|\{[^}]{0,40}\}/g, ' ').replace(/\s*\[…\]\s*$/, '').replace(/\s+/g, ' ').trim();
   return /^[\s.…!?,;:-]*$/.test(t) ? '' : t;      // « ... » seul : il n'a rien dit

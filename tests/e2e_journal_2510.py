@@ -23,7 +23,7 @@ setInterval(() => { const v = window.wilson && wilson.vision; if (!v) return;
 
 async def main():
     conns = []
-    mock = {'lost': False}
+    mock = {'lost': False, 'occupe': 0, 'occupe_poignee': False}
     async with async_playwright() as p:
         b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
             f'--use-file-for-fake-audio-capture={S}/fixtures/quiet.wav', '--autoplay-policy=no-user-gesture-required'])
@@ -37,6 +37,9 @@ async def main():
                     h = (d['setup'].get('sessionResumption') or {}).get('handle')
                     if h and mock['lost']:                     # Google a perdu la session : la reprise est refusée
                         asyncio.ensure_future(ws.close(code=1008, reason='BidiGenerateContent session not found or expired')); return
+                    if mock['occupe'] > 0 or (h and mock['occupe_poignee']):   # l'ancienne connexion n'est pas encore fermée chez Google
+                        mock['occupe'] = max(0, mock['occupe'] - 1)
+                        asyncio.ensure_future(ws.close(code=1008, reason='BidiGenerateContent session is already connected to an existing client')); return
                     ws.send(json.dumps({'setupComplete': {}}))
                     ws.send(json.dumps({'sessionResumptionUpdate': {'resumable': True, 'newHandle': 'poignee-%d' % len(conns)}}))
             ws.on_message(on_msg)
@@ -79,6 +82,21 @@ async def main():
               f"{st}, {len(new)} essai(s) : {[(c['setup'] or {}).get('sessionResumption') for c in new]}")
         check('… sans essayer d\'autres modèles ni réglages', all((c['setup'] or {}).get('model') == (new[0]['setup'] or {}).get('model') for c in new) and not any('Reconnexion impossible' in l for l in logs))
         mock['lost'] = False
+
+        # 2 bis. Journal du 30/10/26, 23h21 : « session is already connected to an existing client » après une coupure
+        await page.wait_for_timeout(300); nc = len(conns); mock['occupe'] = 1
+        await conns[-1]['ws'].close(code=1006, reason='')
+        await page.wait_for_timeout(3500)
+        st = await page.evaluate("({ s: wilson.state, open: wilson.brain.open })"); new = conns[nc:]
+        check('Ancienne connexion encore ouverte chez Google : nouvel essai 2 s plus tard, même session reprise', st['s'] == 'conversation' and st['open'] and any('pas encore fermée chez Google' in l for l in logs)
+              and (new[-1]['setup'] or {}).get('sessionResumption', {}).get('handle'), f"{st}, {[(c['setup'] or {}).get('sessionResumption') for c in new]}")
+        nc = len(conns); mock['occupe_poignee'] = True
+        await conns[-1]['ws'].close(code=1006, reason='')
+        await page.wait_for_timeout(5500)
+        st = await page.evaluate("({ s: wilson.state, open: wilson.brain.open })"); new = conns[nc:]
+        check('… toujours bloquée : nouvelle session, la discussion continue', st['s'] == 'conversation' and st['open'] and any('Ancienne session encore ouverte' in l for l in logs)
+              and not any('Reconnexion impossible' in l for l in logs), f"{st}, {[(c['setup'] or {}).get('sessionResumption') for c in new]}")
+        mock['occupe_poignee'] = False
 
         # 3. Mode voiture en roulant pendant une discussion
         await page.evaluate("wilson.enterCar('en roulant')")

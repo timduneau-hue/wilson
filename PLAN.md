@@ -412,12 +412,18 @@ Maintenance de nuit du 31/10/26 (**1.22.2**) : journal du 30/10/26, 18h45-23h22 
   demand » → l'oreille attend le délai demandé par Google (2 min au plus), ou 20 s s'il est surchargé.
 - Vu en lançant les tests : l'outil `fermer_ecran` avait des paramètres vides (refusés par un serveur strict,
   `tests/e2e_conn.py` était rouge) → déclaré sans paramètres.
-- Pas corrigé (vu) : une réponse en anglais à 22h39 (« To hear your thoughts… ») malgré la consigne ; reconnexion refusée à
-  23h21 (« session is already connected to an existing client ») après une coupure.
+- Pas corrigé la nuit, proposé à Timothée : réponse en anglais (22h39) et reconnexion refusée (23h21) → accepté le 31/10/26
+  (« oui qu'il puisse se reconnecter tout seul et oui pas d'anglais »), fait en **1.22.3** :
+  - 22h39, « To hear your thoughts on something specific, just let me know. » : consigne « jamais en anglais » ; et si sa
+    réponse est en anglais (plusieurs mots anglais courants, presque aucun français : `enAnglais`), l'appli lui demande de
+    la redire tout de suite en français (une fois par 15 s).
+  - 23h21, « Connexion fermée (1006) » puis « session is already connected to an existing client » → « Reconnexion
+    impossible » : `brain.connect` attend 2 s et réessaie la même session ; si Google la croit encore ouverte, nouvelle
+    session (la discussion continue).
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 31/10/26 : **version 1.22.2** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 31/10/26 : **version 1.22.3** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

@@ -165,7 +165,7 @@ export class Brain {
     const all = first([...new Set([opts.model, ...FALLBACK_MODELS])], this.modelUsed);
     const models = [...all.filter((m) => !(this.refused[m] > now)), ...all.filter((m) => this.refused[m] > now)];   // refusés récemment : en dernier
     const levels = first([0, 1, 2], this.level);
-    let last, authErr, serverErr, quotaErr, tries = 0;
+    let last, authErr, serverErr, quotaErr, tries = 0, occupe = 0;
     auth: for (const mode of auths) {
       for (const model of models) {
         for (let li = 0; li < levels.length; li++) {
@@ -186,6 +186,15 @@ export class Brain {
             this._emit('log', `Essai ${mode}/${model}/niv.${level} → ${kind} : ${e.message}`);
             // Google a perdu la session à reprendre (après « Internal error ») : nouvelle session, même modèle et même réglage.
             // Avant : 8 essais avec la poignée périmée, puis abandon de la discussion (journal du 25/10/26, 07h53).
+            // Journal du 30/10/26, 23h21 : après une coupure (1006), Google croyait l'ancienne connexion encore ouverte
+            // (« session is already connected to an existing client ») et la discussion s'arrêtait. On attend 2 s et on
+            // réessaie ; si ça bloque encore, nouvelle session (la reprise est perdue, la discussion continue).
+            if (/already connected/i.test(e.message) && occupe < 3) {
+              occupe++;
+              if (occupe >= 2 && this.handle) { this.handle = null; this._emit('log', 'Ancienne session encore ouverte chez Google : nouvelle session'); }
+              else this._emit('log', 'Ancienne connexion pas encore fermée chez Google : nouvel essai dans 2 s');
+              await new Promise((r) => setTimeout(r, 2000)); li--; tries--; continue;
+            }
             if (kind === 'session') {
               if (this.handle) { this.handle = null; this._emit('log', 'Session perdue chez Google : nouvelle session'); li--; tries--; continue; }
               break auth;
