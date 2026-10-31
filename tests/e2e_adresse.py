@@ -87,6 +87,14 @@ async def main():
         await page.evaluate("wilson._remarqueAt = 0; wilson._tools([{ id: 'rq1', name: 'remarque', args: { texte: 'Les yeux sont tout blancs.' } }])"); await page.wait_for_timeout(300)
         await page.evaluate("wilson.brain._emit('turn', { user: '', wilson: 'C\\'est noté pour ma prochaine mise à jour.' })"); await page.wait_for_timeout(200)
         check('… et rien en double quand il a bien appelé remarque', len([l for l in logs if 'REMARQUE DE TIMOTHÉE' in l]) == 2)
+        # Journal du 30/10/26, 22h39 : réponse en anglais → redite en français
+        check('Consigne : jamais en anglais, même si la phrase entendue est dans une autre langue', 'jamais en anglais' in sysp)
+        na = len(c['texts'])
+        await page.evaluate("wilson.brain._emit('turn', { user: 'c\\'est ta chance', wilson: 'To hear your thoughts on something specific, just let me know.' })"); await page.wait_for_timeout(200)
+        check('Réponse en anglais (« To hear your thoughts… ») : il la redit en français', len(c['texts']) == na + 1 and 'Redis-le maintenant en français' in c['texts'][-1] and has('répondu en anglais'), str(c['texts'][na:]))
+        await page.evaluate("wilson._anglaisAt = 0; wilson.brain._emit('turn', { user: 'Tu me reçois ?', wilson: 'Oui, je te reçois très bien, OK, je suis là pour toi.' })")
+        await page.evaluate("wilson._anglaisAt = 0; wilson.brain._emit('turn', { user: 'Mets Netflix', wilson: 'Voilà, Netflix est lancé sur la TV du salon.' })"); await page.wait_for_timeout(200)
+        check('… une réponse française (même avec « OK », « Netflix », « TV ») ne déclenche rien', len(c['texts']) == na + 1, str(c['texts'][na:]))
         await page.evaluate("wilson.playEndAt = 0; wilson._nudgedFor = null")
 
         # E2 : relance seulement pour une vraie demande
