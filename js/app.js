@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.22.1';
+const VERSION = '1.22.2';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -29,6 +29,7 @@ const LOOKED_IDLE_MS = 60000;     // tant qu'on le regarde, il reste à l'écout
 const SEARCH_MAX_MS = 30000;      // outil « chercher » : Wilson a dit qu'il cherchait, il répond quand il a l'info (filet : 30 s)
 const CRM_MAX_MS = 40000;         // question au CRM (script → CRM) : filet de sécurité
 const CAR_IDLE_MS = 60000;        // mode voiture : il se rendort après 1 min de silence (PLAN 2 quater, C5)
+const BYNAME_IDLE_MS = 45000;     // appelé par son prénom, pas regardé : 45 s sans rien dire → veille, même si on parle autour (journal du 30/10/26, 23h06)
 const NAME_GATE_MS = 7000;        // mode voiture : la 1re phrase doit contenir « Wilson » (vérifié sur la transcription, C6)
 const ECO_SILENCE_MS = 500;       // mode économique : silence qui marque la fin d'une phrase
 const ECO_SPEC_MS = 250;          // envoi anticipé : la phrase part dès ce silence, Wilson ne parle qu'à la fin confirmée (PLAN 6 bis)
@@ -890,7 +891,7 @@ class App {
 Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, la ville où vous habitez, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
 Tu parles toujours en français, et tu ne dis jamais à voix haute tes réflexions, ce que tu vas faire avec tes outils ou des remarques sur toi-même (journal du 30/10/26 : « I need to check why the TV… »).
 La fin : si on te dit clairement au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation. Jamais sur un reproche ou une remarque : reste et écoute.
-Tes progrès : quand Timothée fait une remarque sur ta façon de fonctionner (« c'est un bug », « tu devrais… », « j'aimerais que tu… », « ne fais plus ça », une fonction qui manque), appelle remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. Ne prétends pas pouvoir te modifier toi-même sur-le-champ.
+Tes progrès : quand Timothée fait une remarque sur ta façon de fonctionner (« c'est un bug », « tu devrais… », « j'aimerais que tu… », « ne fais plus ça », une fonction qui manque), appelle remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. Ne dis jamais « c'est noté » sans avoir appelé remarque. Une remarque sur ton apparence ou une chose qu'il trouve bizarre (« je ne vois plus tes pupilles », « tes yeux sont tout blancs ») en est une aussi. N'invente jamais d'explication sur ton propre fonctionnement (« c'est une mise à jour de mon visage ») : si tu ne sais pas, dis-le et note la remarque. Ne prétends pas pouvoir te modifier toi-même sur-le-champ.
 L'heure et la date : appelle date_et_heure.
 L'écran : quand on te demande de montrer, d'afficher, d'écrire quelque chose, ou quand ta réponse est longue ou pratique à lire (recette, liste, étapes, mot à épeler, chiffres), appelle afficher (avec une image si c'est utile) et ne dis à voix haute que l'essentiel. « Ferme », « enlève ça » : fermer_ecran.
 Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« rappelle-moi à 18h de… » : donne quand au format 2026-10-30T18:00, en calculant la date à partir d'aujourd'hui), meteo (pour la météo, plutôt que chercher), courses (la liste de courses de la maison), idees (« note cette idée » : rangée dans son document Google ; « envoie-moi mes idées » : par e-mail). Agis sans demander de confirmation quand la demande est claire.${this.outils && this.outils.resume() ? '\n' + this.outils.resume() : ''}`;
@@ -1093,7 +1094,8 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       }
       this._liveTurn = null; this._outPeak = 0;
       if (user || wilson) this.memory.addExchange(user, wilson);
-      if (wilson) this.log('Wilson : ' + wilson.slice(0, 120), true);
+      if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
+      if (wilson) { this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson); }
       // (pas de relance pendant qu'un outil travaille : CRM ou recherche en cours, il répondra avec le résultat — journal du 25/10/26, 10h21)
       else if (user && realPhrase(user) && (this._gazeMode || this._byName) && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)
         && (this._dialogueEnCours() || this._semblePourMoi(user)) && !this._autrePrenom(user) && !(this.vision && this.vision.faces > 1)) {
@@ -1419,7 +1421,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       if (!r.appel) { this._nomCalme = Date.now() + 3000; if (!r.texte && this._nomJetons) this._nomJetons.n = Math.min(10, this._nomJetons.n + 1); return; }   // rien d'intelligible : ne coûte rien
       if (this.settingsOpen) return;
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) {      // déjà en discussion : la demande part tout de suite
-        this._byName = true; if (this.paused) this._resume();
+        this._byName = true; this._prenomAt = performance.now(); if (this.paused) this._resume();
         if (r.demande) this.brain.sendText(this._texteDeLoin(r.demande, r.doute)); else this._ecouteSeule();
         this.lastActivity = performance.now();
         return;
@@ -1428,7 +1430,14 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this._wakeText = r.demande ? this._texteDeLoin(r.demande, r.doute) : null; this._wakePcm = new Int16Array(0);
       this.face.play('wake'); await this.startConversation('prenom');
       if (!r.demande) this._ecouteSeule();
-    } catch (e) { this.log('Oreille (maison) : vérification impossible (' + e.message + ')'); }
+    } catch (e) {
+      this.log('Oreille (maison) : vérification impossible (' + e.message + ')');
+      // Maintenance de nuit du 31/10/26 (journal du 30/10/26, 22h56-22h58 : 12 essais en 90 s malgré « retry in 52s »
+      // et « high demand ») : on attend ce que Google demande (2 min au plus), ou 20 s s'il est surchargé.
+      const m = /retry in ([\d.]+)\s*s/i.exec(e.message || '');
+      const att = m ? Math.min(120, Math.ceil(+m[1])) : /high demand|overloaded|unavailable|503/i.test(e.message || '') ? 20 : 0;
+      if (att) { this._nomCalme = Date.now() + att * 1000; this.log(`Oreille (maison) : Google demande d'attendre, prochaine vérification dans ${att} s`); }
+    }
     finally { this._nomEnCours = false; }
   }
   _texteDeLoin(demande, doute = false) {
@@ -1614,11 +1623,25 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this.brain.respond([{ id: call.id, name: call.name, response: { result: `${res.ok ? 'Fait' : 'Échec'} — Home Assistant : « ${res.dire} ».${liste} ${res.ok ? 'Dis-le en quelques mots.' : ''}`.trim() } }]);
   }
 
+  // Maintenance de nuit du 31/10/26 (journal du 30/10/26, 22h44 : « pour les mises à jour de ce soir, tu intègres cette
+  // information » → « C'est noté… », mais l'outil remarque n'avait pas été appelé : rien n'arrivait dans le journal).
+  // S'il dit que c'est noté pour sa mise à jour sans avoir appelé remarque, l'appli la note elle-même avec ce qu'il venait
+  // d'entendre.
+  _remarqueOubliee(wilson) {
+    if (!this.outils || !/(not[ée]|retenu|en compte|intègre).{0,80}mise à jour|mise à jour.{0,40}(not[ée]|en compte)/i.test(wilson || '')) return false;
+    if (performance.now() - (this._remarqueAt || -1e9) < 60000) return false;
+    const ctx = (this._entendus || []).join(' / ').slice(-500);
+    if (!ctx) return false;
+    this._remarqueAt = performance.now();
+    this.outils.remarque({ texte: `(notée par l'appli : Wilson a dit « ${wilson.slice(0, 80)} » sans appeler l'outil remarque) Ce qu'il venait d'entendre : « ${ctx} »` });
+    return true;
+  }
+
   // Plus d'outils (PLAN 7 quater).
   async _outil(call) {
     const conv = this.convId, t0 = performance.now(), lent = call.name === 'meteo' || (call.name === 'afficher' && (call.args || {}).image) || call.name === 'courses';
     const pid = lent || call.name === 'remarque' ? this.pill({ meteo: 'Je regarde la météo…', afficher: 'Je cherche une image…', courses: 'Liste de courses…', remarque: 'Je note ta remarque…' }[call.name]) : 0;
-    let info, ok = true;
+    let info, ok = true; if (call.name === 'remarque') this._remarqueAt = performance.now();
     try { info = await this.outils.run(call.name, call.args || {}); }
     catch (e) { ok = false; info = `Impossible pour l'instant (${e.message || 'erreur'}). Dis-le simplement.`; this.log(`Outil ${call.name} : ${e.message}`); }
     if (pid) this.pillEnd(pid, ok, call.name === 'remarque' ? 'Noté pour ma mise à jour' : '');
@@ -1964,7 +1987,12 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         // Sans détection du regard : la conversation se ferme d'elle-même après un silence.
         // Mode éco : seule une vraie réponse prolonge la conversation (un bruit de fond continu ne la garde plus ouverte).
         const busyEar = this.mode === 'eco' ? false : this.audio.speaking;
-        if (!this.continuous && !this.speaking && !busyEar && !thinking && !searching && idle > keep) this.endConversation('silence');
+        // Appelé par son prénom, personne ne le regarde (journal du 30/10/26, 23h06-23h21 : « Merci Wilson, de rien,
+        // voilà » pendant une soirée → discussion restée ouverte 15 min, les voix autour la prolongeaient sans fin) :
+        // 45 s sans qu'il dise un mot ni qu'on le rappelle → veille.
+        if (this._byName && this.mode === 'live' && !this.continuous && !this._gazing(now) && !this.speaking && !thinking && !searching
+          && now - Math.max(this.playEndAt || 0, this._convAt || 0, this._prenomAt || 0, this._resumedAt || 0) > BYNAME_IDLE_MS) this.endConversation('silence : personne ne lui parle');
+        else if (!this.continuous && !this.speaking && !busyEar && !thinking && !searching && idle > keep) this.endConversation('silence');
       }
       if (this.continuous && idle > 30000 && f.p.bright.t > 0.5) { f.setBrightness(0.3); f.setMood('somnolent'); }
       if (this.continuous && idle < 1000 && f.p.bright.t < 0.5) { f.setBrightness(1); f.setMood('ecoute'); }

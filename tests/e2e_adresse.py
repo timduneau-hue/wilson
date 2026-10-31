@@ -76,6 +76,19 @@ async def main():
         pill = await page.evaluate("[document.getElementById('pill').className, document.getElementById('pill').textContent]")
         check('… et ✗ rouge si ça n\'a pas marché', 'ko' in pill[0] and 'introuvable' in pill[1], str(pill))
 
+        # Maintenance de nuit du 31/10/26 (journal du 30/10/26, 22h44) : « c'est noté pour ma mise à jour » sans l'outil remarque
+        check('Consigne : jamais « c\'est noté » sans remarque, ni d\'explication inventée sur son visage', 'sans avoir appelé remarque' in sysp and "N'invente jamais d'explication" in sysp)
+        await page.evaluate("wilson.brain._emit('turn', { user: 'Wilson, c\\'est bizarre, je vois plus tes pupilles.', wilson: '' })")
+        await page.evaluate("wilson.brain._emit('turn', { user: 'Pour les mises à jour de ce soir, tu intègres cette information.', wilson: 'C\\'est noté, je prends cela en compte pour ma prochaine mise à jour.' })"); await page.wait_for_timeout(200)
+        rq = [l for l in logs if 'REMARQUE DE TIMOTHÉE' in l]
+        check('… il dit « c\'est noté » sans appeler remarque : l\'appli la note elle-même, avec ce qu\'il venait d\'entendre', len(rq) == 1 and 'pupilles' in rq[0] and 'notée par l' in rq[0], str(rq))
+        await page.evaluate("wilson.brain._emit('turn', { user: 'Merci.', wilson: 'C\\'est noté pour ma mise à jour.' })"); await page.wait_for_timeout(200)
+        check('… pas deux fois de suite pour la même remarque', len([l for l in logs if 'REMARQUE DE TIMOTHÉE' in l]) == 1)
+        await page.evaluate("wilson._remarqueAt = 0; wilson._tools([{ id: 'rq1', name: 'remarque', args: { texte: 'Les yeux sont tout blancs.' } }])"); await page.wait_for_timeout(300)
+        await page.evaluate("wilson.brain._emit('turn', { user: '', wilson: 'C\\'est noté pour ma prochaine mise à jour.' })"); await page.wait_for_timeout(200)
+        check('… et rien en double quand il a bien appelé remarque', len([l for l in logs if 'REMARQUE DE TIMOTHÉE' in l]) == 2)
+        await page.evaluate("wilson.playEndAt = 0; wilson._nudgedFor = null")
+
         # E2 : relance seulement pour une vraie demande
         n0 = len(c['texts'])
         await page.evaluate("wilson.brain._emit('turn', { user: 'Louis, viens manger, c\\'est prêt.', wilson: '' })"); await page.wait_for_timeout(200)
@@ -128,6 +141,12 @@ async def main():
         check('… pendant la discussion (regardée ou non), l\'oreille se tait : le direct entend déjà tout', await page.evaluate("(() => { let n = 0; const f = wilson.oreille.feed; wilson.oreille.feed = () => n++; wilson.audio._emit('frame', new Float32Array(320), new Int16Array(320), -40); wilson.oreille.feed = f; return n === 0; })()"))
         await page.wait_for_timeout(4200)
         check('… pas de veille faute de regard (4 s sans regard)', await page.evaluate("!wilson.paused && wilson.state === 'conversation'"))
+        # Journal du 30/10/26, 23h06-23h21 : ouverte par le prénom pendant une soirée, restée ouverte 15 min (voix autour)
+        await page.evaluate("const t = performance.now() - 50000; wilson.playEndAt = wilson._convAt = t; wilson._prenomAt = wilson._resumedAt = -1e9; window.__bavard = setInterval(() => { wilson.lastUserSpeech = wilson.lastActivity = performance.now(); }, 50)")
+        await page.wait_for_timeout(600)
+        check('… mais 45 s sans qu\'il parle ni qu\'on le rappelle (on parle autour) : veille', await page.evaluate("clearInterval(window.__bavard), wilson.state !== 'conversation'") and has('personne ne lui parle'))
+        await page.evaluate("window.__nom = true; wilson._nomCalme = 0; wilson._nomJetons = null; wilson.oreille.onDetect({ score: 1.2, limite: 2 })")
+        await page.wait_for_function("wilson.state === 'conversation' && wilson.brain.open", timeout=8000); c = conns[-1]
         await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
         # en veille faute de regard pendant une discussion au regard
         await page.evaluate("window.__look = true; wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000)
@@ -141,6 +160,9 @@ async def main():
             jugerAppel(prenomDans('Wilson'), { nom_sur: false, tele: false }).appel, jugerAppel(prenomDans('Wilson'), { nom_sur: true, tele: false }).appel,
             jugerAppel(prenomDans('Wilson, allume la lumière jaune.'), { nom_sur: true, tele: false }), jugerAppel(prenomDans('il est quelle heure, où il sonne ?'), { nom_sur: false, tele: false })];
         })""")
+        L = await page.evaluate("""import('./js/eco.js').then(({ lireAppel }) => [lireAppel('Here is the JSON requested:'),
+          lireAppel('Here is the JSON requested: {"texte": "Wilson, allume la lumière", "nom_sur": true, "tele": false}'), lireAppel('{"texte": "Wilson, quelle heure est-')])""")
+        check('Journal 22h50 : « Here is the JSON requested: » n\'est pas pris pour ce qu\'on a dit ; JSON après une phrase ou coupé : lu', L[0]['texte'] == '' and L[1]['texte'] == 'Wilson, allume la lumière' and L[1]['nom_sur'] is True and L[2]['texte'].startswith('Wilson, quelle heure'), str(L))
         check('Journal 11h48 : « Wilson, tu peux l\'éteindre ? Hélas, pas de voix de fond… » (télé, ou pas sûr et trop long) → pas d\'appel', J[0] is False and J[1] is False, str(J[:2]))
         check('Journal 11h34-11h47 : « Wilson » tout seul, pas sûr → pas d\'appel ; sûr → appel', J[2] is False and J[3] is True, str(J[2:4]))
         check('… une vraie demande nette passe sans doute ; une demande pas sûre passe mais « avec doute » (confirmation avant d\'agir)', J[4]['appel'] and not J[4]['doute'] and J[5]['appel'] and J[5]['doute'], str(J[4:]))
@@ -150,6 +172,12 @@ async def main():
         check('« Wilson » tout seul : il ne dit plus « Oui ? » (rien envoyé), petite note et « Je t\'écoute… »', not any('Oui ?' in t for t in c['texts']) and has('j\'écoute sans rien dire') and 'écoute' in (await page.evaluate("document.getElementById('pill').textContent")), str(c['texts']))
         await page.wait_for_timeout(8200)
         check('… personne ne parle dans les 8 s : il se rendort sans un mot', await page.evaluate("wilson.state === 'veille'") and has('je me rendors sans rien dire'))
+        # Journal du 30/10/26, 22h56-22h58 : 12 essais en 90 s malgré « retry in 52s »
+        await page.evaluate("window.__n429 = 0; wilson.eco.appelDeLoin = async () => { window.__n429++; throw new Error('Quota exceeded for metric: generate_content_free_tier_requests, limit: 5 (retry in 52s)'); }; wilson._nomCalme = 0; wilson._nomJetons = null; wilson.oreille.onDetect({ score: 1.2, limite: 2 })")
+        await page.wait_for_timeout(1500)
+        await page.evaluate("wilson.oreille.onDetect({ score: 1.2, limite: 2 })"); await page.wait_for_timeout(1500)
+        calme = await page.evaluate("[window.__n429, Math.round((wilson._nomCalme - Date.now()) / 1000)]")
+        check('Quota Google (« retry in 52s ») : l\'oreille attend 52 s avant de revérifier', calme[0] == 1 and 45 <= calme[1] <= 52 and has('prochaine vérification dans 52 s'), str(calme))
         check('Consigne de loin : demande vague (« l\'éteindre ») ou mêlée à d\'autres phrases → il demande avant d\'agir', await page.evaluate("wilson._texteDeLoin('est-ce que tu peux l\\'éteindre ?', true).includes('demande d\\'abord de quoi il s\\'agit')"))
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await ctx.close(); await b.close()

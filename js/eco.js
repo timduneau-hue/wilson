@@ -229,8 +229,8 @@ export class EcoBrain {
         const res = await this._one(API + model + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, signal);
         if (res.ok) {
           const t = ((((res.json.candidates || [])[0] || {}).content || {}).parts || []).filter((x) => x.text && !x.thought).map((x) => x.text).join(' ');
-          let o = null; try { o = JSON.parse(t.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) {}
-          return jugerAppel(prenomDans(String(o ? (o.texte || '') : t).trim()), o || {});
+          const o = lireAppel(t);
+          return jugerAppel(prenomDans(String(o.texte || '').trim()), o);
         }
         last = res;
         if (res.status === 400 && /think/i.test(res.msg || '')) continue;
@@ -377,6 +377,22 @@ export function partialReply(acc) {
     out.reponse = s;
   }
   return out;
+}
+
+// Réponse de la transcription de loin → { texte, nom_sur, tele }. Maintenance de nuit du 31/10/26 (journal du 30/10/26,
+// 22h50 et 22h56 : « Gemini entend « Here is the JSON requested: » ») : le modèle ajoutait parfois une phrase avant le
+// JSON (ou le JSON était coupé) ; le texte de cette phrase était pris pour ce qu'on avait dit.
+export function lireAppel(t) {
+  t = String(t || '');
+  const essai = (x) => { try { const o = JSON.parse(x); return o && typeof o === 'object' ? o : null; } catch (_) { return null; } };
+  let o = essai(t.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
+  const m = !o && t.match(/\{[\s\S]*\}/);
+  if (m) o = essai(m[0]) || essai(m[0].replace(/,\s*([}\]])/g, '$1'));
+  if (o) return o;
+  const tx = /"texte"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(t);           // JSON coupé : on garde ce qui a été transcrit
+  if (tx) { let v = tx[1]; try { v = JSON.parse('"' + v + '"'); } catch (_) {} return { texte: v, nom_sur: /"nom_sur"\s*:\s*true/.test(t), tele: /"tele"\s*:\s*true/.test(t) }; }
+  if (/json|\{/i.test(t)) return { texte: '' };                         // phrase d'annonce sans transcription : rien d'entendu
+  return { texte: t.trim() };
 }
 
 function parseText(txt) { return parseReply({ candidates: [{ content: { parts: [{ text: txt }] } }] }); }
