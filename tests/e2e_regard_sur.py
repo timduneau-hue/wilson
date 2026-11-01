@@ -180,6 +180,15 @@ async def main():
         bil = await page.evaluate('wilson.bilan()')
         check('Bilan (onglet État) : nombre de réponses retenues', bil.get('Réponses retenues (personne ne le regardait)') == '2', str(bil.get('Réponses retenues (personne ne le regardait)')))
 
+        # 1.25.1 : visage Miel (choix de Timothée du 01/11/26) ; un appareil resté sur l'ancien visage par défaut passe à Miel.
+        mg = await page.evaluate("""import('./js/settings.js').then((m) => {
+          const k = 'wilson.settings', old = localStorage.getItem(k), r = {};
+          r.def = m.DEFAULTS.face;
+          localStorage.setItem(k, JSON.stringify({ face: 'lumiere', v: 3, _t: 5 })); const a = m.loadSettings(); r.lum = [a.face, a.v, a._t > 5];
+          localStorage.setItem(k, JSON.stringify({ face: 'led', v: 3, _t: 5 })); const c = m.loadSettings(); r.led = [c.face, c._t];
+          localStorage.setItem(k, old); return r; })""")
+        check('Visage Miel par défaut ; « Lumière » (ancien défaut) → Miel, daté pour la synchro ; un autre choix (Rétro) est gardé',
+              mg['def'] == 'miel' and mg['lum'] == ['miel', 4, True] and mg['led'] == ['led', 5], str(mg))
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
         print('   ', ' | '.join(l[9:] for l in logs if '[Wilson]' in l)[-1800:])
