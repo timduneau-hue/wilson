@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.23.0';
+const VERSION = '1.24.0';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -28,6 +28,9 @@ const LOOK_GRACE_MS = 3000;       // R3 : on peut détourner les yeux 3 s ; au-d
 const LOOKED_IDLE_MS = 60000;     // tant qu'on le regarde, il reste à l'écoute, 60 s de silence au plus
 const SEARCH_MAX_MS = 30000;      // outil « chercher » : Wilson a dit qu'il cherchait, il répond quand il a l'info (filet : 30 s)
 const CRM_MAX_MS = 40000;         // question au CRM (script → CRM) : filet de sécurité
+// Demande de Timothée du 01/11/26 : « supprime le mode voiture ». Plus de bouton, plus de réglage, plus de démarrage en
+// roulant : le mode voiture ne peut plus s'allumer (le code reste en sommeil, testé, pour pouvoir le remettre).
+const VOITURE = false;
 const CAR_IDLE_MS = 60000;        // mode voiture : il se rendort après 1 min de silence (PLAN 2 quater, C5)
 const BYNAME_IDLE_MS = 45000;     // appelé par son prénom, pas regardé : 45 s sans rien dire → veille, même si on parle autour (journal du 30/10/26, 23h06)
 const NAME_GATE_MS = 7000;        // mode voiture : la 1re phrase doit contenir « Wilson » (vérifié sur la transcription, C6)
@@ -156,7 +159,7 @@ class App {
       'Voix de la tablette': `${s.ecoVoice || 'automatique'} (${this.voice.voices().length} voix françaises)`,
       'Souvenirs': `${this.memory.facts.length}`,
       'CRM': this.crm.on ? `relié — ${this.crm.state || 'pas encore interrogé'}${this.crm.cache.size ? `, ${this.crm.cache.size} fiche(s) gardée(s)` : ''}${this.crm.pending ? ', une écriture attend sa confirmation' : ''}${this.crm.queue.length ? `, ${this.crm.queue.length} écriture(s) confirmée(s) en attente du réseau` : ''}` : (this.settings.crm ? 'activé, mais pas de script sur cet appareil' : 'non relié'),
-      'Mode voiture': `${this.car ? `oui (${this.car.why})` : 'non'}${this.settings.voitureAuto && deviceName() === 'téléphone' ? `, automatique en roulant${this._geoErr ? ' (GPS : ' + this._geoErr + ')' : this.speed != null ? `, vitesse ${Math.round(this.speed * 3.6)} km/h` : ''}` : ''}`,
+      'Mode voiture': `${!VOITURE && !this.car ? 'supprimé' : this.car ? `oui (${this.car.why})` : 'non'}${VOITURE && this.settings.voitureAuto && deviceName() === 'téléphone' ? `, automatique en roulant${this._geoErr ? ' (GPS : ' + this._geoErr + ')' : this.speed != null ? `, vitesse ${Math.round(this.speed * 3.6)} km/h` : ''}` : ''}`,
       'Oreille (voiture)': this.oreille.ready ? `apprise, ${this.oreille.templates.length} empreintes, limite ${this.oreille.limite.toFixed(1)} (${this.oreille.sens})${this.oreille.last.length ? ' — dernières phrases : ' + this.oreille.last.slice(-8).map((x) => x.s + (x.oui ? '✓' : '')).join(' ') : ''}` : 'pas apprise',
       'Réglages communs': this.remote.on ? (this.sync.state || 'pas encore vérifiés') : 'pas de script : réglages propres à cet appareil',
       'Phrases échangées dans le journal': s.logContent === false ? 'masquées' : 'envoyées',
@@ -1401,7 +1404,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     document.body.classList.remove('car'); $('car').hidden = true; $('subtitle').hidden = !this.settings.subtitles;
     if (this.settings.camera && !this.vision && this.started) this._startVision();
   }
-  _carHint() { $('car-hint').textContent = this.oreille.ready ? 'Dis « Wilson » pour me parler' : 'Touche l\'écran pour me parler — apprends-moi ton nom : Réglages → CRM et voiture'; }
+  _carHint() { $('car-hint').textContent = this.oreille.ready ? 'Dis « Wilson » pour me parler' : 'Touche l\'écran pour me parler — apprends-moi ton nom : Réglages → CRM et prénom'; }
 
   // L'oreille a reconnu « Wilson » : réveil, avec le début de la phrase.
   _onName(d) {
@@ -1509,7 +1512,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   }
   // En roulant (téléphone, GPS) : mode voiture tout seul ; garé depuis 4 min : fin (C5).
   _watchSpeed() {
-    const want = !!this.settings.voitureAuto && deviceName() === 'téléphone' && !!navigator.geolocation;
+    const want = VOITURE && !!this.settings.voitureAuto && deviceName() === 'téléphone' && !!navigator.geolocation;
     if (!want) { if (this._geo != null) { navigator.geolocation.clearWatch(this._geo); this._geo = null; } return; }
     if (this._geo != null) return;
     let fast = 0, fastSince = 0, slowSince = 0, prev = null;
@@ -1913,7 +1916,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   _wireSensors() {
     const s = this.sensors;
     $('wake').addEventListener('pointerup', () => this.start(true));
-    $('car-btn').hidden = deviceName() !== 'téléphone';
+    $('car-btn').hidden = !VOITURE || deviceName() !== 'téléphone';
     $('car-btn').addEventListener('click', () => { if (this.car) this.exitCar('bouton'); else this.enterCar('bouton'); });
     $('car-exit').addEventListener('click', () => this.exitCar('bouton'));
     s.on('tap', () => {
