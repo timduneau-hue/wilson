@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.22.3';
+const VERSION = '1.22.4';
 const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
@@ -1096,12 +1096,20 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
       if (wilson) {
+        this._demandeTexte = null;
         this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson);
         // Journal du 30/10/26, 22h39 : « To hear your thoughts on something specific, just let me know. » → il le redit en français.
         if (enAnglais(wilson) && this.brain.open && performance.now() - (this._anglaisAt || -1e9) > 15000) {
           this._anglaisAt = performance.now(); this.log('Wilson a répondu en anglais : je lui demande de le redire en français');
           this.brain.sendText('[Tu viens de répondre en anglais. Redis-le maintenant en français, brièvement, sans t\'excuser. Toujours en français ensuite.]');
         }
+      }
+      // Demande transmise en texte (oreille) restée sans réponse alors qu'on le regardait : relance, une fois (01/11/26).
+      else if (!user && this._demandeTexte && this._demandeTexte.conv === this.convId && performance.now() - this._demandeTexte.at < 15000
+        && (this._demandeTexte.vu || this._gazing()) && this.brain.open && !this.paused && !hadTool && this._nudgedFor !== this._demandeTexte.texte) {
+        const D = this._demandeTexte; this._nudgedFor = D.texte; this._demandeTexte = null;
+        this.log('Wilson s\'est tu sur une demande dite en le regardant : relance');
+        this.brain.sendText(`[On te parlait en te regardant (« ${D.texte} ») : réponds maintenant, à voix haute.]`);
       }
       // (pas de relance pendant qu'un outil travaille : CRM ou recherche en cours, il répondra avec le résultat — journal du 25/10/26, 10h21)
       else if (user && realPhrase(user) && (this._gazeMode || this._byName) && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)
@@ -1429,7 +1437,14 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       if (this.settingsOpen) return;
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) {      // déjà en discussion : la demande part tout de suite
         this._byName = true; this._prenomAt = performance.now(); if (this.paused) this._resume();
-        if (r.demande) this.brain.sendText(this._texteDeLoin(r.demande, r.doute)); else this._ecouteSeule();
+        // Maintenance de nuit du 01/11/26 (journal du 31/10/26, 10h44 : « Euh... Wilson, tu me reçois ? » dit pendant
+        // qu'il le regardait de nouveau → envoyé « de loin, pas certain », il s'est tu et Timothée a dû répéter) :
+        // regardé quand la demande arrive → elle lui est adressée à coup sûr ; et s'il reste muet, relance une fois.
+        const vu = this._gazing();
+        if (r.demande) {
+          this.brain.sendText(vu ? this._texteRegarde(r.demande) : this._texteDeLoin(r.demande, r.doute));
+          this._demandeTexte = { texte: r.demande, at: performance.now(), conv: this.convId, vu };
+        } else if (!vu) this._ecouteSeule();
         this.lastActivity = performance.now();
         return;
       }
@@ -1446,6 +1461,9 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       if (att) { this._nomCalme = Date.now() + att * 1000; this.log(`Oreille (maison) : Google demande d'attendre, prochaine vérification dans ${att} s`); }
     }
     finally { this._nomEnCours = false; }
+  }
+  _texteRegarde(demande) {
+    return `[On vient de te dire, en te regardant : « ${demande} ». C'est pour toi : réponds maintenant, à voix haute, brièvement. La transcription peut être approximative : si elle ne veut rien dire, demande de répéter.]`;
   }
   _texteDeLoin(demande, doute = false) {
     return `[On vient de te parler de loin, sans te regarder (« Wilson, … », du canapé par exemple) : « ${demande} ». Fais-le ou réponds maintenant, brièvement. La transcription peut être approximative (de loin, télé possible) : si elle ne veut rien dire, demande-lui de répéter. Si la demande est vague sur ce qu'il faut faire (« l'éteindre », « ça », « le mettre ») ou ${doute ? 'si elle est mêlée à d\'autres phrases (on n\'est pas sûr qu\'on t\'ait appelé)' : 'si elle semble venir de la télé'}, n'agis pas sur la maison : demande d'abord de quoi il s'agit (« Tu veux que j'éteigne la grande lumière ? »). Si c'est visiblement quelqu'un qui parle de toi à une autre personne, ne dis rien.]`;
