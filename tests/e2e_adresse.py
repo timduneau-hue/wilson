@@ -45,7 +45,7 @@ async def main():
 
         ctx = await b.new_context(viewport={'width': 800, 'height': 1000}, permissions=['microphone', 'camera'], service_workers='block')
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps(
-            {'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'listenMode': 'regard', 'convTimeout': 12, 'voitureAuto': False, 'home': 'Timothée, sa femme Julie et Louis', 'haUrl': HA, 'haToken': 'jeton', 'v': 3}))
+            {'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'listenMode': 'regard', 'convTimeout': 12, 'voitureAuto': False, 'home': 'Timothée, sa femme Julie et Louis', 'haUrl': HA, 'haToken': 'jeton', 'prenomMaison': True, 'v': 3}))
         await ctx.add_init_script(FAKE_TTS); await ctx.add_init_script(GAZE)
         page = await ctx.new_page(); logs = []
         await page.route(re.compile(r'.*/vendor/(face_detection|models|mediapipe)/.*'), lambda r: asyncio.ensure_future(r.abort()))
@@ -135,6 +135,9 @@ async def main():
 
         # E3 : du canapé
         await page.evaluate("window.__look = false; wilson.oreille.templates = [[], [], []]; wilson.oreille.seuil = 1"); await page.wait_for_timeout(1800)
+        nfeed = await page.evaluate("(() => { let n = 0; const f = wilson.oreille.feed; wilson.oreille.feed = () => n++; wilson.settings.prenomMaison = false; wilson.audio._emit('frame', new Float32Array(320), new Int16Array(320), -40); wilson.settings.prenomMaison = true; wilson.audio._emit('frame', new Float32Array(320), new Int16Array(320), -40); wilson.oreille.feed = f; return n; })()")
+        check('Accord du 01/11/26 : à la maison, réglage « prenomMaison » décoché → l\'oreille ne guette pas « Wilson » (seulement le regard) ; coché → elle guette', nfeed == 1, str(nfeed))
+        check('… décoché par défaut', await page.evaluate("import('./js/settings.js').then((m) => m.DEFAULTS.prenomMaison === false)"))
         check('E3 : oreille prête et personne ne le regarde', await page.evaluate("wilson.oreille.ready && !wilson._gazing() && wilson.state === 'veille'"))
         await page.evaluate("window.__nom = false; window.__dem = 'allume la lumière jaune'; wilson.eco.appelDeLoin = async () => ({ appel: window.__nom, demande: window.__dem, texte: (window.__nom ? 'Wilson, ' : '') + window.__dem }); wilson.eco.nomDit = async () => window.__nom")
         await page.evaluate("wilson.oreille.onDetect({ score: 1.2, limite: 2 })"); await page.wait_for_timeout(1200)

@@ -435,12 +435,19 @@ Maintenance de nuit du 01/11/26 (**1.22.4**) : journal du 31/10/26, 09h44-11h11.
   ou au contraire (2) ne plus réveiller Wilson à la voix, seulement au regard ; (3) 10h00:58-10h01:11 « je t'avais
   demandé de noter des choses hier » → il a cherché dans les idées et les souvenirs, pas dans les remarques : lui donner
   la liste de ses remarques.
+- Accord de Timothée du 01/11/26 (« proposition 2 et 3 retenu »), fait en **1.23.0** :
+  - (2) à la maison, réveil seulement au regard : l'oreille ne guette plus « Wilson » hors voiture, sauf si la case
+    « À la maison, me réveiller aussi quand on dit « Wilson » sans me regarder » est cochée (réglage commun `prenomMaison`,
+    décoché par défaut ; Réglages → CRM et voiture). En voiture, rien ne change.
+  - (3) outil `mes_remarques` : relit les 10 dernières remarques gardées sur l'appareil, datées (sans les notes ajoutées
+    par l'appli) ; consigne : « ce qu'il t'a fait noter ou demandé de changer » → mes_remarques, pas idees.
+  - (1) mieux entendre « Wilson » de loin : pas retenu.
 - Vu aussi, sans correction : relances « juste après sa réponse » (09h59-10h01, le modèle refuse le réglage de
   proactivité, la relance rattrape en 1,5 à 2 s) ; Netflix lancé en 10,7 s (lenteur de Home Assistant).
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 01/11/26 : **version 1.22.4** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 01/11/26 : **version 1.23.0** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

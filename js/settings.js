@@ -24,7 +24,7 @@ export const DEFAULTS = {
   home: '', city: '', nightStart: 23, nightEnd: 7,
   camera: true, mirror: false, subtitles: false, face: 'lumiere', brainMode: 'auto', ecoVoice: '', ecoSpeed: 'rapide',
   logUrl: '', logContent: true,
-  crm: false, voitureAuto: true, oreilleSens: 'normal',      // CRM à la voix et mode voiture (PLAN 2 quater)
+  crm: false, voitureAuto: true, oreilleSens: 'normal', prenomMaison: false,   // prenomMaison : accord de Timothée du 01/11/26, à la maison seulement au regard      // CRM à la voix et mode voiture (PLAN 2 quater)
   haUrl: '', haToken: '',                                    // la maison par Home Assistant (PLAN 7 bis)
 };
 export const VOICES = [
@@ -89,7 +89,7 @@ export class SettingsUI {
     bind('s-cam', 'camera', Boolean, 'checked'); bind('s-mirror', 'mirror', Boolean, 'checked'); bind('s-subs', 'subtitles', Boolean, 'checked');
 
     // CRM et voiture (PLAN 2 quater)
-    bind('s-crm', 'crm', Boolean, 'checked'); bind('s-carauto', 'voitureAuto', Boolean, 'checked'); bind('s-earsens', 'oreilleSens');
+    bind('s-crm', 'crm', Boolean, 'checked'); bind('s-carauto', 'voitureAuto', Boolean, 'checked'); bind('s-prenommaison', 'prenomMaison', Boolean, 'checked'); bind('s-earsens', 'oreilleSens');
     $('s-crm').addEventListener('change', () => this.crmStatus(true));
     $('t-crm').onclick = () => this.crmStatus(true);
     $('t-car').onclick = () => { this.close(); if (app.car) app.exitCar('réglages'); else app.enterCar('réglages'); };
@@ -221,7 +221,7 @@ export class SettingsUI {
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
     $('s-logurl').value = s.logUrl || ''; $('s-logcontent').checked = s.logContent !== false;
-    $('s-crm').checked = !!s.crm; $('s-carauto').checked = s.voitureAuto !== false; $('s-earsens').value = s.oreilleSens || 'normal';
+    $('s-crm').checked = !!s.crm; $('s-carauto').checked = s.voitureAuto !== false; $('s-prenommaison').checked = !!s.prenomMaison; $('s-earsens').value = s.oreilleSens || 'normal';
     $('t-car').textContent = this.app.car ? 'Quitter le mode voiture' : 'Mode voiture maintenant';
     this.crmStatus(false); this.oreilleStatus();
     const sy = $('s-sync'), sys = this.app.sync.state;
