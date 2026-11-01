@@ -6,7 +6,7 @@ Si un détail technique contredit une règle ci-dessous, c'est le détail qui ch
 ## 1. Ce que Wilson doit être
 
 Un compagnon posé dans le salon, sur une Samsung Galaxy Tab S5e (SM-T720), branché et en Wi-Fi en permanence.
-Un visage original (grands yeux expressifs sur fond noir) qui vit, écoute, regarde, répond et se souvient.
+Un visage original (grands yeux expressifs sur fond noir ; **visage « Miel »**, choix de Timothée confirmé le 01/11/26) qui vit, écoute, regarde, répond et se souvient.
 
 ## 2. Règles de comportement (non négociables)
 
@@ -387,7 +387,7 @@ qui le fait, automatiquement, chaque nuit :
 | # | Quoi | Comment |
 |---|------|---------|
 | G1 | Remarques | Outil `remarque` : quand Timothée dit « c'est un bug », « tu devrais… », « ne fais plus ça », Wilson la met au propre et l'écrit dans le journal (ligne « REMARQUE DE TIMOTHÉE : … », gardée aussi sur la tablette). Il dit que c'est noté pour sa prochaine mise à jour. |
-| G2 | Maintenance de nuit | Tâche planifiée Claude, chaque nuit vers 2h47 (heure de Paris) : lit le journal des dernières 24 h (remarques en premier, puis erreurs, silences, relances, échecs d'outils), corrige le code de ce dépôt, ajoute un test pour chaque correction, lance tous les tests, monte la version, note la correction ici, publie. La tablette se met à jour toute seule en veille. |
+| G2 | Maintenance de la semaine | Tâche planifiée Claude, **une fois par semaine, le lundi vers 2h47** (heure de Paris ; chaque nuit jusqu'au 01/11/26, changé à la demande de Timothée) : lit le journal depuis la maintenance précédente (remarques en premier, puis erreurs, silences, relances, échecs d'outils), corrige le code de ce dépôt, ajoute un test pour chaque correction, lance tous les tests, monte la version, note la correction ici, publie. La tablette se met à jour toute seule en veille. |
 | G3 | Ce qui a changé | `version.json` porte `date` et `nouveautes` (phrase à la 2e personne pour Wilson). À la 1re discussion après la mise à jour, Wilson le dit en une phrase ; ensuite seulement si on le lui demande. |
 
 Garde-fous de la maintenance de nuit : rien publié si un test échoue ; pas de nouvelle grosse fonction, pas de changement
@@ -479,9 +479,18 @@ Corrigé :
   angles) dira d'où vient le faux regard (télé, photo, reflet) ; et si de vraies phrases sont « retenues » (regard trop strict
   de loin), assouplir.
 
+Décisions de Timothée du 01/11/26, 22h39 (**1.25.1**) : (1) mode voiture supprimé (confirmé ; fait en 1.24.0, le code
+reste en sommeil) ; (2) le visage est **Miel** : visage par défaut, et tout appareil resté sur l'ancien défaut « Lumière »
+passe à Miel (réglage daté, envoyé aux autres appareils par la synchronisation ; un autre choix est respecté) ;
+(3) l'analyse automatique des bugs passe **à une fois par semaine** (tâche « Wilson — maintenance de la semaine », lundi vers
+2h47, journal lu par paquets depuis la maintenance précédente, toutes les remarques de la semaine traitées et citées) ;
+(4) les remarques faites à Wilson vont bien au journal : ligne « REMARQUE DE TIMOTHÉE : … » (ex. 01/11/26 18h50:01 « Quand tu
+affiches des photos, je veux que ça dure 5 secondes. »), lue en premier par la maintenance. Test : `e2e_regard_sur.py`
+(visage Miel et passage depuis Lumière).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 01/11/26 : **version 1.25.0** en ligne (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 01/11/26 : **version 1.25.1** en ligne (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

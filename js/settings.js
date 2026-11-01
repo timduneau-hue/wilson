@@ -22,7 +22,7 @@ export const DEFAULTS = {
   apiKey: '', model: 'gemini-3.8-live', voice: 'Puck',
   listenMode: 'regard', gazeCalib: { yaw: 0, pitch: 0, down: 0 }, convTimeout: 12, bargeIn: 'prudente',
   home: '', city: '', nightStart: 23, nightEnd: 7,
-  camera: true, mirror: false, subtitles: false, face: 'lumiere', brainMode: 'auto', ecoVoice: '', ecoSpeed: 'rapide',
+  camera: true, mirror: false, subtitles: false, face: 'miel', brainMode: 'auto', ecoVoice: '', ecoSpeed: 'rapide',
   logUrl: '', logContent: true,
   crm: false, voitureAuto: true, oreilleSens: 'normal', prenomMaison: false,   // prenomMaison : accord de Timothée du 01/11/26, à la maison seulement au regard      // CRM à la voix et mode voiture (PLAN 2 quater)
   haUrl: '', haToken: '',                                    // la maison par Home Assistant (PLAN 7 bis)
@@ -40,6 +40,9 @@ export function loadSettings() {
   // Migration 1.4 : mode le plus rapide par défaut, conversation plus courte.
   if ((s.v || 1) < 2) { s.ecoSpeed = 'rapide'; if (s.convTimeout === 20) s.convTimeout = 12; s.v = 2; }
   if (s.v < 3) { s.listenMode = 'regard'; s.ecoSpeed = 'rapide'; s.v = 3; }   // 1.5 : écoute au regard, plus de mot-clé
+  // 1.25.1 : visage choisi par Timothée le 01/11/26 = Miel. Un appareil resté sur l'ancien visage par défaut passe à Miel
+  // (réglage daté : il part aussi vers les autres appareils par la synchronisation) ; un autre choix est respecté.
+  if (s.v < 4) { if (s.face === 'lumiere') { s.face = 'miel'; s._t = Date.now(); } s.v = 4; }
   try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (_) {}
   return s;
 }
