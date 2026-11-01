@@ -12,9 +12,9 @@ Un visage original (grands yeux expressifs sur fond noir) qui vit, écoute, rega
 
 | # | Règle | Comment c'est garanti |
 |---|-------|-----------------------|
-| R1 | Il ne parle que si on s'adresse à lui : **on lui parle en le regardant**. C'est le **regard** qui compte, pas la simple présence d'un visage (un visage seul : il te suit des yeux, écran tamisé, il n'écoute pas). | Caméra : orientation de la tête (yeux, nez) → « on me regarde » ; voix + regard = phrase pour Wilson. Plus de mot-clé « Wilson » (abandonné le 23/10/26 : trop lent sur la tablette). |
+| R1 | Il ne parle que si on s'adresse à lui : **on lui parle en le regardant**. C'est le **regard** qui compte, pas la simple présence d'un visage (un visage seul : il te suit des yeux, écran tamisé, il n'écoute pas). **Règle de Timothée du 01/11/26 : il ne répond, n'agit (maison, CRM, photo…) et n'engage la conversation que s'il est SÛR que les yeux de la personne le regardent.** | Caméra : orientation de la tête + yeux. Regard **confirmé** seulement si : yeux ouverts, tournés vers lui, sur au moins 3 analyses de suite et 0,6 s (un coup d'œil, une image furtive ou un faux visage ne suffisent plus). Une réponse ou un outil n'est permis que si, depuis sa dernière réponse, une phrase a été dite **pendant** que le regard était confirmé ; sinon la réponse est retenue (rien dit, rien fait) et le journal l'écrit (« Réponse retenue »). Toucher l'écran, les boutons Oui/Non, la suite d'une demande permise (recherche, CRM) restent permis ; les minuteurs et rappels qu'on lui a demandés sonnent quand même. Plus de mot-clé « Wilson » à la maison (sauf case « prenomMaison »). |
 | R2 | La phrase est transmise en entier. | Mémoire tampon : le début de la phrase (avant que le regard soit confirmé) est inclus. |
-| R3 | Pendant une discussion, on peut détourner les yeux **3 s** ; au-delà, il se met en veille ; dès qu'on le regarde de nouveau, il se réactive. | Règle de Timothée (24/10/26). Plus de 3 s sans regard (hors moments où il parle ou cherche) → veille : yeux mi-clos, écran tamisé, micro coupé vers Gemini. Regardé de nouveau dans les 12 s (« Fin de conversation après ») → reprise **instantanée** de la discussion (la session Gemini est gardée, le début de la phrase est transmis). Au-delà, la discussion est fermée ; regarder + parler la rouvre. Tant qu'on le regarde, il reste à l'écoute (60 s de silence au plus). |
+| R3 | Pendant une discussion, on peut détourner les yeux **3 s** ; au-delà, il se met en veille ; dès qu'on le regarde de nouveau, il se réactive. | Règle de Timothée (24/10/26). Plus de 3 s sans regard (hors moments où il parle ou cherche) → veille : yeux mi-clos, écran tamisé, micro coupé vers Gemini. Regardé de nouveau dans les 12 s (« Fin de conversation après ») → reprise **instantanée** de la discussion (la session Gemini est gardée, le début de la phrase est transmis). Au-delà, la discussion est fermée ; regarder + parler la rouvre. Tant qu'on le regarde, il reste à l'écoute (60 s de silence au plus). Depuis le 01/11/26 (R1) : pendant ces 3 s la discussion reste ouverte, mais une phrase dite sans le regarder n'a pas de réponse (même un « oui » juste après sa question : il faut le regarder). |
 | R4 | Il se tait si on lui coupe la parole. | Toucher l'écran (fiable). Coupure « prudente » (défaut) : micro sans annulation d'écho, Wilson n'écoute pas pendant qu'il parle. Coupure à la voix (« directe ») en option : annulation d'écho, mais sur Android le son passe alors en « mode appel » (plus faible, écouteur sur un téléphone). |
 | R5 | Il se tait si les gens parlent entre eux. | Pas de regard = pas d'écoute ; Gemini filtre en plus (« pour_moi ») ; 2 refus d'affilée → veille. |
 | R6 | Il voit ce qu'on lui montre, **seulement quand on le lui demande**. | Règle de Timothée (24/10/26) : aucune photo envoyée d'office. Quand on lui demande de regarder (une couleur, un objet, lire, « regarde ça »…), il dit « Je regarde… » et prend **une photo nette** (1 024 px, qualité moyenne côté Google) : outil « regarder » en direct, champ « regarder » + 2e requête avec la photo en économique. La caméra reste allumée pour le regard, analysé sur l'appareil. |
@@ -450,9 +450,38 @@ Maintenance de nuit du 01/11/26 (**1.22.4**) : journal du 31/10/26, 09h44-11h11.
 - Vu aussi, sans correction : relances « juste après sa réponse » (09h59-10h01, le modèle refuse le réglage de
   proactivité, la relance rattrape en 1,5 à 2 s) ; Netflix lancé en 10,7 s (lenteur de Home Assistant).
 
+Demande de Timothée du 01/11/26, 21h56 (**1.25.0**) : « il ne doit répondre ou engager la conversation que s'il est sûr que
+les yeux de l'interlocuteur le regardent » (le réveil au prénom était déjà coupé depuis la 1.23.0) ; « à un moment il a
+parlé alors que personne n'était devant la caméra ». Journal du 01/11/26, 18h47-20h51 :
+- 19h13:06-19h13:16 : discussion ouverte « au regard », puis « C'est sans commentaire Hudson. » → « D'accord, je reste à ta
+  disposition. » ; 19h13:29-19h13:33 : « I have to go » → « D'accord, je te souhaite une bonne fin de journée » ; aussi
+  18h49:03 « la base » → « Oui, je t'écoute » et 18h55:24 « le bain » → « Je n'ai pas bien compris », chaque fois juste
+  après un « regardé de nouveau ». Phrases de télé ou de pièce, réponses données sans que personne ne parle à Wilson.
+- 19h36-20h51 : une vingtaine de « Conversation ouverte (regard) » sans rien entendu, fermées 3 s plus tard.
+Causes trouvées dans le code : (1) une seule analyse « regarde » (pas confirmée) suffisait 1,5 s pour ouvrir la discussion
+(`_addressed` lisait `lookAt`) ; (2) le regard était « confirmé » après 2 analyses (0,25 s à 8 images/s), yeux mi-clos
+compris (paupières jusqu'à 80 %) ; (3) une fois la discussion ouverte, tout ce que le micro entendait partait vers Gemini
+pendant les 3 s de grâce, et Gemini décidait seul de répondre — l'appli ne vérifiait pas qu'on le regardait pendant la phrase.
+Corrigé :
+- `vision.js` : regard confirmé seulement après 3 analyses ET 0,6 s, paupières ≤ 55 % ; `sureAt` = dernier regard confirmé
+  (seul utilisé par l'appli) ; `lookInfo` (visages, taille, angles, paupières, durée) écrit au journal à chaque ouverture
+  (« Regard confirmé : … ») ; repères du visage à confiance 0,5 (0,3 avant) contre les faux visages.
+- `app.js` : verrou de réponse (`_reponsePermise`) : chaque morceau de voix envoyé est compté avec ou sans regard confirmé ;
+  une réponse n'est jouée et un outil n'est exécuté que si, depuis sa dernière réponse, une phrase a été dite en le regardant
+  (≥ 0,16 s de voix pendant le regard confirmé). Sinon « Réponse retenue » (rien joué, rien en sous-titre, ce qu'il aurait dit
+  au journal, pas de relance) et l'outil reçoit « ne fais rien et ne dis rien ». Permis sans regard : toucher l'écran, boutons
+  Oui/Non (30 s), suite d'un outil permis (jusqu'à ce que son résultat soit dit), réponse tardive. Mode économique : phrase
+  ignorée si elle n'a pas été dite en le regardant. Onglet État : « Réponses retenues ». Préenregistrement 1,6 s (au lieu de
+  1,2) pour ne pas perdre le début de la phrase avec la confirmation plus longue.
+- Minuteurs et rappels demandés sonnent toujours (c'est lui qui les a demandés).
+- Test `e2e_regard_sur.py` (19 vérifications).
+- À surveiller dans le journal : « Regard confirmé : … » au moment d'une ouverture non voulue (nombre de visages, taille,
+  angles) dira d'où vient le faux regard (télé, photo, reflet) ; et si de vraies phrases sont « retenues » (regard trop strict
+  de loin), assouplir.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 01/11/26 : **version 1.24.0** en ligne (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 01/11/26 : **version 1.25.0** en ligne (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

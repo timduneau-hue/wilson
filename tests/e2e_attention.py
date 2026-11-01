@@ -13,7 +13,7 @@ def check(name, ok, detail=''):
 GAZE = """window.__look = false; window.__face = true;
 setInterval(() => { const v = window.wilson && wilson.vision; if (!v) return;
   v.gazeReady = true; v.modelsDone = true; v.forceLook = false;
-  v.looking = !!window.__look; if (window.__look) v.lookAt = performance.now(); if (window.__face) { v.faceAt = performance.now(); v.hasPerson = true; } }, 30);"""
+  v.looking = !!window.__look; if (window.__look) v.lookAt = v.sureAt = performance.now(); if (window.__face) { v.faceAt = performance.now(); v.hasPerson = true; } }, 30);"""
 
 
 def audio_chunks(seconds):
@@ -149,6 +149,9 @@ async def main():
         check('Simple bruit (« Eh ») : pas de relance, « ... » compté comme silence', len(conn['texts']) == nt and not any(l.endswith('Wilson : ...') for l in logs))
         # « Salut » tout seul mérite une réponse ; le délai compte le tour muet + la relance (délai réellement ressenti).
         await page.wait_for_function('!wilson.audio.playing', timeout=5000); await page.wait_for_timeout(1000)
+        # La personne dit « Salut » en le regardant (R1 du 01/11/26 : sans phrase dite en le regardant, pas de relance).
+        await page.evaluate("(() => { const A = wilson.audio, iv = setInterval(() => { A.lastVoicedAt = performance.now(); }, 15); setTimeout(() => clearInterval(iv), 600); })()")
+        await page.wait_for_timeout(700)
         await page.evaluate("wilson.audio.speaking = false; wilson._speechEndAt = performance.now() - 300")
         conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Salut'}}}))
         conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': '<no speech>'}, 'turnComplete': True}}))
@@ -163,6 +166,8 @@ async def main():
         await page.wait_for_function('!wilson.audio.playing', timeout=5000); await page.wait_for_timeout(800)
         nt = len(conn['texts'])
         # Google signale une interruption sans que personne ne parle : la fin déjà reçue est jouée (pas de phrase coupée).
+        await page.evaluate("(() => { const A = wilson.audio, iv = setInterval(() => { A.lastVoicedAt = performance.now(); }, 15); setTimeout(() => clearInterval(iv), 600); })()")
+        await page.wait_for_timeout(700)
         say(2.0)
         await page.wait_for_timeout(300)
         conn['ws'].send(json.dumps({'serverContent': {'interrupted': True}}))

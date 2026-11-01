@@ -19,7 +19,7 @@ const CPU_ONLY = /[?&]cpu=1/.test(self.location.search);
 // Wilson restait figé). Échecs à la suite → retour au processeur ; sur le processeur, repères recréés.
 const health = { lmBad: 0, fixing: false, lastErr: '', debug: {} };
 const LM_OPTS = { runningMode: 'IMAGE', numFaces: 1, outputFacialTransformationMatrixes: true, outputFaceBlendshapes: true,
-  minFaceDetectionConfidence: 0.3, minFacePresenceConfidence: 0.3 };
+  minFaceDetectionConfidence: 0.3, minFacePresenceConfidence: 0.5 };   // 0,5 : moins de faux visages (01/11/26)
 const makeLandmarker = (delegate) => V.FaceLandmarker.createFromOptions(fileset, {
   baseOptions: { modelAssetPath: ROOT + 'vendor/models/face_landmarker.task', delegate }, canvas: new OffscreenCanvas(1, 1), ...LM_OPTS });
 const small = new OffscreenCanvas(64, 48), sg = small.getContext('2d', { willReadFrequently: true });

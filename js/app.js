@@ -19,8 +19,10 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.24.0';
-const PREROLL_MS = 1200;          // R2 : le début de la phrase (avant que le regard soit confirmé) est transmis
+const VERSION = '1.25.0';
+const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
+const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
+const SEG_VU_MIN = 8;             // R1 : une phrase « dite en le regardant » = au moins 8 blocs de 20 ms de voix avec le regard confirmé
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
 const TURN_GATE_MS = 5000;        // micro coupé pendant tout le tour de parole de Wilson (trous de réseau compris), 5 s max sans son
@@ -70,6 +72,7 @@ class App {
     this.face = new Face($('face'), { style: this.settings.face });
     this.face.setMood('somnolent'); this.face.setBrightness(0.35);
     this.audio = new AudioIO(); this.brain = new Brain();
+    { const r0 = this.brain.respond.bind(this.brain); this.brain.respond = (x) => { this._outilRepAt = performance.now(); return r0(x); }; }   // R1 : résultat d'outil rendu
     this.memory = new Memory(); this.vision = null; this.sensors = new Sensors($('face'));
     this.voice = new Voice(); this.eco = new EcoBrain(); this.mode = null; this.ecoState = null;
     this.ui = new SettingsUI(this);
@@ -144,6 +147,7 @@ class App {
     return {
       'Version': VERSION, 'Démarré le': d(this.bootAt), 'État': this.state, 'Cerveau en cours': this.mode || '—', 'Réglage cerveau': s.brainMode,
       'Écoute': `${s.listenMode}${this._gazeMode ? ' (regard actif : veille après 3 s sans regard)' : ''}${this.paused ? ', EN VEILLE (plus regardé)' : ''}`, 'Coupure': s.bargeIn, 'Fin de conversation': `${s.convTimeout} s`,
+      'Réponses retenues (personne ne le regardait)': String(this._nRetenues || 0),
       'Vision': v ? `${v.mode}, regard ${v.gazeReady ? 'prêt' : v.modelsDone ? 'indisponible' : 'en chargement'} (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}), analyse ${Math.round(v.stats.ms || 0)} ms (visages ${Math.round(v.stats.fd || 0)}, regard ${Math.round(v.stats.lm || 0)}), ${v.faces || 0} visage(s), on le regarde : ${v.looking ? 'oui' : 'non'}${v.errors.length ? ' — ' + v.errors.join(' · ') : ''}${v.restarts ? `, relancée ${v.restarts} fois` : ''}${v.fixes.length ? `, ${v.fixes.length} réparation(s)` : ''}` : 'caméra coupée',
       'Visage': `${this.drawFps || 0} images/s${this._light ? ', mode allégé' : ''}${this.face.maxDpr ? ', finesse ' + this.face.maxDpr : ''}`,
       'Retard de la tablette': `${Math.round(this.lag || 0)} ms`,
@@ -342,7 +346,8 @@ class App {
     if (this.paused) return false;                                      // en veille faute de regard : il n'écoute plus
     if (v.looking) return true;
     // R3 : pendant une discussion, on peut détourner les yeux 3 s ; sinon il faut le regarder (1,5 s de marge de détection).
-    return now - v.lookAt < (this.state === 'conversation' ? LOOK_GRACE_MS : 1500);
+    // Depuis le 01/11/26 : à partir du dernier regard CONFIRMÉ (sureAt), plus d'une simple analyse « regarde » (lookAt).
+    return now - (v.sureAt || 0) < (this.state === 'conversation' ? LOOK_GRACE_MS : 1500);
   }
 
   // Le regard pilote la discussion (R3) : actif seulement avec la détection du regard.
@@ -412,9 +417,42 @@ class App {
   }
 
   // On le regarde vraiment (pas seulement « discussion en cours ») : la phrase lui est destinée à coup sûr.
+  // Règle de Timothée du 01/11/26 : regard CONFIRMÉ (yeux ouverts, 0,6 s), avec 0,7 s de marge pour la fin d'un mot.
   _gazing(now = performance.now()) {
     const v = this.vision;
-    return !!(v && v.gazeReady && (this.settings.listenMode || 'regard') === 'regard' && (v.looking || now - v.lookAt < 1500));
+    return !!(v && v.gazeReady && !v.stale && (this.settings.listenMode || 'regard') === 'regard' && (v.looking || now - (v.sureAt || 0) < 700));
+  }
+
+  // ---------- R1 (règle de Timothée du 01/11/26) : répondre seulement s'il est SÛR qu'on le regarde ----------
+  // Chaque morceau de voix envoyé à Gemini est compté, avec ou sans regard confirmé. Une réponse (ou un outil) n'est permise
+  // que si, depuis sa dernière réponse, une phrase a été dite pendant qu'on le regardait — ou par un geste sûr (toucher,
+  // bouton Oui/Non), ou pour finir une demande déjà permise (recherche, CRM, réponse tardive).
+  get _verrouRegard() { return this._gazeMode && !this._byName && !this.car && !this.continuous; }
+  _noteVoix(now = performance.now()) {
+    if (now - this.audio.lastVoicedAt >= 60) return;
+    let S = this._seg;
+    if (!S || now - S.last > SEG_GAP_MS) { S = this._seg = { start: now, last: now, n: 0, vu: 0 }; (this._segs = this._segs || []).push(S); if (this._segs.length > 12) this._segs.shift(); }
+    S.last = now; S.n++; if (this._gazing(now)) S.vu++;
+  }
+  _permettre(ms, pourquoi) { const now = performance.now(); this._permisJusqua = Math.max(this._permisJusqua || 0, now + ms); this._permisPour = pourquoi; this._permisDepuis = now; }
+  // Depuis quand ses phrases comptent : depuis la fin de sa dernière réponse (sinon depuis le début de la discussion).
+  _depuisReponse() { return Math.max(this.playEndAt || 0, this._lastTurnAt || 0, this._convAt0 || 0) - 400; }
+  _phraseRegardee(now = performance.now()) {
+    const t = this._depuisReponse();
+    return (this._segs || []).some((S) => S.last >= t && S.vu >= SEG_VU_MIN);
+  }
+  _reponsePermise(now = performance.now()) {
+    if (!this._verrouRegard) return true;
+    if (now < (this._permisJusqua || 0)) return true;
+    return this._phraseRegardee(now);
+  }
+  // Pour le journal : ce que la caméra voyait (combien de visages, regard confirmé ou non, dernières phrases).
+  _etatRegard(now = performance.now()) {
+    const v = this.vision; if (!v) return 'caméra coupée';
+    const g = v.gaze, t = this._depuisReponse(), segs = (this._segs || []).filter((S) => S.last >= t);
+    const voix = segs.reduce((a, S) => a + S.n, 0) * 0.02, vu = segs.reduce((a, S) => a + S.vu, 0) * 0.02;
+    return `${v.faces || 0} visage(s), regard confirmé ${v.looking ? 'oui' : v.sureAt ? `il y a ${((now - v.sureAt) / 1000).toFixed(1)} s` : 'jamais'}`
+      + `${g ? `, tête ${Math.round(g.gazeYaw)}°/${Math.round(g.pitch)}°, paupières ${Math.round(g.blink * 100)} %` : ''}, voix ${voix.toFixed(1)} s dont ${vu.toFixed(1)} s en le regardant`;
   }
 
   // En veille : quelqu'un parle en regardant Wilson → la conversation démarre avec le début de sa phrase.
@@ -459,6 +497,13 @@ class App {
     // Mode voiture : la 1re phrase doit contenir « Wilson » (transcription de Gemini) ; sinon il se tait et se rendort (C6).
     this._gate = this.car && reason === 'prenom' ? { ok: false, buf: [], until: performance.now() + NAME_GATE_MS } : null;   // maison : le prénom est déjà vérifié par Gemini
     this._byName = reason === 'prenom' && !this.car;                    // E3 : ouverte par le prénom → pas besoin de le regarder
+    // R1 (01/11/26) : la phrase qui ouvre la discussion au regard a été dite avec le regard confirmé (_addressed) ; le toucher et
+    // les réveils pour une réponse attendue sont des demandes sûres.
+    this._segs = []; this._seg = null; this._permisJusqua = 0; this._convAt0 = performance.now();
+    if (reason === 'regard') { this._seg = { start: performance.now(), last: performance.now(), n: SEG_VU_MIN, vu: SEG_VU_MIN }; this._segs.push(this._seg);
+      const L = this.vision && this.vision.lookInfo;
+      this.log(`Regard confirmé : ${L ? `${L.faces} visage(s), taille ${L.size}, tête ${L.yaw}°/${L.pitch}°, paupières ${Math.round(L.blink * 100)} %, ${L.n} analyses en ${L.ms} ms${L.force ? ' (simulé)' : ''}` : 'détails indisponibles'}`); }
+    if (['toucher', 'test', 'apres_appel', 'apres_appel_entrant', 'reponse_tardive'].includes(reason)) this._permettre(30000, reason);
     if (mode === 'eco') return this._startEco(reason, preroll);
     this.mode = 'live';
     this.pending = preroll;
@@ -519,7 +564,7 @@ class App {
     this.log(`Conversation ouverte en mode économique (${reason})`);
     if ((reason === 'prenom' || reason === 'regard') && chunks.length) {
       const len = chunks.reduce((a, c) => a + c.length, 0);
-      this.ecoState.cap = { chunks: chunks.slice(), len, lastVoice: now, wake: reason === 'prenom', voiced: 3, looked: 1, gazed: reason === 'regard' ? 1 : 0, peak: this.audio.db };
+      this.ecoState.cap = { chunks: chunks.slice(), len, lastVoice: now, wake: reason === 'prenom', voiced: 3, looked: 1, gazed: reason === 'regard' ? SEG_VU_MIN : 0, peak: this.audio.db };
     } else if (reason === 'test') this._ecoSend({ text: '[Présente-toi en une phrase, avec chaleur.]' });
     else if (reason === 'toucher') this._say(['Oui ?', "Je t'écoute.", 'Oui, dis-moi ?'][Math.floor(Math.random() * 3)]);
     else if (reason === 'apres_appel') this._ecoSend({ text: this._apresAppelTexte() });
@@ -572,6 +617,11 @@ class App {
     if (!audio) { if (!spec) this.log('Rien d\'audible, phrase ignorée'); return null; }
     if (!cap.wake && (audio.length < 16000 * 0.5 || (cap.voiced || 0) < 15)) return null;  // trop court : un bruit
     if (!cap.wake && !cap.looked) return null;                                              // personne ne le regardait
+    // R1 (règle de Timothée du 01/11/26) : il ne répond que si la phrase a été dite en le regardant (regard confirmé).
+    if (!cap.wake && this._verrouRegard && (cap.gazed || 0) < SEG_VU_MIN && !(performance.now() < (this._permisJusqua || 0))) {
+      if (!spec) this.log(`Phrase ignorée : personne ne me regardait vraiment pendant la phrase (${this._etatRegard()})`);
+      return null;
+    }
     // Indication pour Gemini : on le regardait (réponds), ou simple suite de la discussion (réponds seulement si c'est clair).
     const pol = this.settings.listenMode || 'regard';
     const hint = pol !== 'regard' || cap.wake ? '' : cap.gazed ? 'La personne te regardait en disant cela : elle te parle, réponds-lui (pour_moi true) sauf si on n\'entend que ta propre voix ou rien d\'intelligible.'
@@ -973,7 +1023,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         if (this.settings.prenomMaison && this.oreille.ready && !this.settingsOpen && !this.speaking && performance.now() - this.playEndAt > 800 && !this._gazing()) this.oreille.feed(f32, this.audio.speaking);
         this._watchFrame(); return;
       }
-      if (this.state === 'eveil') { if (this.pending) this.pending.push(i16); return; }
+      if (this.state === 'eveil') { if (this.pending) { this.pending.push(i16); this._noteVoix(); } return; }
       if (this.state === 'conversation' && this.mode === 'eco') {
         // Pendant qu'il parle, le micro entend sa propre voix : on n'enregistre rien, on guette seulement
         // « stop », « chut », « arrête » avec l'oreille locale (et la voix forte si « coupure directe » est choisie).
@@ -993,6 +1043,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       }
       if (this.paused) return;                                         // plus regardé : rien ne part (R3, R9)
       if (now - this.audio.lastVoicedAt < 60 && !this.audio.playing) this.lastUserVoice = now;   // la personne parle (base du délai)
+      this._noteVoix(now);                                             // R1 : dite en le regardant, ou pas
       this.outBuf.push(i16); this.outLen += i16.length;
       if (this.outLen >= 1600) { this.brain.sendAudio(concat(this.outBuf)); this.outBuf = []; this.outLen = 0; }
     });
@@ -1045,6 +1096,13 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     b.on('audio', (i16, rate) => this._liveAudio(i16, rate));
     this._liveAudio = (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
+      // R1 (règle de Timothée du 01/11/26) : il ne parle que s'il est sûr qu'on le regardait en lui parlant.
+      if (this._retenu === this._turnN) return;
+      if (!this._liveTurn && !this.audio.playing && !this._reponsePermise()) {
+        this._retenu = this._turnN; this._nRetenues = (this._nRetenues || 0) + 1;
+        this.log(`Réponse retenue : personne ne me regardait vraiment pendant la phrase (${this._etatRegard()})`);
+        return;
+      }
       const G = this._gate;
       if (G && !G.ok) {
         if (performance.now() < G.until) { G.buf.push([i16, rate]); return; }   // réponse retenue : le nom n'est pas encore vérifié
@@ -1086,7 +1144,19 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       }
       this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._modelTalking = 0;
       wilson = cleanSpeech(wilson);
+      if (this._retenu === this._turnN - 1) {
+        // Réponse retenue (R1) : rien n'a été dit ; on note ce qu'il aurait dit, et surtout pas de relance.
+        this._retenu = null; this._liveTurn = null; this._modelTalking = 0;
+        if (user) this.log(`Entendu (sans regard) : « ${user.slice(0, 160)} »`, true);
+        this.log(`Wilson se tait (personne ne le regardait)${wilson ? ` — il aurait dit : « ${wilson.slice(0, 100)} »` : ''}`, true);
+        if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
+        $('subtitle').textContent = '';
+        return;
+      }
       if (wilson) this._lastTurnAt = performance.now();   // un tour muet (puis relance) ne compte pas : délai réellement ressenti
+      // La suite d'une demande (outil) est dite : la permission donnée par l'outil s'arrête ; la prochaine phrase devra être
+      // dite en le regardant (R1). Le toucher et les boutons gardent leurs 30 s.
+      if (wilson && /^outil/.test(this._permisPour || '') && (this._outilRepAt || 0) >= (this._permisDepuis || 0) && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)) this._permisJusqua = 0;
       if (user) this.log(`Entendu : « ${user.slice(0, 160)} »`, true);
       const imgs = this._imgN || 0, T = this._liveTurn; this._imgN = 0;
       if (T && wilson) {
@@ -1116,7 +1186,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         this.brain.sendText(`[On te parlait en te regardant (« ${D.texte} ») : réponds maintenant, à voix haute.]`);
       }
       // (pas de relance pendant qu'un outil travaille : CRM ou recherche en cours, il répondra avec le résultat — journal du 25/10/26, 10h21)
-      else if (user && realPhrase(user) && (this._gazeMode || this._byName) && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)
+      else if (user && realPhrase(user) && (this._gazeMode || this._byName) && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && this._reponsePermise() && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)
         && (this._dialogueEnCours() || this._semblePourMoi(user)) && !this._autrePrenom(user) && !(this.vision && this.vision.faces > 1)) {
         // Écoute au regard : tout ce qu'il entend lui est adressé. Une vraie phrase restée sans réponse (souvent la 1re
         // d'une discussion, journal du 24/10/26) → on lui demande de répondre, une seule fois.
@@ -1124,7 +1194,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         const deLoin = this._byName && !this._gazing();
         this.log(`Wilson s'est tu alors qu'on lui parlait${deLoin ? ' (appelé par son prénom)' : ' en le regardant'}${this._dialogueEnCours() ? ', juste après sa réponse' : ''} : relance`);
         this.brain.sendText(`[On te parlait${deLoin ? '' : ' en te regardant'} : réponds maintenant, à voix haute, à ce qui vient d'être dit.]`);
-      } else this.log(`Wilson se tait (il pense que la phrase n'était pas pour lui${user && this._gazeMode && !this._dialogueEnCours() && !this._semblePourMoi(user) ? ' : pas une demande pour lui' : this.vision && this.vision.faces > 1 ? ' : plusieurs personnes devant lui' : ''})`);
+      } else this.log(`Wilson se tait (il pense que la phrase n'était pas pour lui${user && this._verrouRegard && !this._reponsePermise() ? ' : personne ne le regardait' : user && this._gazeMode && !this._dialogueEnCours() && !this._semblePourMoi(user) ? ' : pas une demande pour lui' : this.vision && this.vision.faces > 1 ? ' : plusieurs personnes devant lui' : ''})`);
       setTimeout(() => { if (!this.audio.playing) $('subtitle').textContent = ''; }, 5000);
     });
     b.on('heard', (t) => {
@@ -1132,7 +1202,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this.lastActivity = this._heardAt = performance.now(); this._noteHeard(t);
       if (this._gate && !this._gate.ok && nomDit(t)) this._gateOpen('nom entendu');
     });
-    b.on('said', (t) => { if (this.settings.subtitles || this.car) $('subtitle').textContent = cleanSpeech(t).slice(-220); });
+    b.on('said', (t) => { if (this._retenu === this._turnN) return; if (this.settings.subtitles || this.car) $('subtitle').textContent = cleanSpeech(t).slice(-220); });
     b.on('toolcall', (calls) => this._tools(calls));
     b.on('toolcancel', (ids) => {        // la personne a coupé Wilson pendant une recherche : on l'abandonne
       for (const id of ids) {
@@ -1262,6 +1332,12 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (calls.some((c) => c.name !== 'exprimer_emotion' && c.name !== 'memoriser')) this._toolTurn = this._turnN;
     for (const c of calls) {
       const a = c.args || {};
+      if (!['exprimer_emotion'].includes(c.name) && !this._reponsePermise()) {
+        this.log(`Outil ${c.name} refusé : personne ne me regardait vraiment pendant la phrase (${this._etatRegard()})`, true);
+        res.push({ id: c.id, name: c.name, response: { result: "Personne ne te regardait : ce n'était pas pour toi. Ne fais rien et ne dis rien." } });
+        continue;
+      }
+      if (c.name !== 'exprimer_emotion') this._permettre(95000, 'outil ' + c.name);
       const pasDemande = this._outilPasDemande(c);
       if (pasDemande) {
         this.log(`Outil ${c.name} refusé : rien de tel dans ce qui a été dit (« ${this._entenduRecent().slice(-120)} »)`, true);
@@ -1767,7 +1843,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this.log(`Réponse à « ${A.question.slice(0, 80)} » arrivée après ${s} s${this.state === 'conversation' ? '' : ' : je me réveille pour la dire'}`, true);
     this._lateText = `[La recherche dans le CRM que tu avais lancée pour la question « ${A.question} » est terminée (${s} s). Résultat : ${dire} Dis-la-lui maintenant, en commençant par « J'ai la réponse à ta question sur … » (quelques mots du sujet).]`;
     this._lateSay = `J'ai la réponse à ta question. ${dire}`;
-    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) { this.brain.sendText(this._lateText); return; }
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) { this._permettre(30000, 'réponse tardive'); this.brain.sendText(this._lateText); return; }
     if (this.state === 'conversation') { this._say(this._lateSay); return; }
     this.startConversation('reponse_tardive');
   }
@@ -1843,11 +1919,13 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this.log('Écriture confirmée en touchant « Oui » à l\'écran');
     let r;
     try { r = await this.crm.commit(); } catch (e) { r = { dire: `Le CRM ne répond pas (${e.message}) : rien n'est écrit, dis-le simplement.`, phrase: 'Le CRM ne répond pas : rien n\'est écrit.' }; }
+    this._permettre(30000, 'bouton Oui');
     if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Timothée a confirmé en touchant « Oui » sur l'écran. ${r.dire}]`);
     else if (r.phrase) this._say(r.phrase);
   }
   _refuseTap() {
     this.crm.pending = null; this.hideCard('confirm'); this.log('Écriture annulée à l\'écran');
+    this._permettre(30000, 'bouton Non');
     if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText('[Timothée a touché « Non » : rien n\'est enregistré. Demande-lui en une phrase ce qu\'il faut changer.]');
   }
   // Appel lancé : Wilson se tait ; au retour, il propose le compte rendu de l'appel.
@@ -2005,7 +2083,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         // réseau coupé : la discussion attend (C8), son délai à elle décide
       } else if (this._gazeMode && !this.continuous && !this._byName) {
         // R3 : le regard pilote la discussion. 3 s sans regard (sauf s'il parle ou cherche) → veille ; regardé → reprise.
-        const lastSeen = Math.max(v.lookAt || 0, this.playEndAt || 0, this._resumedAt || 0, this._convAt || 0);
+        const lastSeen = Math.max(v.sureAt || 0, this.playEndAt || 0, this._resumedAt || 0, this._convAt || 0);
         if (this.paused) {
           if (v.looking) this._resume();
           else if (now - this._pausedAt > keep) this.endConversation('plus regardé');
