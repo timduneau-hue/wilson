@@ -86,13 +86,14 @@ async def main():
         page.on('console', lambda m: logs.append(m.text)); page.on('pageerror', lambda e: logs.append('PAGEERROR ' + str(e)))
         await page.goto('http://127.0.0.1:8765/index.html')
         await page.wait_for_function('window.wilson && wilson.state === "veille" && wilson.started', timeout=20000)
-        check('Téléphone : bouton « Mode voiture » visible', await page.evaluate("!document.getElementById('car-btn').hidden"))
+        check('Mode voiture supprimé (demande du 01/11/26) : pas de bouton sur le téléphone, rien dans les réglages, bilan « supprimé »', await page.evaluate("document.getElementById('car-btn').hidden && !document.getElementById('s-carauto') && !document.getElementById('t-car') && wilson.bilan()['Mode voiture'] === 'supprimé'"))
+        # Le code reste en sommeil : la suite le vérifie en l'allumant directement (comme le faisait le bouton)
 
         r = await page.evaluate(LOAD_WAV, ['nom_0', 'nom_1', 'nom_2', 'nom_3', 'nom_4', 'calib_sans_nom'])
         check('Oreille apprise (5 « Wilson » + 1 phrase sans le nom)', r['ok'] and r['n'] == 5, json.dumps(r)[:200])
 
         # Bouton voiture
-        await page.click('#car-btn')
+        await page.evaluate("wilson.enterCar('bouton')")
         st = await page.evaluate("({ car: !!wilson.car, cls: document.body.classList.contains('car'), vision: !!wilson.vision, hint: document.getElementById('car-hint').textContent, ov: !document.getElementById('car').hidden })")
         check('Mode voiture : écran voiture, caméra coupée, « Dis Wilson »', st['car'] and st['cls'] and st['ov'] and not st['vision'] and 'Wilson' in st['hint'], str(st))
         await page.wait_for_timeout(1500)
@@ -145,9 +146,9 @@ async def main():
             lat += 0.0005; await ctx.set_geolocation({'latitude': lat, 'longitude': -0.88, 'accuracy': 10}); await page.wait_for_timeout(2300)
             if await page.evaluate('!!wilson.car'): break
         st = await page.evaluate("({ car: wilson.car, speed: wilson.speed })")
-        check('En roulant (GPS) : mode voiture tout seul', st['car'] and st['car']['why'] == 'en roulant', str(st))
+        check('Mode voiture supprimé (01/11/26) : en roulant (GPS), il ne s\'allume plus tout seul', not st['car'], str(st))
         bil = await page.evaluate('wilson.bilan()')
-        check('Bilan du journal : mode voiture, vitesse, oreille, CRM', 'en roulant' in bil['Mode voiture'] and 'km/h' in bil['Mode voiture'] and 'apprise' in bil['Oreille (voiture)'] and 'relié' in bil['CRM'], json.dumps({k: bil[k] for k in ('Mode voiture', 'Oreille (voiture)', 'CRM')}, ensure_ascii=False))
+        check('Bilan du journal : mode voiture, vitesse, oreille, CRM', bil['Mode voiture'] == 'supprimé' and 'apprise' in bil['Oreille (voiture)'] and 'relié' in bil['CRM'], json.dumps({k: bil[k] for k in ('Mode voiture', 'Oreille (voiture)', 'CRM')}, ensure_ascii=False))
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
         await b.close()

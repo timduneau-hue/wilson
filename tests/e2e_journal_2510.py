@@ -119,7 +119,7 @@ async def main():
         for _ in range(16):
             lat += 0.00025; await ctx.set_geolocation({'latitude': lat, 'longitude': -0.88, 'accuracy': 10}); await page.wait_for_timeout(1100)
             if await page.evaluate('!!wilson.car'): break
-        check('En roulant vraiment : mode voiture tout seul', await page.evaluate("!!wilson.car && wilson.car.why === 'en roulant'"), str(await page.evaluate('wilson.speed')))
+        check('Mode voiture supprimé (01/11/26) : même en roulant vraiment, il ne s\'allume plus tout seul (GPS non suivi)', await page.evaluate("!wilson.car && wilson._geo == null"), str(await page.evaluate('wilson.speed')))
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
         await b.close()

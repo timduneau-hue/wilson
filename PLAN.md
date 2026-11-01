@@ -442,12 +442,17 @@ Maintenance de nuit du 01/11/26 (**1.22.4**) : journal du 31/10/26, 09h44-11h11.
   - (3) outil `mes_remarques` : relit les 10 dernières remarques gardées sur l'appareil, datées (sans les notes ajoutées
     par l'appli) ; consigne : « ce qu'il t'a fait noter ou demandé de changer » → mes_remarques, pas idees.
   - (1) mieux entendre « Wilson » de loin : pas retenu.
+- Demande de Timothée du 01/11/26 : « supprime le mode voiture aussi », fait en **1.24.0** : plus de bouton voiture sur le
+  téléphone, plus de case « mode voiture tout seul en roulant » ni de bouton « Mode voiture maintenant » dans les réglages
+  (rubrique renommée « CRM et prénom »), GPS plus suivi ; bilan « Mode voiture : supprimé ». Le code reste en sommeil
+  (`VOITURE = false` dans `app.js`), toujours vérifié par `e2e_car.py` et `e2e_route.py` qui l'allument directement, pour
+  pouvoir le remettre si Timothée le redemande. Le CRM à la voix reste (à la maison).
 - Vu aussi, sans correction : relances « juste après sa réponse » (09h59-10h01, le modèle refuse le réglage de
   proactivité, la relance rattrape en 1,5 à 2 s) ; Netflix lancé en 10,7 s (lenteur de Home Assistant).
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 01/11/26 : **version 1.23.0** en ligne (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 01/11/26 : **version 1.24.0** en ligne (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
