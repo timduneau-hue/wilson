@@ -80,7 +80,12 @@ async def main():
         check('Setup Gemini : modèle, voix, outils, VAD', s['model'] == 'models/gemini-3.8-live' and s['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']['voiceName'] == 'Puck'
               and any('functionDeclarations' in t for t in s['tools']) and 'realtimeInputConfig' in s, s['model'])
         check('Consigne système contient les règles et la date', ('d\'habitude c\'est pour toi' in s['systemInstruction']['parts'][0]['text'] or 'ne dis rien du tout' in s['systemInstruction']['parts'][0]['text']) and 'Nous sommes' in s['systemInstruction']['parts'][0]['text'])
-        await page.wait_for_timeout(1200)
+        # Le son part au fil de l'eau : on l'attend (3 s au plus) plutôt qu'une durée fixe (le visage Miel, plus lourd à
+        # dessiner sur une machine de test sans carte graphique, retarde un peu les blocs ; 01/11/26).
+        for _ in range(30):
+            if conn['audio_bytes'] >= 16000 * 3: break
+            await page.wait_for_timeout(100)
+        await page.wait_for_timeout(300)
         check('Tampon envoyé (≥ 3 s d\'audio avant/pendant le prénom)', conn['audio_bytes'] >= 16000 * 3, f"{conn['audio_bytes'] / 16000:.1f}s, 1er bloc {conn['first_audio_len']} éch.")
         check('Aucune image envoyée au réveil (photo seulement à la demande)', conn['images'] == 0, f"{conn['images']} image(s)")
         # Photo à la demande : l'outil « regarder » envoie une seule photo nette, puis répond.
