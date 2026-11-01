@@ -74,7 +74,7 @@ async def main():
         await page.evaluate("wilson.continuous = true"); c = conns[-1]
         fns = [f['name'] for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', [])]
         sysp = c['setup']['systemInstruction']['parts'][0]['text']
-        check('Outils proposés à Gemini : afficher, fermer_ecran, minuteur, rappel, meteo, courses', all(x in fns for x in ['afficher', 'fermer_ecran', 'minuteur', 'rappel', 'meteo', 'courses', 'idees', 'remarque']), str(fns))
+        check('Outils proposés à Gemini : afficher, fermer_ecran, minuteur, rappel, meteo, courses', all(x in fns for x in ['afficher', 'fermer_ecran', 'minuteur', 'rappel', 'meteo', 'courses', 'idees', 'remarque', 'mes_remarques']), str(fns))
         check('Consigne : afficher les réponses longues, météo par l\'outil meteo', 'appelle afficher' in sysp and 'meteo (pour la météo' in sysp and '(météo, actualités' not in sysp)
         async def tool(i, name, args):
             await page.evaluate("([i, n, a]) => wilson._tools([{ id: i, name: n, args: a }])", [i, name, args])
@@ -142,6 +142,10 @@ async def main():
         r = await page.evaluate("wilson.outils.remarque({ texte: 'Ne te mets pas en veille quand je te fais un reproche' })")
         journal = await page.evaluate("localStorage.getItem('wilson.remarques') || ''") + ' '.join(logs[-30:])
         check('Remarque (F7) : notée pour la prochaine mise à jour, gardée dans le journal', 'prochaine mise à jour' in r and 'reproche' in journal, r + journal[-200:])
+        await page.evaluate("wilson.outils.remarque({ texte: '(notée par l\\'appli : test interne)' })")
+        r = await page.evaluate("wilson.outils.run('mes_remarques', {})")
+        sysm = await page.evaluate("wilson._system()")
+        check('Accord du 01/11/26 : « tu te rappelles ce que je t\'ai fait noter ? » → mes_remarques relit ses remarques datées (pas les notes internes), consigne à jour', 'reproche' in r and 'notée par l' not in r and '/' in r and 'mes_remarques' in sysm, r)
         e0 = await page.evaluate("wilson.outils.afficher({ titre: 'Court', texte: 'Une ligne' }).then(() => wilson.outils._ecranMs)")
         e1 = await page.evaluate("wilson.outils.afficher({ titre: 'Long', texte: Array.from({length: 12}, (_, i) => 'ligne ' + i).join('\\n') }).then(() => wilson.outils._ecranMs)")
         check('Écran : s\'efface tout seul (90 s pour un texte court, 4 min pour un long)', e0 == 90000 and e1 == 240000, f'{e0} {e1}')

@@ -28,6 +28,8 @@ export const OUTILS = [
   { name: 'remarque', behavior: 'BLOCKING',
     description: "Remarque de Timothée sur ton fonctionnement, pour ta prochaine mise à jour (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile.",
     parameters: { type: 'OBJECT', properties: { texte: S }, required: ['texte'] } },
+  { name: 'mes_remarques', behavior: 'BLOCKING',   // accord de Timothée du 01/11/26 (« je t'avais demandé de noter des choses hier »)
+    description: "Relire les remarques que Timothée t'a faites pour tes mises à jour (« qu'est-ce que je t'ai demandé de changer ? », « tu te rappelles ce que je t'ai fait noter hier ? »), avec leur date." },
 ];
 export const OUTILS_NAMES = OUTILS.map((t) => t.name);
 
@@ -69,6 +71,7 @@ export class Outils {
       case 'courses': return this.courses(a);
       case 'idees': return this.idees(a);
       case 'remarque': return this.remarque(a);
+      case 'mes_remarques': return this.mesRemarques();
       default: return 'Outil inconnu.';
     }
   }
@@ -335,6 +338,13 @@ export class Outils {
     this.log(`REMARQUE DE TIMOTHÉE : ${t}`, true);
     const l = lire('wilson.remarques', []); l.push({ t: Date.now(), texte: t }); ecrire('wilson.remarques', l.slice(-50));
     return 'Remarque notée : elle sera lue pour ta prochaine mise à jour (chaque nuit). Dis-le simplement, en une phrase.';
+  }
+
+  mesRemarques() {
+    const l = lire('wilson.remarques', []).filter((r) => r && r.texte && !/^\(notée par l'appli/.test(r.texte)).slice(-10);
+    if (!l.length) return 'Aucune remarque notée sur cet appareil.';
+    const d = (t) => { const x = new Date(t); return `${pad(x.getDate())}/${pad(x.getMonth() + 1)}/${String(x.getFullYear()).slice(2)} ${pad(x.getHours())}h${pad(x.getMinutes())}`; };
+    return `Ses remarques pour tes mises à jour (${l.length}, la plus récente en dernier) : ${l.map((r) => `${d(r.t)} : ${r.texte}`).join(' ; ')}. Celles d'avant la dernière mise à jour ont pu être prises en compte (les nouveautés de ta mise à jour le disent). Résume-les simplement.`;
   }
 
   // Pour la consigne : ce qui est en cours.
