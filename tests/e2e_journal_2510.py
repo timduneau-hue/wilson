@@ -18,7 +18,7 @@ setInterval(() => { const v = window.wilson && wilson.vision; if (!v) return;
   if (!v.__fake) { v.__fake = true; try { v.worker && v.worker.terminate(); } catch (_) {} v.worker = { postMessage() {}, terminate() {} }; v._startWorker = () => {}; }
   v.gazeReady = true; v.modelsDone = true;
   if (window.__stall) return;
-  v._lastResult = performance.now(); v.looking = !!window.__look; if (window.__look) v.lookAt = performance.now(); v.faceAt = performance.now(); v.hasPerson = true; }, 30);"""
+  v._lastResult = performance.now(); v.looking = !!window.__look; if (window.__look) v.lookAt = v.sureAt = performance.now(); v.faceAt = performance.now(); v.hasPerson = true; }, 30);"""
 
 
 async def main():

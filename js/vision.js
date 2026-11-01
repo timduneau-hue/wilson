@@ -7,7 +7,12 @@
 //  2. pour chaque visage, gros plan → repères fins (MediaPipe Face Landmarker) → orientation de la tête + yeux.
 
 // Seuils (degrés / scores 0..1), après calibrage. Assez larges : on regarde rarement la tablette pile en face.
-const LOOK = { yaw: 25, pitchUp: 28, pitchDown: -35, down: 0.6, blink: 0.8 };
+// Yeux bien ouverts (blink ≤ 0,55) : règle de Timothée du 01/11/26, il doit être SÛR que les yeux le regardent.
+const LOOK = { yaw: 25, pitchUp: 28, pitchDown: -35, down: 0.6, blink: 0.55 };
+// Regard confirmé : au moins 3 analyses de suite ET 0,6 s « regarde » (avant : 2 analyses, soit 0,25 s à 8 images/s).
+// Un coup d'œil, une image furtive ou un faux visage ne suffisent plus (journal du 01/11/26, 19h13 : il a répondu
+// alors que personne n'était devant la caméra).
+export const LOOK_CONFIRM = { n: 3, ms: 600 };
 
 export class Vision {
   constructor() {
@@ -18,7 +23,7 @@ export class Vision {
     this.fps = 3; this.mirror = true; this._timer = null; this.onPresence = null; this._busy = false; this._sentAt = 0;
     // Regard
     this.looking = false; this.lookAt = 0; this.faceAt = 0; this.gaze = null; this.faces = 0;
-    this._facingN = 0; this._awayN = 0; this.onLook = null; this.forceLook = false; this.calib = { yaw: 0, pitch: 0, down: 0 };
+    this._facingN = 0; this._awayN = 0; this._facingSince = 0; this.sureAt = 0; this.lookInfo = null; this.onLook = null; this.forceLook = false; this.calib = { yaw: 0, pitch: 0, down: 0 };
     this.stats = { ms: 0, last: 0, trip: 0, n: 0 };
     this._lastResult = 0; this.restarts = 0; this.fixes = []; this.camRestarts = 0; this._noVideo = 0;
   }
@@ -143,11 +148,19 @@ export class Vision {
     } else if (d.mn > 25) found = [d.mx, d.my, 0.2];
     if (this.forceLook) { facing = true; this.faceAt = now; }
 
-    // Lissage : 2 analyses « regarde » pour s'allumer, 3 « ne regarde pas » pour s'éteindre.
-    if (facing) { this._facingN++; this._awayN = 0; this.lookAt = now; } else { this._awayN++; this._facingN = 0; }
+    // Lissage : regard confirmé après 3 analyses ET 0,6 s « regarde » ; 3 « ne regarde pas » pour s'éteindre.
+    // lookAt = dernière analyse « regarde » (même non confirmée) ; sureAt = dernier instant où le regard était CONFIRMÉ :
+    // c'est sureAt (jamais lookAt) qui permet à Wilson d'écouter et de répondre.
+    if (facing) { if (!this._facingN) this._facingSince = now; this._facingN++; this._awayN = 0; this.lookAt = now; } else { this._awayN++; this._facingN = 0; }
     const was = this.looking;
-    if (!this.looking && this._facingN >= 2) this.looking = true;
+    if (!this.looking && this._facingN >= LOOK_CONFIRM.n && now - this._facingSince >= LOOK_CONFIRM.ms) {
+      this.looking = true;
+      const g = this.gaze || {};
+      this.lookInfo = { faces: this.faces, size: Math.round((g.size || 0) * 100) / 100, yaw: Math.round(g.gazeYaw || 0), pitch: Math.round(g.pitch || 0),
+        blink: Math.round((g.blink || 0) * 100) / 100, ms: Math.round(now - this._facingSince), n: this._facingN, force: !!this.forceLook };
+    }
     if (this.looking && this._awayN >= 3) this.looking = false;
+    if (this.looking) this.sureAt = now;
     if (was !== this.looking && this.onLook) this.onLook(this.looking);
 
     if (found) {

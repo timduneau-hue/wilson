@@ -15,7 +15,7 @@ FAKE_TTS = open(os.path.join(S, 'e2e_eco.py'), encoding='utf-8').read().split('F
 GAZE = """window.__look = false; window.__faces = 1;
 setInterval(() => { const v = window.wilson && wilson.vision; if (!v) return;
   if (!v.__fake) { v.__fake = true; try { v.worker && v.worker.terminate(); } catch (_) {} v.worker = { postMessage() {}, terminate() {} }; v._startWorker = () => {}; }
-  v.gazeReady = true; v.modelsDone = true; v._lastResult = performance.now(); v.looking = !!window.__look; if (window.__look) v.lookAt = performance.now(); v.faceAt = performance.now(); v.hasPerson = true; v.faces = window.__faces; }, 30);"""
+  v.gazeReady = true; v.modelsDone = true; v._lastResult = performance.now(); v.looking = !!window.__look; if (window.__look) v.lookAt = v.sureAt = performance.now(); v.faceAt = performance.now(); v.hasPerson = true; v.faces = window.__faces; }, 30);"""
 HA = 'https://homeassistant.exemple.ts.net'
 
 
@@ -55,6 +55,9 @@ async def main():
         await page.goto('http://127.0.0.1:8765/index.html')
         await page.wait_for_function('window.wilson && wilson.state === "veille" && wilson.vision && wilson.vision.__fake', timeout=20000)
         has = lambda t: any(t in l for l in logs)
+        async def parle():   # R1 (01/11/26) : la personne dit sa phrase en le regardant (voix au micro pendant le regard confirmé)
+            await page.evaluate("(() => { const A = wilson.audio, iv = setInterval(() => { A.lastVoicedAt = performance.now(); }, 15); setTimeout(() => clearInterval(iv), 400); })()")
+            await page.wait_for_timeout(450)
 
         # E1 : pastille
         await page.evaluate("window.__look = true"); await page.evaluate("wilson.startConversation('toucher')")
@@ -99,24 +102,29 @@ async def main():
 
         # E2 : relance seulement pour une vraie demande
         n0 = len(c['texts'])
+        await parle()
         await page.evaluate("wilson.brain._emit('turn', { user: 'Louis, viens manger, c\\'est prêt.', wilson: '' })"); await page.wait_for_timeout(200)
         check('E2 : « Louis, viens manger » regardé : pas de relance', len(c['texts']) == n0 and has('pas une demande pour lui'), str(c['texts'][n0:]))
         await page.evaluate("wilson.brain._emit('turn', { user: 'Allez loulou, tu viens ?', wilson: '' })"); await page.wait_for_timeout(200)
         check('… « Allez loulou, tu viens ? » non plus', len(c['texts']) == n0)
         await page.evaluate("wilson.brain._emit('turn', { user: 'Il fait froid ce soir.', wilson: '' })"); await page.wait_for_timeout(200)
         check('… une remarque en l\'air non plus', len(c['texts']) == n0)
+        await parle()
         await page.evaluate("wilson.brain._emit('turn', { user: 'Quelle heure est-il ?', wilson: '' })"); await page.wait_for_timeout(200)
         check('… une vraie question restée sans réponse : relance', len(c['texts']) == n0 + 1 and 'On te parlait' in c['texts'][-1], str(c['texts'][n0:]))
+        await parle()
         await page.evaluate("wilson.brain._emit('turn', { user: 'Hier, tu m\\'as dit que tu regardais Kevin dans le CRM, c\\'est un bug.', wilson: '' })"); await page.wait_for_timeout(200)
         check('… « Hier, tu m\'as dit… » (Hier n\'est pas un prénom) : relance', len(c['texts']) == n0 + 2, str(c['texts'][n0:]))
         # Journal du 30/10/26, 11h26 : Wilson pose une question, « Oui, il va faire chaud. » était bloqué
         await page.evaluate("wilson.playEndAt = performance.now() - 3000; wilson._nudgedFor = null"); n2 = len(c['texts'])
+        await parle()
         await page.evaluate("wilson.brain._emit('turn', { user: 'Oui, il va faire chaud.', wilson: '' })"); await page.wait_for_timeout(200)
         check('Juste après sa réponse, « Oui, il va faire chaud. » est pour lui : relance', len(c['texts']) == n2 + 1 and has('juste après sa réponse'), str(c['texts'][n2:]))
         await page.evaluate("wilson.brain._emit('turn', { user: 'Louis, range ta chambre.', wilson: '' })"); await page.wait_for_timeout(200)
         check('… sauf si la phrase commence par le prénom de quelqu\'un d\'autre', len(c['texts']) == n2 + 1, str(c['texts'][n2:]))
         await page.evaluate("wilson.playEndAt = performance.now() - 60000")
         await page.evaluate("window.__faces = 2"); await page.wait_for_timeout(100); n1 = len(c['texts'])
+        await parle()
         await page.evaluate("wilson.brain._emit('turn', { user: 'Tu peux allumer la télé ?', wilson: '' })"); await page.wait_for_timeout(200)
         check('… plusieurs visages devant la tablette : pas de relance', len(c['texts']) == n1 and has('plusieurs personnes devant lui'), str(c['texts'][n1:]))
         # Garde-fou : outil appelé à partir d'une phrase sans rapport (journal du 30/10/26)
@@ -125,9 +133,11 @@ async def main():
         await page.evaluate("wilson._tools([{ id: 'g1', name: 'regarder', args: { quoi: 'le siège pupitre' } }, { id: 'g2', name: 'crm_client', args: { client: 'Kevin' } }])"); await page.wait_for_timeout(300)
         resp = json.dumps(c['tool'][nt:], ensure_ascii=False)
         check('Garde-fou : « avec le siège pupitre » → ni photo ni fiche « Kevin », il se tait', '"g1"' in resp and '"g2"' in resp and 'Ne fais rien et ne dis rien' in resp and not has('Photo prise') and not has('CRM (direct) : crm_client'), resp[:300])
+        await parle()
         await page.evaluate("wilson._noteHeard('Qu\\'est-ce que j\\'ai dans ma main Wilson ?', true)"); nt = len(c['tool'])
         await page.evaluate("wilson._tools([{ id: 'g2b', name: 'regarder', args: {} }])"); await page.wait_for_timeout(300)
         check('… « Qu\'est-ce que j\'ai dans ma main ? » → la photo est bien prise (journal 9h48)', 'Ne fais rien' not in json.dumps(c['tool'][nt:], ensure_ascii=False))
+        await parle()
         await page.evaluate("wilson._noteHeard('Regarde ce que je tiens', true)"); nt = len(c['tool'])
         await page.evaluate("wilson._tools([{ id: 'g3', name: 'regarder', args: {} }])"); await page.wait_for_timeout(300)
         check('… « Regarde ce que je tiens » → la photo est bien prise', 'Ne fais rien' not in json.dumps(c['tool'][nt:], ensure_ascii=False))
