@@ -161,6 +161,18 @@ async def main():
         await page.evaluate("window.__look = false"); await page.wait_for_function('wilson.paused', timeout=6000)
         await page.evaluate("window.__dem = ''; wilson.oreille.onDetect({ score: 1.2, limite: 2 })"); await page.wait_for_timeout(1500)
         check('En veille faute de regard, « Wilson » reprend la discussion (sans le regarder)', await page.evaluate("!wilson.paused && wilson._byName && wilson.state === 'conversation'") and has('→ oui, « Wilson »'))
+        # Maintenance du 01/11/26 (journal du 31/10/26, 10h44) : « Euh... Wilson, tu me reçois ? » dit en le regardant de nouveau
+        await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(400)
+        await page.evaluate("window.__look = true; wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000)
+        await page.evaluate("window.__look = false"); await page.wait_for_function('wilson.paused', timeout=6000); c = conns[-1]; nt = len(c['texts'])
+        await page.evaluate("window.__nom = true; wilson._nomCalme = 0; wilson._nomJetons = null; wilson.eco.appelDeLoin = async () => { window.__look = true; await new Promise((r) => setTimeout(r, 400)); return { appel: true, doute: true, demande: 'Euh..., tu me reçois?', texte: 'Euh... Wilson, tu me reçois ?' }; }; wilson.oreille.onDetect({ score: 1.2, limite: 2 })")
+        await page.wait_for_timeout(1500); T = c['texts'][nt:]
+        check('Journal 10h44 : « Wilson, tu me reçois ? » arrivé pendant qu\'on le regarde → transmis comme dit en le regardant (pas « de loin, pas certain »)', any('en te regardant' in t and 'tu me reçois' in t for t in T) and not any('sans te regarder' in t for t in T), str(T))
+        nt = len(c['texts']); await page.evaluate("wilson._toolTurn = -1; wilson.brain._emit('turn', { user: '', wilson: '' })"); await page.wait_for_timeout(200)
+        check('… et s\'il reste muet : relance une fois (Timothée n\'a plus à répéter)', any('réponds maintenant' in t and 'tu me reçois' in t for t in c['texts'][nt:]) and has('demande dite en le regardant : relance'), str(c['texts'][nt:]))
+        nt = len(c['texts']); await page.evaluate("wilson.brain._emit('turn', { user: '', wilson: '' })"); await page.wait_for_timeout(200)
+        check('… une seule relance', len(c['texts']) == nt)
+        await page.evaluate("window.__look = false; wilson.eco.appelDeLoin = async () => ({ appel: window.__nom, demande: window.__dem, texte: (window.__nom ? 'Wilson, ' : '') + window.__dem })")
         # Journal du 30/10/26, 11h34-11h48 : « Wilson » entendu dans le bruit et dans la télé
         J = await page.evaluate("""import('./js/eco.js').then(({ prenomDans, jugerAppel }) => {
           const tv = 'Wilson, est-ce que tu peux l\\'éteindre ? Hélas, pas de voix de fond, nous avons échoué. Vous pensez que ça justifie le fa';
