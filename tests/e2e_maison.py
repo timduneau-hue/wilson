@@ -155,7 +155,7 @@ async def main():
         st['down'] = True
         r = await tool('b2', 'maison_commande', {'appareil': 'light.grande_lumiere_salon', 'action': 'eteindre'})
         st['down'] = False
-        check('Home Assistant injoignable : « Tailscale n\'est peut-être pas allumé »', r.startswith('Échec') and 'Tailscale' in r, r)
+        check('Home Assistant injoignable : « ordinateur de la maison peut-être éteint » ou Tailscale (remarque du 30/10/26)', r.startswith('Échec') and 'Tailscale' in r and 'ordinateur' in r, r)
         check('Journal : action, appareil et résultat notés', any('Maison : allumer → Grande lumière salon : ok' in l for l in logs), str([l for l in logs if 'Maison' in l][:3]))
         eco = await page.evaluate("wilson._system('eco')")
         check('Mode économique : champ « maison » (voie simple)', '"maison": "vide, sauf si' in eco and 'remplis le champ "maison"' in eco)

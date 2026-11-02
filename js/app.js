@@ -15,11 +15,11 @@ import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
 import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
-import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
+import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES, HA_MUET } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.25.1';
+const VERSION = '1.25.2';
 const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
 const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
 const SEG_VU_MIN = 8;             // R1 : une phrase « dite en le regardant » = au moins 8 blocs de 20 ms de voix avec le regard confirmé
@@ -1765,7 +1765,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     try {
       if (call.name === 'maison_etat') { info = await this.maison.etat(a.appareils || [], ctl.signal); ok = true; }
       else { const r = await this.maison.commande(a, ctl.signal); info = r.info; ok = r.ok; }
-    } catch (e) { if (!this._searches.has(call.id)) return; info = 'Home Assistant ne répond pas.'; }
+    } catch (e) { if (!this._searches.has(call.id)) return; info = HA_MUET; }
     if (conv !== this.convId || !this._searches.has(call.id)) return;
     this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
     if (call.name === 'maison_commande') { this.face.clearEmotion(); this.face.play(ok ? 'nod' : 'shake'); }
