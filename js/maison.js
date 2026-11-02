@@ -43,6 +43,10 @@ const TYPE = { light: 'lumière', switch: 'prise', media_player: 'lecteur', remo
 const ETAT = { on: 'allumé', off: 'éteint', playing: 'en lecture', paused: 'en pause', idle: 'allumé (rien en cours)', standby: 'en veille', unavailable: 'injoignable', unknown: 'inconnu', buffering: 'chargement', open: 'ouvert', closed: 'fermé' };
 const PLAY_MEDIA = 512;
 const TIMEOUT_MS = 15000;
+// Remarque de Timothée du 30/10/26, 18h02:44 : « l'ordinateur doit être allumé pour commander les appareils » (Home
+// Assistant tourne sur le PC de la maison) ; journal du 01/11/26, 19h16 : il disait seulement « Home Assistant ne répond pas ».
+export const HA_MUET = "Home Assistant ne répond pas : l'ordinateur de la maison est sans doute éteint (il doit être allumé pour que je commande les appareils).";
+const HA_INJOIGNABLE = "Impossible de joindre la maison : l'ordinateur de la maison est peut-être éteint (il doit être allumé), ou Tailscale n'est pas allumé sur cet appareil.";
 const netErr = (e) => !navigator.onLine || (e && e.name === 'TypeError') || /Failed to fetch|NetworkError|Load failed/i.test(String((e && e.message) || ''));
 const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9+]+/g, ' ').trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -157,7 +161,7 @@ export class Maison {
       if (err.name === 'AbortError' && signal && signal.aborted) throw err;
       this.log('Maison : ' + (err.message || err.name));
       if (err.status === 401 || err.status === 403) return { ok: false, info: "Home Assistant refuse le jeton d'accès : il faut en recréer un et le recoller dans les réglages." };
-      return { ok: false, info: netErr(err) ? "Impossible de joindre la maison : Tailscale n'est peut-être pas allumé sur cet appareil." : 'Home Assistant ne répond pas.' };
+      return { ok: false, info: netErr(err) ? HA_INJOIGNABLE : HA_MUET };
     }
   }
 
@@ -336,8 +340,8 @@ export class Maison {
     } catch (e) {
       if (e.name === 'AbortError' && signal && signal.aborted) throw e;
       this.log('Maison : ' + (e.message || e.name));
-      if (e.name === 'AbortError') return { ok: false, dire: 'Home Assistant ne répond pas.' };
-      return { ok: false, dire: netErr(e) ? "Je n'arrive pas à joindre la maison : vérifie que Tailscale est allumé sur cet appareil." : 'Home Assistant ne répond pas.' };
+      if (e.name === 'AbortError') return { ok: false, dire: HA_MUET };
+      return { ok: false, dire: netErr(e) ? HA_INJOIGNABLE : HA_MUET };
     }
   }
 

@@ -488,9 +488,23 @@ passe à Miel (réglage daté, envoyé aux autres appareils par la synchronisati
 affiches des photos, je veux que ça dure 5 secondes. »), lue en premier par la maintenance. Test : `e2e_regard_sur.py`
 (visage Miel et passage depuis Lumière).
 
+Maintenance de la semaine du 02/11/26 (**1.25.2**) : journal du 31/10/26, 11h11 au 01/11/26, 20h51 (rien après : dernier bilan
+de la tablette le 01/11/26 à 20h51, en 1.24.0, batterie 71 % **non branchée** ; les 1.25.0 et 1.25.1 n'ont encore jamais tourné).
+- Remarque de Timothée du 01/11/26, 18h50:01 : « Quand tu affiches des photos, je veux que ça dure 5 secondes. » (après l'affiche
+  du film « Flo » montrée à 18h49:31, restée 45 s par-dessus le visage). Désormais une photo seule à l'écran (image sans texte)
+  s'efface au bout de 5 s (`PHOTO_MS` dans `outils.js`) ; les cartes de texte gardent 90 s / 4 min.
+- Remarque de Timothée du 30/10/26, 18h02:44 (pas traitée par les maintenances précédentes) : « Prendre en compte le fait que
+  l'ordinateur doit être allumé pour commander les appareils » (« C'est parce que mon ordinateur est éteint », Home Assistant
+  tourne sur le PC de la maison) ; encore le 01/11/26, 19h16:20 : « Je ne peux pas allumer la télé car Home Assistant ne répond
+  pas en ce moment » (inventaire impossible toutes les 10 min, « signal is aborted without reason »). Désormais, Home Assistant
+  muet → « l'ordinateur de la maison est sans doute éteint (il doit être allumé pour que je commande les appareils) » ;
+  injoignable → ordinateur peut-être éteint, ou Tailscale (`HA_MUET`, `HA_INJOIGNABLE` dans `maison.js`).
+- Le reste du 01/11/26 (réponses données sans regard, ouvertures à vide) avait déjà été corrigé en 1.25.0.
+- Tests : `e2e_outils.py` (photo seule 5 s), `e2e_maison.py` et `maison_unit.mjs` (ordinateur éteint).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 01/11/26 : **version 1.25.1** en ligne (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 02/11/26 : **version 1.25.2** en ligne (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

@@ -12,6 +12,7 @@ globalThis.fetch = async (url, o) => {
   const b = JSON.parse(o.body);
   if (/grande lumière/.test(b.text)) return { status: 200, ok: true, json: async () => ({ response: { response_type: 'action_done', speech: { plain: { speech: 'Allumé' } }, data: { success: [{ name: 'Grande lumière salon' }] } } }) };
   if (/réseau/.test(b.text)) throw new TypeError('Failed to fetch');
+  if (/lent/.test(b.text)) { const e = new Error('signal is aborted without reason'); e.name = 'AbortError'; throw e; }
   return { status: 200, ok: true, json: async () => ({ response: { response_type: 'error', speech: { plain: { speech: "Désolé, je ne connais pas d'appareil" } }, data: { code: 'no_valid_targets' } } }) };
 };
 const logs = []; const s = { haUrl: 'https://ha.exemple.ts.net/', haToken: 'bon' };
@@ -21,7 +22,8 @@ let r = await m.dire('allume la grande lumière du salon');
 t(r.ok && r.dire === 'Allumé', 'action faite : ' + JSON.stringify(r));
 t(calls[0].url === 'https://ha.exemple.ts.net/api/conversation/process' && JSON.parse(calls[0].o.body).language === 'fr', 'appel conversation fr');
 r = await m.dire('allume le frigo'); t(!r.ok && /pas compris/.test(r.dire), 'appareil inconnu : ' + r.dire);
-r = await m.dire('test réseau'); t(!r.ok && /Tailscale/.test(r.dire), 'réseau : ' + r.dire);
+r = await m.dire('test réseau'); t(!r.ok && /Tailscale/.test(r.dire) && /ordinateur/.test(r.dire), 'réseau : ' + r.dire);
+r = await m.dire('test lent'); t(!r.ok && /ordinateur de la maison est sans doute éteint/.test(r.dire), 'délai dépassé (PC éteint, remarque du 30/10/26) : ' + r.dire);
 t((await m.verifier()).ok, 'vérifier ok');
 s.haToken = 'mauvais'; r = await m.dire('allume la grande lumière'); t(!r.ok && /jeton/.test(r.dire), 'jeton refusé');
 t(!(await m.verifier()).ok, 'vérifier jeton refusé');

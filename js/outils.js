@@ -37,6 +37,7 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': 
 const $ = (id) => document.getElementById(id);
 const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 const pad = (n) => String(n).padStart(2, '0');
+const PHOTO_MS = 5000;   // photo seule à l'écran : 5 s (remarque de Timothée du 01/11/26)
 const KEY_M = 'wilson.minuteurs', KEY_R = 'wilson.rappels', KEY_C = 'wilson.courses', KEY_I = 'wilson.idees';
 const lire = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch (_) { return d; } };
 const ecrire = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
@@ -105,7 +106,8 @@ export class Outils {
     const html = (img ? `<figure class="ecran-img"><img src="${esc(img.src)}" alt="${esc(img.titre)}"><figcaption>${esc(img.titre)} — Wikipédia</figcaption></figure>` : '') + this._texteHtml(texte);
     if (!html) return "Rien à afficher : il faut un texte ou une image.";
     const lignes = String(texte || '').split(/\n+/).filter((l) => l.trim()).length;
-    this._montrer(html, { titre, large: !!img && !texte, ms: lignes > 8 ? 4 * 60000 : img && !texte ? 45000 : 90000 });
+    // Remarque de Timothée du 01/11/26, 18h50:01 : « Quand tu affiches des photos, je veux que ça dure 5 secondes. »
+    this._montrer(html, { titre, large: !!img && !texte, ms: lignes > 8 ? 4 * 60000 : img && !texte ? PHOTO_MS : 90000 });
     this.log(`Écran : « ${String(titre).slice(0, 60)} »${img ? ' + image ' + img.titre : image ? ' (image introuvable)' : ''}`, true);
     return `Affiché à l'écran${image && !img ? ` (sans image : rien trouvé pour « ${image} »)` : img ? ` avec une photo de « ${img.titre} »` : ''}. Ne relis pas tout : dis l'essentiel en une phrase.`;
   }
