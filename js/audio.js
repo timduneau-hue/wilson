@@ -13,6 +13,7 @@ export class AudioIO {
     this.micTaken = false; this.takenN = 0; this._muted = false; this._zero = false; this._zeroMs = 0; this._liveMs = 0;
     this.sources = []; this.nextTime = 0; this.outLevel = 0; this.outRound = 0;
     this.gainDb = 0; this.aec = false; this.playedSec = 0;
+    this.micDevice = null; this.micInfo = ''; this.btIn = false;
   }
   on(ev, fn) { this.listeners[ev].push(fn); }
   off(ev, fn) { this.listeners[ev] = this.listeners[ev].filter((f) => f !== fn); }
@@ -26,7 +27,9 @@ export class AudioIO {
     this.aec = !!aec;
     this.stream = await this._openMic(this.aec); this._watchTrack();
     this.ctx.onstatechange = () => this._emit('info', `son : ${this.ctx.state}`);
-    if (navigator.mediaDevices && 'ondevicechange' in navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', () => this._emit('info', 'appareils audio changés (Bluetooth ?)'));
+    if (navigator.mediaDevices && 'ondevicechange' in navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', () => {
+      clearTimeout(this._devT); this._devT = setTimeout(() => this._onDevices(), 1000);   // la voiture se connecte ou se déconnecte
+    });
     await this.ctx.audioWorklet.addModule(new URL('./worklets/capture.js', import.meta.url));
     const node = this.node = new AudioWorkletNode(this.ctx, 'wilson-capture');
     node.port.onmessage = (e) => this._onCapture(e.data);
@@ -42,11 +45,60 @@ export class AudioIO {
     return this;
   }
 
-  _openMic(aec) {
-    return navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: aec, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-      video: false,
-    });
+  // Micro Bluetooth (voiture en Android Auto, kit mains libres) — journal du 02/11/26, 16h43, téléphone dans la voiture :
+  // « j'ai pas entendu la réponse » alors que 17 s de voix avaient été jouées. Si Chrome prend le micro de la voiture,
+  // Android ouvre le canal « appel » du Bluetooth et tout le son de la page y part ; la voiture ne le joue que pendant un
+  // vrai appel → silence. Quand un micro Bluetooth est présent, Wilson écoute donc avec le micro du téléphone : le son reste
+  // sur le canal « musique » (Android Auto, A2DP), que la voiture joue.
+  static isBluetooth(label) { return /bluetooth|\bsco\b|hands.?free|mains.?libres|\bbt\b|\bhfp\b/i.test(label || ''); }
+  static pickBuiltIn(inputs) {
+    const ok = inputs.filter((d) => d.label && !AudioIO.isBluetooth(d.label) && !['default', 'communications'].includes(d.deviceId));
+    const by = (re) => ok.find((d) => re.test(d.label));
+    return by(/speakerphone|haut.?parleur|built.?in|intégr|integr|bottom|internal|interne|phone mic|micro du/i)
+      || by(/earpiece|écouteur|ecouteur|receiver/i) || ok.find((d) => !/wired|filaire|usb/i.test(d.label)) || null;
+  }
+  async _chooseMic() {
+    this.micDevice = null; this.btIn = false;
+    try {
+      const ins = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+      this.btIn = ins.some((d) => AudioIO.isBluetooth(d.label));
+      this._inputs = ins.map((d) => d.label || '(sans nom)').join(', ');
+      if (this.btIn) this.micDevice = AudioIO.pickBuiltIn(ins);
+    } catch (_) {}
+  }
+  async _openMic(aec) {
+    await this._chooseMic();
+    const base = { echoCancellation: aec, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
+    let st = null;
+    if (this.micDevice) {
+      try { st = await navigator.mediaDevices.getUserMedia({ audio: { ...base, deviceId: { exact: this.micDevice.deviceId } }, video: false }); }
+      catch (e) { this._emit('info', `micro du téléphone impossible à choisir (${e.message}) : micro par défaut`); }
+    }
+    if (!st) st = await navigator.mediaDevices.getUserMedia({ audio: base, video: false });
+    const t = st.getAudioTracks()[0], lab = (t && t.label) || '?';
+    this.micInfo = `micro « ${lab} »${this.btIn ? (AudioIO.isBluetooth(lab) ? ' (Bluetooth : son en canal appel, muet en voiture !)' : ' (micro Bluetooth présent, évité)') : ''}`;
+    // Après le premier accès au micro, les noms des appareils sont connus : si un micro Bluetooth est là et qu'on l'a pris
+    // faute de nom (premier démarrage), on recommence une fois avec le bon micro.
+    if (!this._retried && !this.micDevice && t && AudioIO.isBluetooth(lab)) {
+      this._retried = true; await this._chooseMic();
+      if (this.micDevice) { st.getTracks().forEach((x) => x.stop()); return this._openMic(aec); }
+    }
+    return st;
+  }
+  // La voiture se connecte (ou se déconnecte) pendant que Wilson tourne : si le micro en cours n'est pas le bon, il est rouvert.
+  async _onDevices() {
+    if (!this.ctx || !this.node) return;
+    let ins = [];
+    try { ins = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput'); } catch (_) {}
+    const bt = ins.some((d) => AudioIO.isBluetooth(d.label)), t = this.stream && this.stream.getAudioTracks()[0];
+    const curBt = !!(t && AudioIO.isBluetooth(t.label)), want = bt ? AudioIO.pickBuiltIn(ins) : null;
+    const curId = t && t.getSettings ? t.getSettings().deviceId : '';
+    this._emit('info', `appareils audio changés : ${bt ? 'micro Bluetooth présent (voiture ?)' : 'pas de micro Bluetooth'} — micros : ${ins.map((d) => d.label || '?').join(', ')}`);
+    if ((bt && want && (curBt || (curId && curId !== want.deviceId))) || (!bt && this.micDevice)) {
+      this._retried = true;
+      await this._reopen();
+      this._emit('info', `son : ${this.micInfo}`);
+    }
   }
   // Change l'annulation d'écho : l'ancien micro est fermé AVANT d'ouvrir le nouveau (sinon Android reste en « mode appel »).
   async setEchoCancel(aec) {
@@ -64,7 +116,7 @@ export class AudioIO {
     t.onmute = () => { this._muted = true; this._micUpdate('micro coupé par le système'); };
     t.onunmute = () => { this._muted = false; this._micUpdate('micro rendu'); };
     t.onended = () => {
-      if (this.stream && this.stream.getAudioTracks()[0] !== t) return;          // ancienne piste, fermée par nous
+      if (!this.stream || this.stream.getAudioTracks()[0] !== t) return;          // ancienne piste, fermée par nous (ou en cours de réouverture)
       this._emit('info', 'micro arrêté par le système : je le rouvre'); this._muted = false;
       setTimeout(() => this._reopen(), 800);
     };
@@ -73,6 +125,8 @@ export class AudioIO {
   async _reopen(n = 0) {
     try {
       if (this.src) { try { this.src.disconnect(); } catch (_) {} }
+      const old = this.stream; this.stream = null;
+      if (old) old.getTracks().forEach((tr) => { if (tr.readyState !== 'ended') tr.stop(); });
       this.stream = await this._openMic(this.aec); this._watchTrack();
       this.src = this.ctx.createMediaStreamSource(this.stream); this.src.connect(this.node);
       this._emit('info', 'micro rouvert');
@@ -114,7 +168,7 @@ export class AudioIO {
   describe() {
     const c = this.ctx; if (!c) return 'pas démarré';
     const lat = Math.round(((c.baseLatency || 0) + (c.outputLatency || 0)) * 1000);
-    return `${c.state}, ${c.sampleRate} Hz, latence de sortie ${lat} ms, annulation d'écho ${this.aec ? 'oui (Android : son en mode appel)' : 'non (haut-parleur normal)'}, voix du direct jouée : ${Math.round(this.playedSec)} s${this.takenN ? `, micro pris par le téléphone ${this.takenN} fois${this.micTaken ? ' (EN CE MOMENT)' : ''}` : ''}`;
+    return `${c.state}, ${c.sampleRate} Hz, latence de sortie ${lat} ms, annulation d'écho ${this.aec ? 'oui (Android : son en mode appel)' : 'non (haut-parleur normal)'}, voix du direct jouée : ${Math.round(this.playedSec)} s${this.micInfo ? ', ' + this.micInfo : ''}${this.takenN ? `, micro pris par le téléphone ${this.takenN} fois${this.micTaken ? ' (EN CE MOMENT)' : ''}` : ''}`;
   }
 
   get running() { return this.ctx && this.ctx.state === 'running'; }
