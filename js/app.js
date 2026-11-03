@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES, HA_MUET } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.25.3';
+const VERSION = '1.26.0';
 const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
 const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
 const SEG_VU_MIN = 8;             // R1 : une phrase « dite en le regardant » = au moins 8 blocs de 20 ms de voix avec le regard confirmé
@@ -338,7 +338,7 @@ class App {
   // La phrase est-elle pour Wilson ? On le regarde (ou on vient de le regarder), ou bien la discussion est en cours.
   _addressed(now = performance.now()) {
     if (this.car) return this.state === 'conversation' || this.state === 'eveil';   // voiture : réveillé par son nom, seul avec lui
-    if (this._byName && (this.state === 'conversation' || this.state === 'eveil')) return true;   // E3 : appelé par son prénom
+    if ((this._byName || this._voitureBt) && (this.state === 'conversation' || this.state === 'eveil')) return true;   // E3 : appelé par son prénom ; téléphone en voiture (03/11/26)
     const pol = this.settings.listenMode || 'regard', v = this.vision;
     if (pol === 'toucher') return false;
     if (pol === 'toujours') return true;
@@ -427,7 +427,12 @@ class App {
   // Chaque morceau de voix envoyé à Gemini est compté, avec ou sans regard confirmé. Une réponse (ou un outil) n'est permise
   // que si, depuis sa dernière réponse, une phrase a été dite pendant qu'on le regardait — ou par un geste sûr (toucher,
   // bouton Oui/Non), ou pour finir une demande déjà permise (recherche, CRM, réponse tardive).
-  get _verrouRegard() { return this._gazeMode && !this._byName && !this.car && !this.continuous; }
+  get _verrouRegard() { return this._gazeMode && !this._byName && !this.car && !this.continuous && !this._voitureBt; }
+  // Accord de Timothée du 03/11/26 : « uniquement quand je suis sur le téléphone, et quand il est branché à Android Auto ».
+  // Téléphone relié à la voiture (un micro Bluetooth est là) : pas besoin de le regarder (il conduit) ; il se réveille quand
+  // on dit « Wilson » (oreille du téléphone, confirmée par Gemini), répond sans regard, et se rendort après 45 s sans lui
+  // parler. Ni la tablette, ni le téléphone hors de la voiture ne changent : là, la règle R1 (le regard) reste entière.
+  get _voitureBt() { return !!(this.audio && this.audio.btIn) && deviceName() === 'téléphone'; }
   _noteVoix(now = performance.now()) {
     if (now - this.audio.lastVoicedAt >= 60) return;
     let S = this._seg;
@@ -1020,7 +1025,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         }
         // E3 : à la maison, personne ne le regarde (canapé…) : l'oreille guette « Wilson » ; le regard reste le plus rapide.
         // Accord de Timothée du 01/11/26 : par défaut, à la maison, seulement au regard (réglage « prenomMaison »).
-        if (this.settings.prenomMaison && this.oreille.ready && !this.settingsOpen && !this.speaking && performance.now() - this.playEndAt > 800 && !this._gazing()) this.oreille.feed(f32, this.audio.speaking);
+        if ((this.settings.prenomMaison || this._voitureBt) && this.oreille.ready && !this.settingsOpen && !this.speaking && performance.now() - this.playEndAt > 800 && !this._gazing()) this.oreille.feed(f32, this.audio.speaking);
         this._watchFrame(); return;
       }
       if (this.state === 'eveil') { if (this.pending) { this.pending.push(i16); this._noteVoix(); } return; }
@@ -1031,7 +1036,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         else this._ecoFrame(i16);
         return;
       }
-      if (this.state === 'conversation' && this.paused && !this.car && this.settings.prenomMaison && this.oreille.ready && !this.speaking && performance.now() - this.playEndAt > 800) this.oreille.feed(f32, this.audio.speaking);
+      if (this.state === 'conversation' && this.paused && !this.car && (this.settings.prenomMaison || this._voitureBt) && this.oreille.ready && !this.speaking && performance.now() - this.playEndAt > 800) this.oreille.feed(f32, this.audio.speaking);
       if (this.state !== 'conversation' || !this.brain.open) return;
       const now = performance.now();
       if (this.voice.speaking) return;                                 // sa voix de secours (réseau…) ne part pas vers Gemini
@@ -2069,7 +2074,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       // une question à l'analyste garde la discussion ouverte 90 s ; au-delà, la réponse viendra de toute façon (C11 bis)
       const searching = !!(this._searches && this._searches.size) || [...(this._analyses || new Map()).values()].some((A) => now - A.t0 < 90000);
       // Images : aucune envoyée d'office (R6) ; seulement à la demande (outil « regarder »).
-      const keep = this.car ? CAR_IDLE_MS : this.settings.convTimeout * 1000;
+      const keep = this.car || this._voitureBt ? CAR_IDLE_MS : this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
       // Réseau qui ne passe plus (le son du micro s'accumule sans partir, 3 s) : même chose qu'une coupure (C8).
       if (this.mode === 'live' && this.brain.open && !this.netWait) {
@@ -2081,7 +2086,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       }
       if (this.netWait) {
         // réseau coupé : la discussion attend (C8), son délai à elle décide
-      } else if (this._gazeMode && !this.continuous && !this._byName) {
+      } else if (this._gazeMode && !this.continuous && !this._byName && !this._voitureBt) {
         // R3 : le regard pilote la discussion. 3 s sans regard (sauf s'il parle ou cherche) → veille ; regardé → reprise.
         const lastSeen = Math.max(v.sureAt || 0, this.playEndAt || 0, this._resumedAt || 0, this._convAt || 0);
         if (this.paused) {
@@ -2097,12 +2102,21 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         // Appelé par son prénom, personne ne le regarde (journal du 30/10/26, 23h06-23h21 : « Merci Wilson, de rien,
         // voilà » pendant une soirée → discussion restée ouverte 15 min, les voix autour la prolongeaient sans fin) :
         // 45 s sans qu'il dise un mot ni qu'on le rappelle → veille.
-        if (this._byName && this.mode === 'live' && !this.continuous && !this._gazing(now) && !this.speaking && !thinking && !searching
+        if ((this._byName || this._voitureBt) && this.mode === 'live' && !this.continuous && !this._gazing(now) && !this.speaking && !thinking && !searching
           && now - Math.max(this.playEndAt || 0, this._convAt || 0, this._prenomAt || 0, this._resumedAt || 0) > BYNAME_IDLE_MS) this.endConversation('silence : personne ne lui parle');
         else if (!this.continuous && !this.speaking && !busyEar && !thinking && !searching && idle > keep) this.endConversation('silence');
       }
       if (this.continuous && idle > 30000 && f.p.bright.t > 0.5) { f.setBrightness(0.3); f.setMood('somnolent'); }
       if (this.continuous && idle < 1000 && f.p.bright.t < 0.5) { f.setBrightness(1); f.setMood('ecoute'); }
+    }
+    // Téléphone relié à la voiture (03/11/26) : noté au journal, et une bulle dit comment lui parler.
+    const vb = this._voitureBt;
+    if (vb !== !!this._voitureBtVu && this.started) {
+      this._voitureBtVu = vb;
+      if (vb) {
+        this.log(`Voiture : téléphone relié en Bluetooth — je réponds sans qu'on me regarde ; réveil en disant « Wilson »${this.oreille.ready ? ` (oreille prête, limite ${this.oreille.limite.toFixed(1)})` : ' (oreille pas apprise : toucher l\'écran)'}`);
+        this.badge(this.oreille.ready ? 'En voiture : dis « Wilson » pour me parler' : 'En voiture : touche l\'écran pour me parler (apprends-moi ton nom : Réglages → CRM et prénom)', 6000);
+      } else this.log('Voiture : plus de Bluetooth — de nouveau, je réponds quand on me regarde');
     }
     // Veille → dodo quand la pièce est vide (ou la nuit).
     if (v && v.hasPerson) this.presenceAt = now;

@@ -8,8 +8,12 @@ Appareils simulés comme sur Chrome Android (« Speakerphone », « Headset earp
    une fois avec le micro du téléphone.
 3. Pas de voiture : micro par défaut, rien de changé (tablette).
 4. La voiture se connecte pendant que Wilson tourne : micro rouvert sur celui du téléphone ; elle se déconnecte : défaut.
+5. Accord de Timothée du 03/11/26 : téléphone relié à la voiture → pas besoin de le regarder (réponse sans regard, pas de
+   veille au bout de 3 s, oreille « Wilson » active) ; voiture déconnectée → le regard redevient obligatoire ;
+   tablette avec un micro Bluetooth → rien ne change (R1 entière).
 """
-import asyncio, re, json, os
+import asyncio, re, json, os, base64
+import numpy as np
 from playwright.async_api import async_playwright
 
 S = os.path.dirname(os.path.abspath(__file__))
@@ -46,15 +50,40 @@ STUB = """(() => {
 })();"""
 
 
-async def run(p, bt, noms, label):
+PHONE_UA = 'Mozilla/5.0 (Linux; Android 15; SM-A266B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36'
+TAB_UA = 'Mozilla/5.0 (Linux; Android 10; SM-T720) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36'
+GAZE = """window.__look = false;
+setInterval(() => { const v = window.wilson && wilson.vision; if (!v) return;
+  v.gazeReady = true; v.modelsDone = true; v.forceLook = false; v._lastResult = performance.now();
+  v.looking = !!window.__look; if (window.__look) v.lookAt = v.sureAt = performance.now(); v.faceAt = performance.now(); v.hasPerson = true; v.faces = 1; }, 30);
+window.__parle = (ms) => { const A = wilson.audio; const iv = setInterval(() => { A.lastVoicedAt = performance.now(); A.speaking = true; A._offCnt = 0; }, 15); setTimeout(() => clearInterval(iv), ms); };"""
+
+
+def audio_chunks(seconds):
+    sr = 24000; t = np.arange(int(sr * seconds)) / sr
+    pcm = (np.sin(2 * np.pi * 180 * t) * 8000).astype(np.int16)
+    return [base64.b64encode(pcm[i:i + 4800].tobytes()).decode() for i in range(0, len(pcm), 4800)]
+
+
+async def run(p, bt, noms, label, ua=None, conns=None):
     b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
         f'--use-file-for-fake-audio-capture={S}/fixtures/quiet.wav', '--autoplay-policy=no-user-gesture-required'])
-    ctx = await b.new_context(viewport={'width': 412, 'height': 900}, permissions=['microphone', 'camera'], service_workers='block')
+    ctx = await b.new_context(viewport={'width': 412, 'height': 900}, permissions=['microphone', 'camera'], service_workers='block', **({'user_agent': ua} if ua else {}))
     await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify({apiKey:'AIzaTESTTESTTESTTESTTESTTESTTEST', listenMode:'regard', v:4}));")
     await ctx.add_init_script(STUB % ('true' if bt else 'false', 'true' if noms else 'false', "'default'"))
+    if ua: await ctx.add_init_script(GAZE)
     page = await ctx.new_page(); logs = []
     await page.route(re.compile(r'.*/vendor/(face_detection|models|mediapipe)/.*'), lambda r: asyncio.ensure_future(r.abort()))
     page.on('console', lambda m: logs.append(m.text)); page.on('pageerror', lambda e: logs.append('PAGEERROR ' + str(e)))
+    if conns is not None:
+        def handler(ws):
+            conn = {'ws': ws, 'texts': []}; conns.append(conn)
+            def on_msg(m):
+                d = json.loads(m)
+                if 'setup' in d: ws.send(json.dumps({'setupComplete': {}}))
+                elif 'realtimeInput' in d and 'text' in d['realtimeInput']: conn['texts'].append(d['realtimeInput']['text'])
+            ws.on_message(on_msg)
+        await page.route_web_socket(re.compile(r'.*generativelanguage\.googleapis\.com.*'), handler)
     await page.goto('http://127.0.0.1:8765/index.html')
     await page.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
     await page.wait_for_timeout(400)
@@ -101,6 +130,50 @@ async def main():
         await page.evaluate("window.__bt = false; navigator.mediaDevices.dispatchEvent(new Event('devicechange'))")
         await page.wait_for_function("window.__gum[window.__gum.length - 1] === 'défaut'", timeout=5000)
         check('Voiture déconnectée : retour au micro par défaut', True, str(await page.evaluate('window.__gum')))
+        errs += [l for l in logs if 'PAGEERROR' in l]
+        await b.close()
+
+        # 5. Téléphone relié à la voiture (accord du 03/11/26) : pas besoin de le regarder.
+        conns = []
+        b, page, logs = await run(p, True, True, 'téléphone voiture', PHONE_UA, conns)
+        await page.wait_for_timeout(600)
+        check('Téléphone + voiture : noté au journal (« je réponds sans qu\'on me regarde »)', await page.evaluate('wilson._voitureBt') and any('Voiture : téléphone relié en Bluetooth' in l for l in logs))
+        # Oreille « Wilson » active en veille, sans regard.
+        await page.evaluate("wilson.oreille.templates = [[1], [1], [1]]; wilson.oreille.seuil = 1; window.__fed = 0; wilson.oreille.feed = () => { window.__fed++; }")
+        await page.wait_for_timeout(500)
+        check('… en veille, l\'oreille guette « Wilson » (sans qu\'on le regarde)', await page.evaluate('window.__fed') > 5, str(await page.evaluate('window.__fed')))
+        # Discussion ouverte d'un coup d'œil, puis il regarde la route : pas de veille, et la réponse est jouée.
+        await page.evaluate("window.__look = true; window.__parle(900)")
+        await page.wait_for_function('wilson.state === "conversation" && wilson.brain.open', timeout=8000)
+        await page.evaluate("window.__look = false"); await page.wait_for_timeout(4500)
+        check('… il regarde la route plus de 3 s : pas de veille', await page.evaluate('wilson.state === "conversation" && !wilson.paused'))
+        conn = conns[-1]
+        await page.evaluate("window.__parle(800)"); await page.wait_for_timeout(900)
+        conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Quelle est la différence entre le mode sport et éco ?'}}}))
+        for c in audio_chunks(0.8):
+            conn['ws'].send(json.dumps({'serverContent': {'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]}}}))
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': 'Le mode sport rend l\'accélérateur plus vif.'}, 'turnComplete': True}}))
+        await page.wait_for_timeout(250)
+        check('… question posée sans le regarder (journal du 02/11/26, 16h43) : la réponse est jouée', await page.evaluate('wilson.audio.playing') and not any('Réponse retenue' in l for l in logs))
+        await page.wait_for_function('!wilson.audio.playing', timeout=5000)
+        # Plus personne ne lui parle : il se rendort au bout de 45 s (pas de discussion ouverte sans fin avec la radio).
+        await page.evaluate("wilson.playEndAt = wilson._convAt = wilson._prenomAt = wilson._resumedAt = performance.now() - 46000; wilson.lastActivity = performance.now()")
+        await page.wait_for_function('wilson.state === "veille"', timeout=3000)
+        check('… 45 s sans lui parler : il se rendort, même avec la radio', True)
+        # Voiture déconnectée : le regard redevient obligatoire.
+        await page.evaluate("window.__bt = false; navigator.mediaDevices.dispatchEvent(new Event('devicechange'))")
+        await page.wait_for_function('!wilson._voitureBt', timeout=5000); await page.wait_for_timeout(300)
+        f0 = await page.evaluate('window.__fed'); await page.wait_for_timeout(500)
+        check('Voiture déconnectée : retour à la règle du regard (verrou actif, oreille coupée)', await page.evaluate('wilson._verrouRegard') and await page.evaluate('window.__fed') == f0
+              and any('plus de Bluetooth' in l for l in logs))
+        errs += [l for l in logs if 'PAGEERROR' in l]
+        await b.close()
+
+        # 6. Tablette avec un micro Bluetooth : rien ne change (R1 entière).
+        b, page, logs = await run(p, True, True, 'tablette bluetooth', TAB_UA, [])
+        await page.wait_for_timeout(600)
+        check('Tablette avec un micro Bluetooth : la règle du regard reste entière', not await page.evaluate('wilson._voitureBt') and await page.evaluate('wilson._verrouRegard')
+              and not any('Voiture : téléphone relié' in l for l in logs))
         errs += [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
         await b.close()
