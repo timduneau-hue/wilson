@@ -502,9 +502,23 @@ de la tablette le 01/11/26 à 20h51, en 1.24.0, batterie 71 % **non branchée** 
 - Le reste du 01/11/26 (réponses données sans regard, ouvertures à vide) avait déjà été corrigé en 1.25.0.
 - Tests : `e2e_outils.py` (photo seule 5 s), `e2e_maison.py` et `maison_unit.mjs` (ordinateur éteint).
 
+Demande de Timothée du 03/11/26, 08h51 (**1.25.3**) : en voiture (téléphone relié en Bluetooth / Android Auto, sans le mode
+voiture), pas de son de Wilson dans les haut-parleurs, alors que le volume du téléphone indique « Bluetooth » ; voiture
+éteinte, le son sort du téléphone ; à la maison (tablette), aucun problème. Journal du 02/11/26, 16h43 (téléphone) :
+« Voix du direct : 17.2 s reçues, niveau de sortie max 100 % » puis « Tu peux répéter, s'il te plaît, parce que j'ai pas
+entendu la réponse » : la voix était bien jouée par l'appli. Cause probable : Chrome prenait le micro Bluetooth de la voiture
+(« mains libres ») ; pour s'en servir Android ouvre le canal « appel » du Bluetooth et y envoie tout le son de la page ; la
+voiture ne joue ce canal que pendant un vrai appel. Corrigé dans `audio.js` : quand un micro Bluetooth est présent, Wilson
+ouvre le micro **du téléphone** (deviceId exact, « Speakerphone » sur Chrome Android) ; au premier démarrage (noms des micros
+pas encore connus) il recommence une fois ; si la voiture se connecte ou se déconnecte pendant qu'il tourne, le micro est
+rouvert. Le journal dit quel micro est utilisé (« Micro prêt — … micro « Speakerphone » (micro Bluetooth présent, évité) »,
+« appareils audio changés : … ») et l'onglet État aussi (ligne « Son »). Test `e2e_bluetooth.py`.
+À vérifier au prochain trajet dans le journal. Si le son ne sort toujours pas, plan B : jouer la voix par le lecteur
+multimédia du navigateur (balise audio) pour que la voiture la traite comme de la musique.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 02/11/26 : **version 1.25.2** en ligne (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 03/11/26 : **version 1.25.3** en ligne (son en voiture : micro du téléphone quand un micro Bluetooth est présent) ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
