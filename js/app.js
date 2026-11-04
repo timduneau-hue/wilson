@@ -552,7 +552,12 @@ class App {
     if (reason === 'apres_appel') this.brain.sendText(this._apresAppelTexte());
     if (reason === 'apres_appel_entrant') this.brain.sendText(this._apresAppelEntrantTexte());
     if (reason === 'reponse_tardive' && this._lateText) this.brain.sendText(this._lateText);
-    if (reason === 'prenom' && this._wakeText) { this.brain.sendText(this._wakeText); } this._wakeText = null;
+    if (reason === 'prenom' && this._wakeText) {
+      this.brain.sendText(this._wakeText);
+      // Journal du 04/11/26, 11h49:54 (voiture) : réveillé avec sa demande, Gemini n'a rien dit et rien ne l'a relancé.
+      this._demandeTexte = { texte: this._wakeDemande || '', at: performance.now(), conv: this.convId, vu: false };
+    }
+    this._wakeText = null;
     if (this.netWait && this.netWait.start) this._netBack();          // réveillé sans réseau : c'est reparti
     this.lastActivity = performance.now();
   }
@@ -928,8 +933,11 @@ class App {
   endConversation(why) {
     if (this.state !== 'conversation' && this.state !== 'eveil') return;
     if (this.netWait && !this.netWait.start) { clearTimeout(this.netWait.timer); this.netWait = null; }
-    this.log(`Fin de conversation (${why})`); this._byName = false; this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false; this._searchMs = 0;
-    if (this._searches) { for (const c of this._searches.values()) c.abort(); this._searches.clear(); }
+    const depuis = (t) => (t ? `${Math.round((performance.now() - t) / 1000)} s` : '—');
+    this.log(`Fin de conversation (${why}) — dernière parole de Wilson il y a ${depuis(this.playEndAt)}, de Timothée il y a ${depuis(this._heardAt)}${this._voitureBt ? ', en voiture' : ''}`); this._byName = false; this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false; this._searchMs = 0;
+    // Les outils du CRM vont au bout (une préparation affiche sa carte « Oui / Non ») ; les recherches s'arrêtent.
+    if (this._searches) { for (const c of this._searches.values()) if (!c.crm) c.abort(); this._searches.clear(); }
+    if (this._voitureBt && why !== 'essai de voix' && why !== 'volant') { try { this.audio.tone('dodo'); } catch (_) {} }   // en voiture : il entend qu'il se rendort
     this.brain.close(); this.audio.flush(); this.voice.cancel(); this.outBuf = []; this.outLen = 0;
     if (this.ecoState) this.ecoState.queue = []; this.ecoState = null; this.mode = null;
     this.face.setTalk(0); this.face.setListen(-1); this.face.clearEmotion();
@@ -1101,6 +1109,22 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   // ---------- cerveau ----------
   _wireBrain() {
     const b = this.brain;
+    // Journal plus complet (demande de Timothée du 04/11/26, 11h53 : « des bugs se passent et ne sont pas relevés ») :
+    // chaque résultat d'outil rendu à Gemini et chaque consigne que l'appli lui glisse sont écrits au journal.
+    const respond0 = b.respond.bind(b), sendText0 = b.sendText.bind(b);
+    b.respond = (rs) => {
+      for (const r of rs || []) {
+        if (r.name === 'exprimer_emotion') continue;
+        const txt = typeof r.response?.result === 'string' ? r.response.result : JSON.stringify(r.response || {});
+        this.log(`Outil ${r.name} → Gemini : « ${txt.replace(/\s+/g, ' ').slice(0, 160)} »${r.scheduling ? ` (${r.scheduling})` : ''}`, true);
+      }
+      respond0(rs);
+      // Chien de garde (journal du 04/11/26, 11h50:59 et 11h51:37) : sur Gemini 3.1, après l'outil « remarque », il n'a plus
+      // rien dit jusqu'à ce que Timothée le rappelle. S'il reste muet 5 s après un résultat, relance une fois.
+      const muet = (rs || []).every((r) => r.name === 'exprimer_emotion' || /ne dis rien|ne redis rien|ne fais rien/i.test(JSON.stringify(r.response || {})));
+      if (!muet) this._apresOutil = { at: performance.now(), conv: this.convId, noms: (rs || []).map((r) => r.name).join(', ') };
+    };
+    b.sendText = (t) => { this.log(`Consigne à Gemini : « ${String(t).replace(/\s+/g, ' ').slice(0, 160)} »`, true); sendText0(t); };
     b.on('audio', (i16, rate) => this._liveAudio(i16, rate));
     this._liveAudio = (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
@@ -1126,11 +1150,11 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         // Fin de phrase détectée sur la tablette ; à défaut (bruit continu, dehors…), dernier mot transcrit par Google.
         const end = e > after && !this.audio.speaking ? e : h > after ? h : 0;
         // (plus de 60 s : ce n'était pas une attente, mais une phrase bien plus ancienne — « 90,7 s » après un essai de voix, 04/11/26)
-        const dl = end ? Math.round((now - end) / 100) / 10 : null;
+        const dl = end && end > (this._convAt || 0) - 15000 ? Math.round((now - end) / 100) / 10 : null;   // « 34,1 s » après un toucher (04/11/26, 11h37)
         this._liveTurn = { t: now, sec: 0, delay: dl != null && dl <= 60 ? dl : null, search: this._searchMs || 0 };
         this._searchMs = 0;
       }
-      this._liveTurn.sec += i16.length / (rate || 24000);
+      this._liveTurn.sec += i16.length / (rate || 24000); this._apresOutil = null;
       this.audio.play(i16, rate); this.lastActivity = performance.now();
     };
     b.on('interrupted', () => {
@@ -1181,16 +1205,16 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         this.log(`Délais (direct) : 1er son ${s != null ? s + ' s' : '?'} après la fin de ta phrase (${this.brain.modelUsed}${T.search ? `, dont recherche ${(T.search / 1000).toFixed(1)} s` : ''})`);
         this.remote.mesure({ google: s, voix: s != null ? Math.round((s + 0.06 + (this.audio.ctx.outputLatency || 0)) * 10) / 10 : null, modele: this.brain.modelUsed, reflexion: 'direct',
           recherche: T.search ? Math.round(T.search / 100) / 10 : null });
-        this.log(`Voix du direct : ${T.sec.toFixed(1)} s reçues, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} photo(s) prise(s) à la demande${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
+        this.log(`Voix du direct : ${T.sec.toFixed(1)} s reçues${this.audio.trous ? `, ${this.audio.trous} trou(s) (voix arrivée en retard)` : ''}, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} photo(s) prise(s) à la demande${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
       }
-      this._liveTurn = null; this._outPeak = 0;
+      this._liveTurn = null; this._outPeak = 0; this.audio.trous = 0;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
       if (user) this._parleDepuis = true;
       if (wilson) {
         this._demandeTexte = null;
         this._derniereReponse = { texte: wilson, at: performance.now() }; this._parleDepuis = false;
-        this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson);
+        this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson); this._enregistreFaux(wilson);
         // Journal du 30/10/26, 22h39 : « To hear your thoughts on something specific, just let me know. » → il le redit en français.
         if (enAnglais(wilson) && this.brain.open && performance.now() - (this._anglaisAt || -1e9) > 15000) {
           this._anglaisAt = performance.now(); this.log('Wilson a répondu en anglais : je lui demande de le redire en français');
@@ -1199,10 +1223,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       }
       // Demande transmise en texte (oreille) restée sans réponse alors qu'on le regardait : relance, une fois (01/11/26).
       else if (!user && this._demandeTexte && this._demandeTexte.conv === this.convId && performance.now() - this._demandeTexte.at < 15000
-        && (this._demandeTexte.vu || this._gazing()) && this.brain.open && !this.paused && !hadTool && this._nudgedFor !== this._demandeTexte.texte) {
+        && (this._demandeTexte.vu || this._gazing() || this._voitureBt) && this.brain.open && !this.paused && !hadTool && this._nudgedFor !== this._demandeTexte.texte) {
         const D = this._demandeTexte; this._nudgedFor = D.texte; this._demandeTexte = null;
-        this.log('Wilson s\'est tu sur une demande dite en le regardant : relance');
-        this.brain.sendText(`[On te parlait en te regardant (« ${D.texte} ») : réponds maintenant, à voix haute.]`);
+        this.log(`Wilson s'est tu sur une demande ${this._voitureBt && !D.vu ? 'faite en voiture' : 'dite en le regardant'} : relance`);
+        this.brain.sendText(`[On te parlait${this._voitureBt && !D.vu ? ' (Timothée, en voiture)' : ' en te regardant'} (« ${D.texte} ») : réponds maintenant, à voix haute.]`);
       }
       // (pas de relance pendant qu'un outil travaille : CRM ou recherche en cours, il répondra avec le résultat — journal du 25/10/26, 10h21)
       else if (user && realPhrase(user) && (this._gazeMode || this._byName) && this.brain.open && !this.paused && this._nudgedFor !== user && !hadTool && this._reponsePermise() && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)
@@ -1241,7 +1265,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       for (const id of ids) {
         const A = this._analyses && this._analyses.get(id);
         if (A) { A.cancelled = true; this.log('Question au CRM : Gemini n\'attend plus, la réponse viendra quand même'); continue; }   // C11 bis
-        const c = this._searches && this._searches.get(id); if (c) { this._searches.delete(id); c.abort(); this.log('Recherche annulée'); }
+        const c = this._searches && this._searches.get(id);
+        if (c && c.crm) { c.annule = true; this.log(`Outil ${c.crm} annulé par Google (Timothée parlait encore) : je le finis quand même et je lui donne le résultat`); continue; }
+        if (c) { this._searches.delete(id); c.abort(); this.log('Recherche annulée par Google (on parlait encore)'); }
+        else this.log(`Google annule un outil déjà fini (${id.slice(0, 12)})`);
       }
     });
     b.on('goaway', () => this._reconnect('goAway'));
@@ -1358,6 +1385,19 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (this.voice.speaking || t0 < (this.playEndAt || 0) + 300 || !this._addressed(now)) return;
     W.phrase = this.audio.recent(Math.min(6000, now - t0 + 700)); W.phraseAt = Date.now();
     this.log(`Phrase gardée pendant la coupure (${(W.phrase.length / 16000).toFixed(1)} s)`);
+  }
+
+  // Journal du 04/11/26, 11h48:37 : verrou refusé (« rien à enregistrer »), et Wilson dit « J'enregistre la tâche maintenant.
+  // C'est bon » : rien n'était écrit. Toute phrase qui dit « enregistré » sans écriture confirmée par le CRM est corrigée.
+  _enregistreFaux(t) {
+    if (!this.crm.on || !this.brain.open || this.mode !== 'live') return;
+    if (!/\b(c'est|ça y est|voilà|j'ai)\b[^.!?]{0,30}(enregistr|dans (tes|mes) tâches|dans le crm)/i.test(t)) return;
+    if (/\b(pas|jamais|rien)\b[^.!?]{0,20}enregistr|\?\s*$/i.test(t)) return;
+    const D = this.crm.dernierEnregistre;
+    if ((D && Date.now() - D.at < 90000) || (this.crm.queue && this.crm.queue.length)) return;
+    const p = this.crm.pending;
+    this.log(`Wilson a dit « enregistré » alors que le CRM n'a rien enregistré${p ? ` (préparé, pas confirmé : « ${p.relu.slice(0, 80)} »)` : ' (rien de préparé)'} : je le corrige`);
+    this.brain.sendText(`[ATTENTION : rien n'est enregistré dans le CRM, le CRM ne l'a pas confirmé. Dis-le-lui tout de suite en une phrase, sans t'excuser longuement, puis ${p ? `relis-lui la phrase préparée (« ${p.relu} ») et demande « Je l'enregistre ? »` : 'prépare-le avec crm_noter et relis-le-lui'}.]`);
   }
 
   // Réponse en double : même début que sa réponse précédente (moins de 45 s), sans que personne ait parlé entre les deux.
@@ -1556,7 +1596,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       while (performance.now() - t0 < 4000 && (this.audio.speaking || performance.now() - this.audio.lastVoicedAt < 700)) await new Promise((r) => setTimeout(r, 100));
       const pcm = this.audio.recent(Math.min(8000, performance.now() - t0 + 3000));
       const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: pcm });
-      this.log(`Oreille (maison) : écart ${d.score.toFixed(1)} → Gemini entend « ${(r.texte || '').slice(0, 120)} » → ${r.appel ? `oui, « Wilson »${r.doute ? ' (pas certain)' : ''}${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non' + (r.pourquoi ? ' (' + r.pourquoi + ')' : '')}`, r.appel);
+      this.log(`Oreille (${this._voitureBt ? 'voiture' : 'maison'}) : écart ${d.score.toFixed(1)} → Gemini entend « ${(r.texte || '').slice(0, 120)} » → ${r.appel ? `oui, « Wilson »${r.doute ? ' (pas certain)' : ''}${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non' + (r.pourquoi ? ' (' + r.pourquoi + ')' : '')}`, r.appel);
       if (!r.appel) { this._nomCalme = Date.now() + 3000; if (!r.texte && this._nomJetons) this._nomJetons.n = Math.min(10, this._nomJetons.n + 1); return; }   // rien d'intelligible : ne coûte rien
       if (this.settingsOpen) return;
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) {      // déjà en discussion : la demande part tout de suite
@@ -1573,7 +1613,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         return;
       }
       if (this.state !== 'veille') return;
-      this._wakeText = r.demande ? this._texteDeLoin(r.demande, r.doute) : null; this._wakePcm = new Int16Array(0);
+      this._wakeText = r.demande ? this._texteDeLoin(r.demande, r.doute) : null; this._wakeDemande = r.demande || ''; this._wakePcm = new Int16Array(0);
       this.face.play('wake'); await this.startConversation('prenom');
       if (!r.demande) this._ecouteSeule();
     } catch (e) {
@@ -1597,12 +1637,18 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   _ecouteSeule() {
     const conv = this.convId, t0 = performance.now();
     try { this.audio.tone('ecoute'); } catch (_) {}
-    this.pill('Je t\'écoute…', 'run', 8000);
-    this.log('« Wilson » tout seul : j\'écoute sans rien dire');
+    // En voiture (journal du 04/11/26, 11h31 et 11h47 : « Wilson » → rien, rendormi 8 s après ; « j'ai cru que tu m'entendais
+    // plus ») : il ne voit pas l'écran, Wilson répond « Oui ? » et attend 20 s.
+    const voiture = this._voitureBt, attente = voiture ? 20000 : 8000;
+    this.pill('Je t\'écoute…', 'run', attente);
+    if (voiture && this.brain.open) {
+      this.log('« Wilson » tout seul, en voiture : je réponds « Oui ? » et j\'écoute 20 s');
+      this.brain.sendText('[Timothée t\'appelle en voiture : dis seulement « Oui ? » et écoute la suite.]');
+    } else this.log('« Wilson » tout seul : j\'écoute sans rien dire');
     setTimeout(() => {
       if (conv !== this.convId || this.state !== 'conversation' || (this._heardAt || 0) > t0 || this.audio.playing) return;
-      this.log('Appelé sans suite : je me rendors sans rien dire'); this.endConversation('silence');
-    }, 8000);
+      this.log(`Appelé sans suite (rien entendu en ${attente / 1000} s) : je me rendors${voiture ? '' : ' sans rien dire'}`); this.endConversation('silence');
+    }, attente);
   }
 
   // Chaque phrase entendue en voiture : son écart avec les empreintes (pour régler l'oreille d'après le journal).
@@ -1826,6 +1872,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   async _crmTool(call) {
     if (call.name === 'crm_question') return this._analyse(call);
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
+    ctl.crm = call.name;                    // outil du CRM : jamais abandonné en route (voir 'toolcancel')
     this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
     if (['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit'].includes(call.name)) this.face.setEmotion('reflexion', CRM_MAX_MS + 2000, 0.6);
     this.log(`CRM (direct) : ${call.name} ${JSON.stringify(call.args || {}).slice(0, 160)}`, true);
@@ -1839,9 +1886,20 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         : isNetErr(e) ? 'Pas de réseau vers le CRM pour l\'instant. Dis-le simplement et propose de réessayer dans un moment.' : `Le CRM ne répond pas (${e.message}). Dis-le simplement.` };
       this.log(`CRM impossible (${((performance.now() - t0) / 1000).toFixed(1)} s) : ${e.name === 'AbortError' ? 'trop long' : e.message}`);
     } finally { clearTimeout(timer); }
-    if (conv !== this.convId || !this._searches.has(call.id)) return;
+    if (conv !== this.convId || !this._searches.has(call.id)) {
+      if (conv !== this.convId) this.log(`CRM : ${call.name} fini après la fin de la discussion (${((performance.now() - t0) / 1000).toFixed(1)} s) : « ${String(res.info || '').slice(0, 140)} »`);
+      return;
+    }
     this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
     this.face.clearEmotion(); if (pid) this.pillEnd(pid, true, '');
+    if (ctl.annule) {
+      // Journal du 04/11/26, 11h45:53 : crm_noter (tâche Karine Viola) annulé par Google parce qu'il parlait encore → rien
+      // de préparé, puis Wilson a dit « c'est bon » sans rien enregistrer. Désormais l'outil va au bout et Gemini reçoit le
+      // résultat en message.
+      this.log(`CRM : ${call.name} fini malgré l'annulation : résultat donné à Gemini en message`);
+      if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Résultat de ${call.name} (demandé juste avant, il parlait encore) : ${res.info} Dis-le-lui maintenant, brièvement.]`);
+      return;
+    }
     this.brain.respond([{ id: call.id, name: call.name, response: { result: res.info } }]);
     const n = this._modelOut;
     setTimeout(() => {
@@ -2149,7 +2207,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         // voilà » pendant une soirée → discussion restée ouverte 15 min, les voix autour la prolongeaient sans fin) :
         // 45 s sans qu'il dise un mot ni qu'on le rappelle → veille.
         if ((this._byName || this._voitureBt) && this.mode === 'live' && !this.continuous && !this._gazing(now) && !this.speaking && !thinking && !searching
-          && now - Math.max(this.playEndAt || 0, this._convAt || 0, this._prenomAt || 0, this._resumedAt || 0) > BYNAME_IDLE_MS) this.endConversation('silence : personne ne lui parle');
+          && now - Math.max(this.playEndAt || 0, this._convAt || 0, this._prenomAt || 0, this._resumedAt || 0, this._voitureBt ? this._heardAt || 0 : 0) > (this._voitureBt ? CAR_IDLE_MS : BYNAME_IDLE_MS)) this.endConversation('silence : personne ne lui parle');   // en voiture : ce qu'il dit compte aussi, 60 s de calme (remarque du 04/11/26, 11h50 : « tu te mets en veille alors que je parle ») ; la radio est coupée pendant la discussion
         else if (!this.continuous && !this.speaking && !busyEar && !thinking && !searching && idle > keep) this.endConversation('silence');
       }
       if (this.continuous && idle > 30000 && f.p.bright.t > 0.5) { f.setBrightness(0.3); f.setMood('somnolent'); }
@@ -2172,6 +2230,16 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this._holdOn = garde; this._holdTry = now;
       this.audio.mediaHold(garde, (a) => { this.log(`Bouton ${a} (volant ou écran de la voiture) : je me tais`); if (this.state === 'conversation') this.endConversation('volant'); });
     }
+    const AO = this._apresOutil;
+    if (AO && (AO.conv !== this.convId || this.state !== 'conversation')) this._apresOutil = null;
+    else if (AO && now - AO.at > 5000 && !this.audio.playing && this.brain.open && !this.paused && !(this._searches && this._searches.size) && !(this._analyses && [...this._analyses.values()].some((A) => !A.cancelled))) {
+      this._apresOutil = null;
+      this.log(`Wilson muet 5 s après le résultat de ${AO.noms} : relance`);
+      this.brain.sendText('[Tu as le résultat de ton outil : réponds-lui maintenant à voix haute, brièvement, en français.]');
+    }
+    // En voiture, personne ne regarde l'écran : caméra à 2 analyses/s et visage à 30 images/s pendant la discussion, pour que
+    // le téléphone garde de la marge pour le son (grésillements, remarque du 04/11/26, 11h32).
+    if (vb && this.state === 'conversation') { if (this.vision && this.vision.fps > 2) this.vision.setRate(2); if (this.face.fpsDiv < 2) this.face.setFps(30); }
     // Remarque de Timothée du 04/11/26, 10h13 : en voiture il ne regarde pas l'écran ; pendant qu'il cherche (CRM, analyste,
     // Internet), un petit « tic-tac » doux toutes les 2,5 s dit qu'il réfléchit (jusqu'à 32 s de silence ce matin-là).
     const cherche = this.state === 'conversation' && ((this._searches && this._searches.size) || (this._analyses && [...this._analyses.values()].some((A) => !A.cancelled)));

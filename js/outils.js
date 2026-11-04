@@ -339,7 +339,8 @@ export class Outils {
     const t = String(texte).trim(); if (!t) return 'Quelle remarque ?';
     this.log(`REMARQUE DE TIMOTHÉE : ${t}`, true);
     const l = lire('wilson.remarques', []); l.push({ t: Date.now(), texte: t }); ecrire('wilson.remarques', l.slice(-50));
-    return 'Remarque notée : elle sera lue pour ta prochaine mise à jour (chaque nuit). Dis-le simplement, en une phrase.';
+    // Remarque du 04/11/26, 11h51 : « noter mes remarques en arrière-plan, sans rester bloqué ni arrêter de m'écouter ».
+    return 'Remarque notée pour ta prochaine mise à jour (chaque semaine). Dis seulement « C\'est noté. » (trois mots), puis réponds tout de suite à ce qu\'il a dit d\'autre ou écoute la suite.';
   }
 
   mesRemarques() {
