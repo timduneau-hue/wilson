@@ -343,7 +343,7 @@ export class Crm {
       p.relu = type === 'note' ? `Note pour ${qui} : « ${texte} ».`
         : `Compte rendu ${p.echange === 'appel' ? 'd\'appel' : 'de visite'}${d ? ' du ' + jourDit(d) : ''}, ${qui} : « ${texte} ».`;
     }
-    this.pending = p;
+    this.pending = p; this.dernierEnregistre = null;     // nouvelle préparation : « déjà enregistré » ne vaut plus
     this.log(`à confirmer : ${p.relu}`, true);
     if (this.app.showConfirm) this.app.showConfirm(p);
     return { ok: true, pending: p,
