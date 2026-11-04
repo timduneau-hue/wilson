@@ -172,6 +172,27 @@ async def main():
         send(conn, turnComplete=True); await page.wait_for_timeout(400)
         check('Réveillé par « Wilson, est-ce que tu m\'écoutes ? », Gemini muet : relance (voiture, sans regard)', any('réponds maintenant, à voix haute' in x for x in conn['texts'][n0:]) and has('demande dite en le regardant : relance') or any('réponds maintenant' in x for x in conn['texts'][n0:]), str(conn['texts'][n0:])[:160])
 
+        # --- 7. recherche dans le CRM en arrière-plan (question de 12h19) ---
+        conn = conns[-1]; n0 = len(conn['texts']); k = len(conn['tools'])
+        await page.route(re.compile(r'https://generativelanguage\.googleapis\.com/v1beta/models/.*'), lambda r: asyncio.ensure_future(r.fulfill(status=200, content_type='application/json',
+            body=json.dumps({'candidates': [{'content': {'parts': [{'text': json.dumps({'action': 'repondre', 'reponse': 'SN Samarch a commandé 1 715 € de serrures à larder.'})}]}}]}))))
+        await page.evaluate("window.__parle(500)"); await page.wait_for_timeout(600)
+        conn['ws'].send(json.dumps({'toolCall': {'functionCalls': [{'id': 'q1', 'name': 'crm_question', 'args': {'question': 'Quelles serrures a commandé SN Samarch ?'}}]}}))
+        await page.wait_for_timeout(400)
+        r = [x for x in conn['tools'][k:] if x['id'] == 'q1']
+        check('Question au CRM (3.1) : résultat d\'outil immédiat « je cherche, je te tiens au courant » (Wilson reste libre)', r and 'arrière-plan' in r[0]['response']['result'] and has('Analyste en arrière-plan'), str(r)[:120])
+        await page.wait_for_function("window.wilson && !(wilson._analyses && wilson._analyses.size)", timeout=15000); await page.wait_for_timeout(500)
+        t = conn['texts'][n0:]
+        check('… la réponse arrive ensuite en message (« J\'ai la réponse à ta question »)', any('La recherche dans le CRM que tu avais lancée' in x for x in t), str(t)[-1:][:160] if t else '')
+        # point d'avancement : dit seulement si personne ne parle, au plus toutes les 12 s
+        n0 = len(conn['texts'])
+        pt = await page.evaluate("""(() => { const ctl = new AbortController(); const A = { id: 'q2', question: 'Devis à relancer', ctl, fond: true, cancelled: true, dernierPoint: performance.now() - 20000, t0: performance.now(), conv: wilson.convId };
+          wilson._analyses = wilson._analyses || new Map(); wilson._analyses.set('q2', A); wilson.audio.lastVoicedAt = performance.now() - 5000; wilson.audio.speaking = false;
+          wilson._pointAnalyse(ctl.signal, 2, 'je regarde les devis de cette année'); wilson._pointAnalyse(ctl.signal, 3, 'je compare avec l\\'an dernier');
+          wilson._analyses.delete('q2'); return true; })()""")
+        t = conn['texts'][n0:]
+        check('… point d\'avancement dit en quelques mots, une fois (pas deux en moins de 12 s)', sum('Point d\'avancement' in x for x in t) == 1 and has('moins de 12 s'), str(t)[:160])
+
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
         await b.close()
