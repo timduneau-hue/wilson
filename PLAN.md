@@ -636,20 +636,13 @@ Demandes de Timothée du 04/11/26, 17h25 (**1.26.5**, avec la 1.26.4 qui n'avait
   journée sur l'appareil, même après un redémarrage ; chaque lecture du CRM a un délai maximal (requête de l'analyste 60 s,
   fiche/journée/bilan 45 s) : une requête bloquée sur le réseau mobile (17h18 : recherche partie, jamais revenue) compte
   comme une coupure, l'analyste attend puis la relance. Les écritures n'ont pas de délai (jamais renvoyées deux fois).
-- **Tâches : 8 annoncées, 5 dans le CRM** (17h20-17h22) : les 3 en trop sont les sujets « À voir au prochain RDV » créés le
-  jour même dans le CRM (feuille RAPPELS_TIM, statut « rdv », sans date) : `crm_journee` du CRM les compte comme des tâches
-  du jour. Correction **côté CRM** (`WebApp_autonome.gs`, crm_journee et crm_client : les écarter des tâches, les donner
-  à part dans la fiche du client sous « À voir au prochain RDV ») : à faire dans l'éditeur Apps Script depuis le PC de
-  Timothée (Chrome injoignable le 04/11/26 à 17h30).
-- **« Wilson » appelé au moins 5 fois en voiture, aucune réaction** (17h40 : « même s'il y a un problème réseau ou autre
-  chose, il faut que je sois au courant ») : le journal du téléphone s'arrête à 17h22:57 (fin d'une discussion), plus rien
-  ensuite, pas même le pouls de l'onglet État : l'appli ne tournait plus (écran éteint ou autre appli devant : Chrome met la
-  page en pause, elle n'entend ni ne parle) ou n'avait plus du tout de réseau (les lignes seraient alors arrivées au retour).
-  **Garde « sourd »** (téléphone relié à la voiture seulement) : au passage en arrière-plan, petit son + « je passe en
-  arrière-plan, je ne t'entends plus » (tant que Chrome le laisse parler) et journal envoyé tout de suite ; au retour, il dit
-  combien de temps il n'a rien entendu ; micro muet plus de 5 s à l'écran : il le dit et relance le son, puis annonce qu'il
-  entend de nouveau. Avec la 1.26.4 : un « Wilson » entendu ne reste plus jamais sans réponse quand le réseau traîne.
-  Test `e2e_sourd_0411.py` (7 vérifications).
+- **Tâches : 8 annoncées, 5 dans le CRM** (17h20-17h22) : les 3 en trop sont les sujets « À voir au prochain RDV » (feuille
+  RAPPELS_TIM, statut « rdv », sans date). Le code du CRM les écarte bien (`lireTaches_`), mais **Wilson interrogeait un
+  autre déploiement du CRM, resté sur la version 173 du 25/10/26** : le projet CRM a 172 déploiements actifs, l'appli de
+  Timothée utilise le plus récent, Wilson celui dont l'ID commence par `AKfycbxllCCbk5` (ligne `CRM_URL` du script de
+  Wilson). Passé en version 180 le 04/11/26 à 18h24 (Timothée a cliqué « Déployer »), même adresse.
+  **Règle : à chaque nouvelle version du CRM, mettre aussi à jour ce déploiement-là** (Gérer les déploiements → celui dont
+  l'ID commence par `AKfycbxllCCbk5` → crayon → dernière version → Déployer), sinon Wilson reste sur l'ancien CRM.
 - Test `e2e_crm_0411.py` (7 vérifications) ; `e2e_outils.py` et `e2e_question.py` passés à la nouvelle règle de l'écran.
 
 Demande de Timothée du 04/11/26, 17h57 (« il se met à me parler tout de suite même quand je lui parle pas… une fois pour
