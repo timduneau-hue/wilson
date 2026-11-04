@@ -102,7 +102,7 @@ async def main():
         check('… puis les résultats de la recherche, et il répond', 'Résultats' in json.dumps(st['gem'][-1]['contents'], ensure_ascii=False) and '3500' in json.dumps(st['gem'][-1]['contents'], ensure_ascii=False))
         check('Réponse rendue au direct (outil crm_question)', '3 500 €' in res and 'sans rien ajouter' in res, res)
         card = await page.evaluate("({ vis: !document.getElementById('cards').hidden, txt: document.getElementById('cards').innerText })")
-        check('… et affichée à l\'écran (question + réponse)', card['vis'] and '3 500 €' in card['txt'] and 'juillet 2025' in card['txt'], str(card))
+        check('… et PAS affichée à l\'écran (règle du 04/11/26 : du texte seulement s\'il le demande)', not ('3 500 €' in card['txt']), str(card))
         await page.wait_for_timeout(200)
         check('… tête qui réfléchit retirée une fois la réponse là', await page.evaluate("wilson.face.emotion !== 'reflexion'"))
         await page.evaluate("wilson.hideCard()")
@@ -128,11 +128,11 @@ async def main():
         c3 = conns[-1]
         check('Réponse arrivée après la fin de la discussion : il se réveille et la dit', len(conns) > nc and any('deux devis à relancer' in t and "J'ai la réponse à ta question" in t for t in c3['texts']) and has('je me réveille pour la dire'), str(c3['texts']))
         card = await page.evaluate("document.getElementById('cards').innerText")
-        check('… et l\'affiche à l\'écran', 'deux devis à relancer' in card, card)
+        check('… sans carte à l\'écran (règle du 04/11/26)', 'deux devis à relancer' not in card, card)
         await page.evaluate("wilson.hideCard()")
 
         # 4. CRM pas encore mis à jour : il le dit simplement
-        await page.evaluate("wilson.crm.analyste._schema = null")
+        await page.evaluate("wilson.crm.analyste._schema = null; localStorage.removeItem('wilson.analyste.schema')")
         st['schema_ok'] = False; st['slow'] = 0
         await tool(c3, 'crm_question', {'question': 'Qui n\'a pas commandé depuis 3 mois ?'}, 'q4')
         for _ in range(40):

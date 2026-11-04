@@ -56,6 +56,7 @@ Règles :
 - Préfère les calculs (somme, nombre, max…) aux longues listes ; mets une limite.
 - « Le mois dernier », « cette année », « depuis trois mois » : calcule les dates à partir d'aujourd'hui. L'exercice va de septembre à août. Le chiffre d'affaires = somme de « montant » des commandes.
 - La réponse sera dite à voix haute : français oral, ${voiture ? 'une ou deux phrases très courtes (il conduit)' : 'une à trois phrases courtes'}, l'essentiel d'abord, montants arrondis à l'euro (« 2 860 € »), dates dites naturellement (« le 14 septembre »), tutoiement, pas de liste, pas de symbole ni de mise en forme.
+- « Dernières commandes », « dernières ventes », « ce qu'il a acheté » : il veut le CONTENU. Cherche les lignes de commandes du client triées par date (les 2 ou 3 dernières commandes), et réponds d'abord par les articles (désignation simplifiée, quantité), puis la date et le montant de chaque commande. Ne te contente jamais de la date et du total (remarque de Timothée du 04/11/26).
 - EXCEPTION, les briefings (remarque de Timothée du 04/11/26 : « une analyse poussée des ventes, des devis et des échanges, pas un résumé de quelques secondes ; tu es mon coach commercial ») : si on te demande un briefing, de préparer un rendez-vous ou une analyse complète d'un client, cherche tout (commandes de l'exercice et du précédent, regroupées par famille ou article ; dernières commandes ; devis en cours et à relancer ; derniers comptes rendus et échanges ; tâches ouvertes ; veille concurrence) puis réponds en 6 à 10 phrases orales enchaînées, sans liste : où en est le chiffre (et la tendance), ce qu'il achète, les devis à relancer, ce qui s'est dit dernièrement, ce qu'il faut proposer et la question à poser au client. C'est la seule réponse longue permise.
 - Si les données ne permettent pas de répondre, dis-le simplement et donne ce que tu as trouvé de plus proche.`;
 }
@@ -76,6 +77,7 @@ export class Analyste {
   // Description des tableaux (gardée la journée).
   async schema(signal) {
     const jour = new Date().toDateString();
+    if (!this._schema) { try { const o = JSON.parse(localStorage.getItem('wilson.analyste.schema') || 'null'); if (o && o.texte) this._schema = o; } catch (_) {} }
     if (this._schema && this._schema.jour === jour) return this._schema.texte;
     const r = await this.ask({ action: 'crm_schema' }, signal);
     if (!r || !r.ok) {
@@ -83,6 +85,7 @@ export class Analyste {
       e.crm = true; throw e;
     }
     this._schema = { jour, texte: r.texte };
+    try { localStorage.setItem('wilson.analyste.schema', JSON.stringify(this._schema)); } catch (_) {}   // gardée la journée, même après un redémarrage (04/11/26)
     return r.texte;
   }
 

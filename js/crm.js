@@ -20,6 +20,7 @@ const minuit = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const plus = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const CACHE_KEY = 'wilson.crm.cache', QUEUE_KEY = 'wilson.crm.attente', PENDING_MS = 5 * 60000, CACHE_MS = 6 * 3600000;
 const JOURNEE_MS = 10 * 60000, BILAN_MS = 15 * 60000;      // journée et bilan récents : réponse immédiate (et sans réseau)
+const LECTURES = { crm_requete: 60000, crm_schema: 30000, crm_client: 45000, crm_journee: 45000, crm_bilan: 45000, crm_produit: 45000, crm_etat: 30000, crm_trouver: 30000 };
 const hm = (t) => { const d = new Date(t); return `${d.getHours()}h${pad(d.getMinutes())}`; };
 // Pas de réseau, ou réseau trop faible (C8) : la requête n'est pas partie.
 export const netErr = (e) => !navigator.onLine || (e && e.name === 'TypeError') || /Failed to fetch|NetworkError|Load failed|network/i.test(String((e && e.message) || ''));
@@ -182,7 +183,7 @@ export const CRM_TOOL_NAMES = CRM_TOOLS.map((t) => t.name);
 
 export class Crm {
   constructor(app) {
-    this.app = app; this.cache = new Map(); this.pending = null; this.last = null; this.journee = null; this._bilan = null;
+    this.app = app; this.delais = { ...LECTURES }; this.cache = new Map(); this.pending = null; this.last = null; this.journee = null; this._bilan = null;
     this.state = ''; this.etat = null; this.call = null; this.queue = [];
     this.analyste = new Analyste({ ask: (p, s) => this.ask(p, s), log: (m) => this.app.log(m) });
     this._load();
@@ -194,7 +195,23 @@ export class Crm {
 
   async ask(payload, signal) {
     const t0 = performance.now();
-    const r = await this.app.remote.ask(payload, signal);
+    // Lectures : délai maximal (journal du 04/11/26, 17h18 : une recherche de l'analyste partie en voiture n'est jamais
+    // revenue, la requête restait bloquée sur le réseau mobile). Passé ce délai, elle compte comme une coupure de réseau :
+    // l'analyste attend puis la relance. Les écritures n'en ont pas (on ne renvoie jamais une écriture qui a peut-être eu lieu).
+    const max = (this.delais || LECTURES)[payload && payload.action];
+    let r;
+    if (!max) r = await this.app.remote.ask(payload, signal);
+    else {
+      const ctl = new AbortController(), stop = () => ctl.abort();
+      if (signal) { if (signal.aborted) stop(); else signal.addEventListener('abort', stop, { once: true }); }
+      let trop = false; const t = setTimeout(() => { trop = true; ctl.abort(); }, max);
+      try { r = await this.app.remote.ask(payload, ctl.signal); }
+      catch (e) {
+        if (!trop) throw e;
+        this.log(`${payload.action} sans réponse au bout de ${Math.round(max / 1000)} s (réseau bloqué)`);
+        const err = new Error(`Failed to fetch : pas de réponse du CRM en ${Math.round(max / 1000)} s`); err.network = true; err.name = 'TypeError'; throw err;
+      } finally { clearTimeout(t); if (signal) signal.removeEventListener('abort', stop); }
+    }
     const s = ((performance.now() - t0) / 1000).toFixed(1);
     if (!r || r.ok === false) { this.state = 'refus : ' + ((r && r.erreur) || 'réponse vide'); this.log(`${payload.action} refusé en ${s} s : ${(r && r.erreur) || 'réponse vide'}`); }
     else { this.state = 'à jour'; this.log(`${payload.action} en ${s} s${r.ms ? ` (CRM ${(r.ms / 1000).toFixed(1)} s)` : ''}`); }

@@ -4,12 +4,15 @@
 const S = { type: 'STRING' }, N = { type: 'NUMBER' };
 export const OUTILS = [
   { name: 'afficher', behavior: 'BLOCKING',
-    description: "Montre quelque chose sur le grand écran de la tablette, par-dessus ton visage : une recette, une liste, des étapes, une explication, un mot à épeler, des chiffres, ou une image (« montre-moi un koala », « affiche la recette », « écris-le »). Utilise-le aussi quand une réponse est longue ou pratique à lire (recette, liste, itinéraire en étapes) : dis seulement l'essentiel à voix haute.",
+    description: "Montre quelque chose sur l'écran, par-dessus ton visage. SEULEMENT quand on te le demande : « montre-moi », « affiche », « mets-le par écrit », « écris-le à l'écran », « fais-moi voir », ou une photo (« montre-moi un koala »). Jamais de toi-même : ni message d'attente, ni résultat de recherche, ni réponse longue (dis-la à voix haute). Une photo reste 5 s ; un texte demandé reste jusqu'à ce qu'on le ferme.",
     parameters: { type: 'OBJECT', properties: {
       titre: S,
-      texte: { type: 'STRING', description: 'le contenu ; une ligne par élément ; « - » au début pour une puce, « 1. » pour une étape' },
+      texte: { type: 'STRING', description: 'le contenu demandé ; une ligne par élément ; « - » au début pour une puce, « 1. » pour une étape' },
       image: { type: 'STRING', description: "ce qu'il faut illustrer par une photo (cherchée sur Wikipédia), ex. « koala », « tour Eiffel » ; vide sinon" } }, required: ['titre'] } },
   { name: 'fermer_ecran', behavior: 'BLOCKING', description: "Ferme ce qui est affiché à l'écran." },   // sans paramètres : un objet vide est refusé par Google (tests/e2e_conn.py)
+  { name: 'reafficher', behavior: 'BLOCKING',   // demande de Timothée du 04/11/26 (« réaffiche la photo, j'ai pas eu le temps de voir »)
+    description: "Réaffiche ce qui vient d'être montré (photo, météo, texte), plus longtemps : « réaffiche la photo », « remontre-moi la météo, j'ai pas eu le temps de voir ». duree_sec : combien de temps s'il le dit (60 s sinon).",
+    parameters: { type: 'OBJECT', properties: { duree_sec: N } } },
   { name: 'minuteur', behavior: 'BLOCKING',
     description: "Minuteurs (compte à rebours visible, sonnerie à la fin) : lancer (duree_sec, nom facultatif : « pâtes »), annuler (nom, ou le dernier), liste.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['lancer', 'annuler', 'liste'] }, duree_sec: N, nom: S }, required: ['action'] } },
@@ -38,6 +41,12 @@ const $ = (id) => document.getElementById(id);
 const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 const pad = (n) => String(n).padStart(2, '0');
 const PHOTO_MS = 5000;   // photo seule à l'écran : 5 s (remarque de Timothée du 01/11/26)
+// Règle de Timothée du 04/11/26 : photos, météo et autres images 5 s par défaut (« réaffiche » pour les revoir plus
+// longtemps) ; du texte à l'écran seulement s'il le demande (« montre-moi », « affiche », « mets-le par écrit »).
+const IMAGE_MS = 5000, REAFFICHE_MS = 60000;
+const plat = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[’ʼ]/g, "'");
+export const DEMANDE_ECRAN = /(montr|affich|par ecrit|ecri[st]\b|ecrire|a l'?ecran|sur l'?ecran|sur ton ecran|fais(-| )?(moi )?voir|que je (le |la |les )?voie|je veux (le |la |les )?voir|fais-moi une liste|note(-le)? a l'ecran)/;
+export const demandeEcran = (t) => DEMANDE_ECRAN.test(plat(t));
 const KEY_M = 'wilson.minuteurs', KEY_R = 'wilson.rappels', KEY_C = 'wilson.courses', KEY_I = 'wilson.idees';
 const lire = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch (_) { return d; } };
 const ecrire = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
@@ -66,6 +75,7 @@ export class Outils {
     switch (name) {
       case 'afficher': return this.afficher(a);
       case 'fermer_ecran': this.fermer(); return 'Écran fermé.';
+      case 'reafficher': return this.reafficher(a);
       case 'minuteur': return this.minuteur(a);
       case 'rappel': return this.rappel(a);
       case 'meteo': return this.meteo(a);
@@ -78,12 +88,28 @@ export class Outils {
   }
 
   // ---------- F1 : l'écran ----------
-  _montrer(html, { titre = '', large = false, ms = 90000 } = {}) {   // demande du 30/10/26 : l'écran s'efface tout seul
+  _montrer(html, { titre = '', large = false, ms = 90000, garder = true } = {}) {   // demande du 30/10/26 : l'écran s'efface tout seul
     const el = $('ecran'); if (!el) return;
+    if (garder) this._dernier = { html, titre, large, ms };       // pour « réaffiche » (04/11/26)
     el.innerHTML = `<div class="ecran-in${large ? ' large' : ''}"><div class="ecran-h"><div class="ecran-t">${esc(titre)}</div><button class="ecran-x" type="button" aria-label="Fermer">×</button></div><div class="ecran-b">${html}</div></div>`;
     el.hidden = false;
     el.querySelector('.ecran-x').addEventListener('click', () => this.fermer());
     clearTimeout(this._ecranT); this._ecranMs = ms; this._ecranT = setTimeout(() => this.fermer(), ms);
+  }
+  reafficher({ duree_sec } = {}) {
+    const D = this._dernier;
+    if (!D) return "Rien à réafficher : rien n'a été montré depuis le démarrage. Dis-le simplement.";
+    const ms = Math.min(600000, Math.max(5000, Math.round((Number(duree_sec) || 0) * 1000) || REAFFICHE_MS));
+    this._montrer(D.html, { titre: D.titre, large: D.large, ms, garder: false });
+    this.log(`Écran : réaffiché « ${String(D.titre).slice(0, 60)} » pendant ${Math.round(ms / 1000)} s`, true);
+    return `Réaffiché à l'écran pendant ${Math.round(ms / 1000)} s. Dis seulement « Voilà. »`;
+  }
+  // A-t-il demandé à voir quelque chose à l'écran ? (ce qu'il a dit ces 25 dernières secondes ; la transcription arrive
+  // parfois juste après l'appel de l'outil : on l'attend jusqu'à 1,5 s)
+  async _demande() {
+    const dit = () => (this.app._entenduRecent ? this.app._entenduRecent(25000) : '');
+    for (let i = 0; i < 6 && !demandeEcran(dit()); i++) await new Promise((r) => setTimeout(r, 250));
+    return demandeEcran(dit());
   }
   fermer() { const el = $('ecran'); if (el) { el.hidden = true; el.innerHTML = ''; } clearTimeout(this._ecranT); }
   get ouvert() { const el = $('ecran'); return !!(el && !el.hidden); }
@@ -101,15 +127,23 @@ export class Outils {
     fermer(); return html;
   }
   async afficher({ titre = '', texte = '', image = '' }) {
+    // Règle de Timothée du 04/11/26 : « si je te demande rien, tu l'affiches pas » (journal, 13h25 : « Recherche CRM »
+    // affiché de lui-même pendant une recherche, « je m'en fous de ça »). Le texte ne s'affiche que s'il l'a demandé.
+    const demande = texte ? await this._demande() : true;
+    if (texte && !demande) {
+      this.log(`Écran : texte « ${String(titre).slice(0, 60)} » pas affiché (pas demandé)${image ? ', photo seule' : ''}`);
+      texte = '';
+      if (!image) return "Pas affiché : il ne t'a pas demandé de l'écrire à l'écran. Dis-le à voix haute, brièvement. Tu ne l'affiches que s'il te dit « montre-moi », « affiche » ou « mets-le par écrit ».";
+    }
     let img = null;
     if (image) img = await this._image(image).catch(() => null);
     const html = (img ? `<figure class="ecran-img"><img src="${esc(img.src)}" alt="${esc(img.titre)}"><figcaption>${esc(img.titre)} — Wikipédia</figcaption></figure>` : '') + this._texteHtml(texte);
-    if (!html) return "Rien à afficher : il faut un texte ou une image.";
+    if (!html) return image ? `Pas de photo trouvée pour « ${image} » : dis-le simplement.` : "Rien à afficher : il faut un texte ou une image.";
     const lignes = String(texte || '').split(/\n+/).filter((l) => l.trim()).length;
-    // Remarque de Timothée du 01/11/26, 18h50:01 : « Quand tu affiches des photos, je veux que ça dure 5 secondes. »
-    this._montrer(html, { titre, large: !!img && !texte, ms: lignes > 8 ? 4 * 60000 : img && !texte ? PHOTO_MS : 90000 });
-    this.log(`Écran : « ${String(titre).slice(0, 60)} »${img ? ' + image ' + img.titre : image ? ' (image introuvable)' : ''}`, true);
-    return `Affiché à l'écran${image && !img ? ` (sans image : rien trouvé pour « ${image} »)` : img ? ` avec une photo de « ${img.titre} »` : ''}. Ne relis pas tout : dis l'essentiel en une phrase.`;
+    // Photo : 5 s (remarques du 01/11/26 et du 04/11/26) ; texte demandé : 90 s, 4 min s'il est long.
+    this._montrer(html, { titre, large: !!img && !texte, ms: !texte ? IMAGE_MS : lignes > 8 ? 4 * 60000 : 90000 });
+    this.log(`Écran : « ${String(titre).slice(0, 60)} »${img ? ' + image ' + img.titre : image ? ' (image introuvable)' : ''}${texte ? '' : ' (5 s)'}`, true);
+    return `Affiché à l'écran${image && !img ? ` (sans image : rien trouvé pour « ${image} »)` : img ? ` avec une photo de « ${img.titre} »` : ''}${texte ? '' : ', pendant 5 secondes (il peut te dire « réaffiche » pour la revoir plus longtemps)'}. Ne relis pas tout : dis l'essentiel en une phrase.`;
   }
   async _image(sujet) {
     // D'abord l'article qui porte ce nom (« vaisselle » → Vaisselle), sinon une recherche (journal du 30/10/26 : « la
@@ -178,7 +212,7 @@ export class Outils {
   _sonner(phrase, titre) {
     const app = this.app;
     this.log(`Alarme : ${phrase}`, true);
-    this._montrer(`<p class="alarme">${esc(phrase)}</p><p class="fine">Touche l'écran pour arrêter.</p>`, { titre, ms: 10 * 60000 });
+    this._montrer(`<p class="alarme">${esc(phrase)}</p><p class="fine">Touche l'écran pour arrêter.</p>`, { titre, ms: 10 * 60000, garder: false });
     const el = $('ecran'); if (el) el.addEventListener('click', () => this._arreterSonnerie(), { once: true });
     if (this._sonne) clearInterval(this._sonne.t);
     const t0 = Date.now();
@@ -245,9 +279,9 @@ export class Outils {
     });
     const html = `<div class="meteo-now"><span class="meteo-ico">${icoC}</span><span class="meteo-t">${Math.round(c.temperature_2m)}°</span><span class="meteo-m">${esc(motC)}<br><small>ressenti ${Math.round(c.apparent_temperature)}°, vent ${Math.round(c.wind_speed_10m)} km/h</small></span></div>`
       + `<div class="meteo-j">${jl.map((j) => `<div class="mj"><div class="mj-n">${esc(j.nom)}</div><div class="mj-i">${j.ico}</div><div class="mj-t">${j.max}° <small>${j.min}°</small></div><div class="mj-p">💧 ${j.pluie ?? '—'} %</div></div>`).join('')}</div>`;
-    this._montrer(html, { titre: `Météo — ${lieu.name}` });
+    this._montrer(html, { titre: `Météo — ${lieu.name}`, ms: IMAGE_MS });   // 5 s (règle du 04/11/26)
     this.log(`Météo : ${lieu.name}, ${Math.round(c.temperature_2m)}°, ${motC}`, true);
-    return `Météo à ${lieu.name} (affichée à l'écran). Maintenant : ${Math.round(c.temperature_2m)}°, ${motC}, ressenti ${Math.round(c.apparent_temperature)}°, vent ${Math.round(c.wind_speed_10m)} km/h ; risque de pluie dans les 12 heures : ${maxH} %. `
+    return `Météo à ${lieu.name} (affichée 5 s à l'écran ; « réaffiche » pour la revoir). Maintenant : ${Math.round(c.temperature_2m)}°, ${motC}, ressenti ${Math.round(c.apparent_temperature)}°, vent ${Math.round(c.wind_speed_10m)} km/h ; risque de pluie dans les 12 heures : ${maxH} %. `
       + jl.map((j) => `${j.nom} : ${j.mot}, ${j.min} à ${j.max}°, pluie ${j.pluie} %`).join(' ; ') + '. Résume à l\'oral en une ou deux phrases.';
   }
 
@@ -292,11 +326,11 @@ export class Outils {
       return 'Articles cochés enlevés de la liste.';
     }
     const reste = L.items.filter((x) => !x.complete), coches = L.items.filter((x) => x.complete);
-    if (action === 'afficher' || reste.length > 6) {
+    if (action === 'afficher') {                     // seulement s'il le demande (règle du 04/11/26)
       this._montrer(`<ul class="courses">${reste.map((x) => `<li>${esc(x.name)}</li>`).join('')}${coches.map((x) => `<li class="fait">${esc(x.name)}</li>`).join('')}</ul>${L.items.length ? '' : '<p>La liste est vide.</p>'}`, { titre: '🛒 Liste de courses' });
     }
     if (!reste.length) return 'La liste de courses est vide.';
-    return `Liste de courses (${reste.length}) : ${reste.map((x) => x.name).join(', ')}.${action === 'afficher' || reste.length > 6 ? ' Elle est affichée à l\'écran.' : ''}`;
+    return `Liste de courses (${reste.length}) : ${reste.map((x) => x.name).join(', ')}.${action === 'afficher' ? ' Elle est affichée à l\'écran.' : ''}`;
   }
 
   // ---------- F6 : mes idées (document Google par le script de Timothée ; sinon gardées sur l'appareil) ----------
@@ -330,8 +364,8 @@ export class Outils {
       return "Je ne peux pas encore envoyer l'e-mail moi-même (script de Wilson pas à jour) : un bouton « Envoyer par e-mail » est affiché à l'écran, il appuie dessus. Dis-le-lui.";
     }
     if (!liste.length) return 'Aucune idée notée pour l\'instant.';
-    if (action === 'afficher' || liste.length > 5) this._montrer(`<ul>${liste.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${lien ? '<p class="fine">Dans le document Google « Wilson — mes idées ».</p>' : ''}`, { titre: '💡 Mes idées' });
-    return `Ses idées (${liste.length}, la plus récente en dernier) : ${liste.slice(-10).join(' ; ')}.${action === 'afficher' || liste.length > 5 ? ' Affichées à l\'écran.' : ''}`;
+    if (action === 'afficher') this._montrer(`<ul>${liste.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${lien ? '<p class="fine">Dans le document Google « Wilson — mes idées ».</p>' : ''}`, { titre: '💡 Mes idées' });
+    return `Ses idées (${liste.length}, la plus récente en dernier) : ${liste.slice(-10).join(' ; ')}.${action === 'afficher' ? ' Affichées à l\'écran.' : ''}`;
   }
 
   // ---------- F7 : remarques pour la prochaine mise à jour (lues chaque nuit par Claude dans le journal) ----------

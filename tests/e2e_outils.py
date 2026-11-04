@@ -75,7 +75,7 @@ async def main():
         fns = [f['name'] for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', [])]
         sysp = c['setup']['systemInstruction']['parts'][0]['text']
         check('Outils proposés à Gemini : afficher, fermer_ecran, minuteur, rappel, meteo, courses', all(x in fns for x in ['afficher', 'fermer_ecran', 'minuteur', 'rappel', 'meteo', 'courses', 'idees', 'remarque', 'mes_remarques']), str(fns))
-        check('Consigne : afficher les réponses longues, météo par l\'outil meteo', 'appelle afficher' in sysp and 'meteo (pour la météo' in sysp and '(météo, actualités' not in sysp)
+        check('Consigne : afficher seulement sur demande (04/11/26), météo par l\'outil meteo, reafficher proposé', 'appelle alors afficher' in sysp and 'QUE s\'il te le demande' in sysp and 'reafficher' in fns and 'meteo (pour la météo' in sysp and '(météo, actualités' not in sysp)
         async def tool(i, name, args):
             await page.evaluate("([i, n, a]) => wilson._tools([{ id: i, name: n, args: a }])", [i, name, args])
             for _ in range(60):
@@ -85,11 +85,22 @@ async def main():
                         if r['id'] == i: return r['response']['result']
             return ''
         ecran = lambda: page.evaluate("[document.getElementById('ecran').hidden, document.getElementById('ecran').innerText]")
+        # Règle du 04/11/26 : du texte à l'écran seulement s'il le demande
+        r = await tool('t0', 'afficher', {'titre': 'Recherche CRM', 'texte': 'Je cherche dans le CRM…'})
+        e = await ecran()
+        check('Texte pas demandé (« Recherche CRM » du journal du 04/11/26) : rien à l\'écran, Gemini doit le dire à voix haute', e[0] and 'voix haute' in r, r + str(e))
+        await page.evaluate("wilson._noteHeard('Montre-moi la recette des pâtes carbonara')")
         r = await tool('t1', 'afficher', {'titre': 'Pâtes carbonara', 'texte': 'Ingrédients :\n- 200 g de pâtes\n- 2 œufs\n1. Cuire les pâtes\n2. Mélanger'})
         e = await ecran()
         check('Afficher : titre, puces et étapes à l\'écran', not e[0] and 'Pâtes carbonara' in e[1] and '200 g de pâtes' in e[1] and await page.evaluate("document.querySelectorAll('#ecran ul li').length === 2 && document.querySelectorAll('#ecran ol li').length === 2") and 'essentiel' in r, r)
         r = await tool('t2', 'afficher', {'titre': 'Un koala', 'image': 'koala'})
         check('Afficher une image : photo Wikipédia', await page.evaluate("!!document.querySelector('#ecran img')") and 'Koala' in r, r)
+        e5 = await page.evaluate("wilson.outils._ecranMs")
+        check('… la photo reste 5 s', e5 == 5000, str(e5))
+        r = await tool('t2b', 'reafficher', {})
+        check('« Réaffiche la photo » : de nouveau à l\'écran, 60 s', await page.evaluate("!!document.querySelector('#ecran img') && wilson.outils._ecranMs === 60000") and 'Réaffiché' in r, r)
+        r = await tool('t2c', 'reafficher', {'duree_sec': 120})
+        check('… « pendant 2 minutes » : 120 s', await page.evaluate("wilson.outils._ecranMs === 120000"), r)
         r = await tool('t3', 'fermer_ecran', {}); e = await ecran()
         check('fermer_ecran : écran fermé', e[0], str(e))
         r = await tool('t4', 'minuteur', {'action': 'lancer', 'duree_sec': 600, 'nom': 'pâtes'})
@@ -117,7 +128,7 @@ async def main():
         await page.evaluate("wilson.outils._arreterSonnerie(); wilson.outils.fermer()")
         r = await page.evaluate("wilson.outils.meteo({ jours: 3 })")
         e = await ecran()
-        check('Météo (ville des réglages) : texte pour Gemini et carte à l\'écran', 'Angers' in r and '12°' in r and 'pluie faible' in r and 'Demain' in r and not e[0] and 'Météo — Angers' in e[1] and 'Demain' in e[1], r[:200] + ' | ' + e[1][:120])
+        check('Météo (ville des réglages) : texte pour Gemini et carte à l\'écran pendant 5 s (règle du 04/11/26)', 'Angers' in r and '12°' in r and 'pluie faible' in r and 'Demain' in r and not e[0] and 'Météo — Angers' in e[1] and 'Demain' in e[1] and await page.evaluate("wilson.outils._ecranMs") == 5000, r[:200] + ' | ' + e[1][:120])
         await page.evaluate("wilson.outils.fermer()")
         r = await page.evaluate("wilson.outils.courses({ action: 'ajouter', articles: ['beurre', 'Lait'] })")
         check('Courses : ajouter (le lait déjà présent n\'est pas doublé)', 'beurre' in r and [x['name'] for x in st['liste']] == ['Lait', 'beurre'], str(st['liste']))
@@ -125,6 +136,10 @@ async def main():
         check('… lire', 'Lait' in r and 'beurre' in r, r)
         r = await page.evaluate("wilson.outils.courses({ action: 'retirer', articles: ['lait'] })")
         check('… retirer', 'Retiré' in r and [x['name'] for x in st['liste']] == ['beurre'], str(st['liste']))
+        await page.evaluate("wilson.outils.courses({ action: 'ajouter', articles: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7'] })")
+        r = await page.evaluate("wilson.outils.courses({ action: 'lire' })")
+        check('… lire une longue liste : rien à l\'écran (pas demandé)', (await ecran())[0] and 'affichée' not in r, r)
+        await page.evaluate("wilson.outils.courses({ action: 'retirer', articles: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7'] })")
         await page.evaluate("wilson.outils.courses({ action: 'afficher' })")
         check('… afficher à l\'écran', '🛒 Liste de courses' in (await ecran())[1])
         await page.evaluate("wilson.outils.fermer()")
@@ -146,6 +161,7 @@ async def main():
         r = await page.evaluate("wilson.outils.run('mes_remarques', {})")
         sysm = await page.evaluate("wilson._system()")
         check('Accord du 01/11/26 : « tu te rappelles ce que je t\'ai fait noter ? » → mes_remarques relit ses remarques datées (pas les notes internes), consigne à jour', 'reproche' in r and 'notée par l' not in r and '/' in r and 'mes_remarques' in sysm, r)
+        await page.evaluate("wilson._noteHeard('mets-le par écrit')")
         e0 = await page.evaluate("wilson.outils.afficher({ titre: 'Court', texte: 'Une ligne' }).then(() => wilson.outils._ecranMs)")
         e1 = await page.evaluate("wilson.outils.afficher({ titre: 'Long', texte: Array.from({length: 12}, (_, i) => 'ligne ' + i).join('\\n') }).then(() => wilson.outils._ecranMs)")
         check('Écran : s\'efface tout seul (90 s pour un texte court, 4 min pour un long)', e0 == 90000 and e1 == 240000, f'{e0} {e1}')
