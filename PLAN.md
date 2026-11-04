@@ -605,9 +605,23 @@ voiture et il ne répond pas ; il fait des recherches et je ne sais pas ce qu'il
   réveille si la discussion est finie. Sur 3.8 (outils en arrière-plan natifs), rien ne change.
 - Test `e2e_voiture_0411.py` (21 vérifications) ; `e2e_bluetooth.py` passé à la règle des 60 s.
 
+Demande de Timothée du 04/11/26, 17h02 (« il n'a pas démarré au son de ma voix dans la voiture, il a fallu que je le
+regarde ») (**1.26.4**). Journal du 04/11/26, 16h57-17h01 (téléphone relié à la voiture, 1.26.3) ; remarque de 17h00:26.
+- **8 « Wilson » reconnus, aucun réveil, rien au journal** : l'état donnait « dernières phrases : 110.74✓ 83.86✓ … 65.21✓ »
+  (tous sous la limite 167.3), et seule une vérification par Gemini est revenue, à 16h59:56, vide (« Gemini entend « » »),
+  alors qu'il était déjà réveillé au regard (16h59:38). La vérification n'avait pas de délai maximal : avec le réseau mobile
+  elle restait bloquée, et pendant ce temps tous les « Wilson » suivants étaient ignorés sans un mot. Désormais : délai
+  maximal 4 s en voiture (8 s à la maison) ; en voiture, vérification trop lente ou impossible → il se réveille quand même,
+  Gemini reçoit la phrase et la consigne « Oui ? si c'était seulement son nom, rien si c'était la radio » ; sans réseau, il
+  se réveille (message « pas d'Internet » habituel) ; chaque « Wilson » ignoré pendant une vérification est noté au journal.
+- Le second avis (« presque » reconnu) et le journal de chaque phrase de l'oreille ne marchaient que dans l'ancien mode
+  voiture (supprimé le 01/11/26) : remis en route pour le téléphone relié à la voiture (journal : seulement les phrases
+  proches de « Wilson », la radio ne remplit pas la feuille), second avis avec délai maximal de 4 s.
+- Test `e2e_oreille_0411.py` (9 vérifications).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 04/11/26 : **version 1.26.3** en ligne (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 04/11/26 : **version 1.26.4** en ligne (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
