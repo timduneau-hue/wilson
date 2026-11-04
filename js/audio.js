@@ -23,7 +23,11 @@ export class AudioIO {
   // (volume d'appel, écouteur du téléphone) : la voix du mode direct devenait inaudible (23/10/26). Elle n'est donc
   // utilisée qu'avec la coupure « directe » ; en « prudente », Wilson n'écoute pas pendant qu'il parle, l'écho ne gêne pas.
   async start({ aec = false } = {}) {
-    this.ctx = new AudioContext({ latencyHint: 'interactive' });
+    // Téléphone (remarque du 04/11/26, 11h32 : « des grésillements, des scintillements, peu importe la voix ») : sortie à
+    // 8-12 ms de latence, trop juste pour un téléphone occupé (caméra, visage, réseau) → craquements. Tampon « lecture »
+    // sur téléphone (~0,1 s de plus, inaudible dans une discussion), et une avance plus grande au début de chaque réponse.
+    this.mobile = /Mobile/.test(navigator.userAgent);
+    this.ctx = new AudioContext({ latencyHint: this.mobile ? 'playback' : 'interactive' });
     this.aec = !!aec;
     this.stream = await this._openMic(this.aec); this._watchTrack();
     this.ctx.onstatechange = () => this._emit('info', `son : ${this.ctx.state}`);
@@ -206,8 +210,8 @@ export class AudioIO {
 
   tone(kind) {
     if (!this.ctx) return;
-    const t0 = this.ctx.currentTime + 0.03, f = kind === 'ecoute' ? [880] : kind === 'reflexion' ? [587.33, 698.46] : kind === 'revenu' ? [523.25, 783.99] : [659.25, 440];
-    const doux = kind === 'ecoute' || kind === 'reflexion';
+    const t0 = this.ctx.currentTime + 0.03, f = kind === 'ecoute' ? [880] : kind === 'reflexion' ? [587.33, 698.46] : kind === 'dodo' ? [698.46, 523.25] : kind === 'revenu' ? [523.25, 783.99] : [659.25, 440];
+    const doux = kind === 'ecoute' || kind === 'reflexion' || kind === 'dodo';
     f.forEach((hz, i) => {
       const o = this.ctx.createOscillator(), g = this.ctx.createGain(), t = t0 + i * 0.18;
       o.frequency.value = hz; o.type = 'sine';
@@ -279,7 +283,10 @@ export class AudioIO {
     const buf = this.ctx.createBuffer(1, f.length, rate); buf.copyToChannel(f, 0);
     const src = this.ctx.createBufferSource(); src.buffer = buf; src.connect(this.out);
     const now = this.ctx.currentTime;
-    if (this.nextTime < now + 0.03) this.nextTime = now + 0.06;   // petite avance pour une voix sans à-coups
+    if (this.nextTime < now + 0.03) {                               // petite avance pour une voix sans à-coups
+      if (this.nextTime > 0 && this.sources.length) this.trous = (this.trous || 0) + 1;   // trou en pleine réponse (réseau en retard)
+      this.nextTime = now + (this.mobile ? 0.18 : 0.06);
+    }
     src.start(this.nextTime); this.nextTime += buf.duration; this.playedSec += buf.duration;
     this.sources.push(src);
     src.onended = () => {

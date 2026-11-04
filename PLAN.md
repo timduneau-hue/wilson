@@ -573,9 +573,36 @@ voiture : fait par lui à 10h09), 10h13:17, 10h13:52, 10h16:23, 10h44:43, 10h45:
   tâche planifiée (pas en temps réel). **Abandonné par Timothée le 04/11/26, 11h06** (« oublie les tâches complexes pour
   Claude ») : Wilson reste seul (Gemini + analyste du CRM).
 
+Demande de Timothée du 04/11/26, 11h53 (« revérifie le journal ; complète-le, des bugs ne sont pas relevés ; je l'appelle en
+voiture et il ne répond pas ; il fait des recherches et je ne sais pas ce qu'il fait ») (**1.26.3**). Journal du 04/11/26,
+11h29-11h52 (téléphone en voiture, 1.26.2). Il a aussi renoncé à l'API Claude (trop cher) : rien de payant.
+- **Tâche Karine Viola jamais enregistrée** (remarque de 11h48:52) : 11h45:53 `crm_noter` annulé par Google parce qu'il parlait
+  encore (« Recherche annulée », l'outil était abandonné) ; Wilson a dit « je prépare la tâche » sans rien préparer, puis à
+  11h48:37, verrou refusé (« rien à enregistrer »), « J'enregistre la tâche maintenant. C'est bon » : FAUX. Désormais les outils
+  du CRM ne sont jamais abandonnés (ni par une annulation de Google, ni par la fin de la discussion) : ils vont au bout et Gemini
+  reçoit le résultat en message (« [Résultat de crm_noter …] ») ; toute réponse qui dit « enregistré », « dans tes tâches », « dans
+  le CRM » sans écriture confirmée par le CRM depuis 90 s est corrigée tout de suite (`_enregistreFaux`, journal « Wilson a dit
+  « enregistré » alors que le CRM n'a rien enregistré »).
+- **Appelé en voiture sans réponse** (11h31 et 11h47 : « Wilson » tout seul → rien, rendormi 8 s après) : en voiture il répond
+  « Oui ? » et attend 20 s. Réveillé avec sa demande et resté muet (11h49:54) : relance aussi en voiture (avant, seulement si on
+  le regardait). Muet après un outil sur Gemini 3.1 (11h50:59, 11h51:37, l'outil « remarque ») : chien de garde, relance une fois
+  5 s après un résultat d'outil resté sans réponse (sauf « ne dis rien »). « Remarque » : il dit seulement « C'est noté. » et
+  continue (remarque de 11h51:35 : noter sans rester bloqué).
+- **« Tu te mets en veille alors que je parle »** (remarque de 11h50:59) : en voiture, ce que Timothée dit compte aussi ; 60 s
+  de calme (Wilson et lui) avant la veille, et un petit son descendant quand il se rendort.
+- **Grésillements** (remarque de 11h32:26, toutes les voix) : sur téléphone, sortie son en tampon « lecture » (8-12 ms de
+  latence avant), avance de 0,18 s au début d'une réponse ; en voiture pendant la discussion, caméra à 2 analyses/s et visage à
+  30 images/s (16 images/s mesurées : téléphone saturé). Les trous dans la voix (réseau en retard) sont comptés au journal. À
+  vérifier au prochain trajet.
+- **Journal plus complet** : chaque résultat d'outil rendu à Gemini (« Outil X → Gemini : « … » »), chaque consigne que l'appli
+  lui glisse (« Consigne à Gemini : … »), les outils annulés par Google (nom), le chien de garde, les faux enregistrements,
+  l'oreille marquée « voiture » ou « maison », la fin de discussion avec le temps depuis la dernière parole de chacun, les trous
+  de la voix ; délai « 34,1 s » (phrase d'avant l'ouverture) plus compté.
+- Test `e2e_voiture_0411.py` (18 vérifications).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 04/11/26 : **version 1.26.2** en ligne (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 04/11/26 : **version 1.26.3** en ligne (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
