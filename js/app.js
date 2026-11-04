@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES, HA_MUET } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.26.4';
+const VERSION = '1.26.5';
 const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
 const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
 const SEG_VU_MIN = 8;             // R1 : une phrase « dite en le regardant » = au moins 8 blocs de 20 ms de voix avec le regard confirmé
@@ -198,7 +198,8 @@ class App {
     if (this.settings.camera) await this._startVision();
     this.sensors.startMotion(); this.sensors.startBattery();
     this._watchSpeed();
-    this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._shownAt = performance.now(); this._wakeLock(); this.audio.resume(); this._backFromCall(); } });
+    this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._shownAt = performance.now(); this._wakeLock(); this.audio.resume(); this._backFromCall(); this._sourdFin(); } else this._sourdDebut('appli en arrière-plan ou écran éteint'); });
+    setInterval(() => this._sourdGarde(), 2000);
     if (fromGesture && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => this._freeRotation()).catch(() => {});
     this._freeRotation();
     if (!this.audio.running) this._showWake(); else this._hideWake();
@@ -961,13 +962,14 @@ Tu parles toujours en français, et tu ne dis jamais à voix haute tes réflexio
 La fin : si on te dit clairement au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation. Jamais sur un reproche ou une remarque : reste et écoute.
 Tes progrès : quand Timothée fait une remarque sur ta façon de fonctionner (« c'est un bug », « tu devrais… », « j'aimerais que tu… », « ne fais plus ça », une fonction qui manque), appelle remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. S'il demande ce qu'il t'a fait noter ou demandé de changer : mes_remarques (pas idees). Ne dis jamais « c'est noté » sans avoir appelé remarque. Une remarque sur ton apparence ou une chose qu'il trouve bizarre (« je ne vois plus tes pupilles », « tes yeux sont tout blancs ») en est une aussi. N'invente jamais d'explication sur ton propre fonctionnement (« c'est une mise à jour de mon visage ») : si tu ne sais pas, dis-le et note la remarque. Ne prétends pas pouvoir te modifier toi-même sur-le-champ.
 L'heure et la date : appelle date_et_heure.
-L'écran : quand on te demande de montrer, d'afficher, d'écrire quelque chose, ou quand ta réponse est longue ou pratique à lire (recette, liste, étapes, mot à épeler, chiffres), appelle afficher (avec une image si c'est utile) et ne dis à voix haute que l'essentiel. « Ferme », « enlève ça » : fermer_ecran.
+L'écran (règle de Timothée du 04/11/26) : n'affiche du texte QUE s'il te le demande (« montre-moi », « affiche », « mets-le par écrit », « écris-le à l'écran ») : appelle alors afficher et ne dis à voix haute que l'essentiel. Sinon, jamais d'écran de toi-même (ni message d'attente, ni résultat, ni réponse longue) : tu réponds à voix haute. Une photo demandée (« montre-moi un koala ») et la météo restent 5 secondes à l'écran ; « réaffiche », « remontre-moi, j'ai pas eu le temps » : reafficher. « Ferme », « enlève ça » : fermer_ecran.
 Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« rappelle-moi à 18h de… » : donne quand au format 2026-10-30T18:00, en calculant la date à partir d'aujourd'hui), meteo (pour la météo, plutôt que chercher), courses (la liste de courses de la maison), idees (« note cette idée » : rangée dans son document Google ; « envoie-moi mes idées » : par e-mail). Agis sans demander de confirmation quand la demande est claire.${this.outils && this.outils.resume() ? '\n' + this.outils.resume() : ''}`;
     // CRM à la voix et mode voiture (PLAN 2 quater)
     const travail = !crm ? '' : `
 Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
 - Dès qu'il parle d'un client, d'un rendez-vous, d'une tâche, d'un devis, d'un chiffre ou d'un article, ${eco ? 'remplis le champ "crm"' : 'dis « Je regarde dans le CRM… » puis appelle l\'outil (crm_client, crm_agenda, crm_bilan, crm_produit)'}. Ne devine jamais un nom, un chiffre ou une date : dis seulement ce que le CRM répond. Pour « lui », « ce client », c'est le dernier client dont vous avez parlé.
 - Toute autre question sur ses données (un chiffre passé, un total, une liste, un détail, une comparaison, « qui… », « combien… », « quand… », les devis à relancer) : ${eco ? 'outil "question" avec la question complète dans "demande"' : 'dis « Je cherche l\'information… » puis appelle crm_question avec la question complète'}. Un analyste cherche dans tout le CRM : ça peut prendre une minute ou plus, attends le résultat sans relancer.
+- « Ses dernières commandes », « ses dernières ventes », « qu'est-ce qu'il a acheté dernièrement » : il veut savoir CE QU'IL A ACHETÉ (les articles, les quantités), pas seulement la date ou le montant. ${eco ? 'Outil "question"' : 'Dis « Je regarde ses dernières commandes… » puis appelle directement crm_question'} en demandant « les articles des dernières commandes de <client> » (pas de fiche avant : c'est plus long). Donne d'abord les articles, la date et le montant après (remarque de Timothée du 04/11/26).
 - « Fais-moi un briefing », « prépare mon rendez-vous », « qu'est-ce que je dois savoir sur X » : ${eco ? 'outil "question"' : 'dis « Je prépare ton briefing, je te tiens au courant… » puis appelle crm_question'} en demandant un BRIEFING COMPLET du client (son nom) : ventes et tendance, ce qu'il achète, devis à relancer, derniers échanges, quoi proposer. Quand la réponse arrive, dis-la en entier, sans la raccourcir : tu es son coach commercial (remarque de Timothée du 04/11/26).
 - Avant toute recherche (CRM, analyste, Internet), dis d'abord en quelques mots que tu regardes (« Je regarde et je te tiens au courant… ») : en voiture, il ne voit pas l'écran.
 - « Emmène-moi chez X », « l'adresse de X » : ${eco ? 'outil "itineraire"' : 'outil itineraire'} (un bouton s'affiche, il appuie dessus pour lancer le GPS).
@@ -1029,6 +1031,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this.audio.on('info', (m) => this.log('Audio : ' + m));
     this.audio.on('mic', ({ taken, why }) => (taken ? this._phoneStart(why) : this._phoneEnd(why)));
     this.audio.on('frame', (f32, i16, db) => {
+      this._capAt = performance.now();                                           // le micro arrive (garde « sourd », 04/11/26)
       if (this._earTest) this.oreille.feed(f32, this.audio.speaking);              // réglages : « Tester l'oreille »
       if (this.state === 'veille' || this.state === 'dodo') {
         if (this.car) {                                                         // voiture : réveil au nom, pas au regard
@@ -1974,10 +1977,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     A.dernierPoint = now;
     this.brain.sendText(`[Point d'avancement de ta recherche (« ${A.question.slice(0, 100)} ») : ${pourquoi}. Dis-le en quelques mots seulement (« Je regarde … »), sans donner de résultat, puis reste disponible.]`);
   }
-  // La réponse : dans la même discussion, comme résultat de l'outil ; sinon il la dit dès que possible (C11 bis). Toujours à l'écran.
+  // La réponse : dans la même discussion, comme résultat de l'outil ; sinon il la dit dès que possible (C11 bis). À l'écran seulement s'il le demande.
   _livrer(A, res) {
     const s = Math.round((performance.now() - A.t0) / 1000);
-    if (!res.echec && res.dire) this.showAnswer(A.question, res.dire);
+    // Plus de carte « Réponse du CRM » d'office (règle du 04/11/26 : du texte à l'écran seulement s'il le demande).
     const meme = !A.cancelled && A.conv === this.convId && this.state === 'conversation' && this.mode === 'live' && this.brain.open && A.gen === (this._liveGen || 0);
     if (meme) {
       this.brain.respond([{ id: A.id, name: 'crm_question', response: { result: res.info } }]);
@@ -2089,6 +2092,42 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this._callAfter = { ...t, at: Date.now() };
     this.hideCard('call');
     setTimeout(() => { if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('appel'); }, 400);
+  }
+  // « Wilson » dit plusieurs fois en voiture, aucune réaction (04/11/26, 17h40 : « même s'il y a un problème réseau ou
+  // autre chose, il faut que je sois au courant ») : le journal s'arrête à 17h22:57, plus rien du téléphone ensuite. Une page
+  // web cachée (écran éteint, autre appli devant) n'entend plus rien et ne peut rien dire. Désormais, en voiture :
+  //  - au moment où il passe en arrière-plan : petit son + « Je ne t'entends plus… » (tant que Chrome le laisse parler) ;
+  //  - au retour : il dit combien de temps il n'a rien entendu ;
+  //  - micro muet plus de 5 s alors qu'il est à l'écran (micro pris, son suspendu) : il le dit tout de suite et relance le son.
+  _sourdDebut(pourquoi) {
+    if (!this._voitureBt || !this.started || this._sourd) return;
+    this._sourd = { at: Date.now(), pourquoi };
+    this.log(`Sourd : ${pourquoi} — je ne t'entends plus jusqu'à ce que tu me rouvres`, true);
+    try { this.audio.tone('dodo'); } catch (_) {}
+    try { this.voice.speak("Attention, je passe en arrière-plan : je ne t'entends plus. Rouvre-moi pour me parler."); } catch (_) {}
+    try { this.remote.flush({ beacon: true }); } catch (_) {}
+  }
+  _sourdFin() {
+    const S = this._sourd; if (!S) return;
+    this._sourd = null;
+    const s = Math.round((Date.now() - S.at) / 1000);
+    this.log(`Sourd pendant ${s} s (${S.pourquoi}) : je t'entends de nouveau`, true);
+    if (s < 15 || !this._voitureBt) return;
+    const duree = s < 90 ? `${s} secondes` : `${Math.round(s / 60)} minutes`;
+    const phrase = S.pourquoi.startsWith('micro') ? `Je ne t'entendais plus depuis ${duree}, mon micro était coupé. C'est revenu, je t'écoute.`
+      : `J'étais en arrière-plan pendant ${duree} : je ne t'entendais pas. C'est bon, je t'écoute de nouveau.`;
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Dis-lui exactement : « ${phrase} »]`);
+    else this._sayAfter(phrase);
+  }
+  _sourdGarde() {
+    if (!this._voitureBt || !this.started || document.hidden || this.phone || this.settingsOpen) return;
+    const now = performance.now(), muet = now - (this._capAt || now);
+    if (!this._sourd && this._capAt && muet > 5000 && now - (this._shownAt || 0) > 5000) {
+      this._sourd = { at: Date.now() - Math.round(muet), pourquoi: 'micro muet (aucun son reçu depuis ' + Math.round(muet / 1000) + ' s)' };
+      this.log(`Sourd : ${this._sourd.pourquoi} — son : ${this.audio.ctx ? this.audio.ctx.state : '?'}`, true);
+      this.audio.resume().catch(() => {});
+      try { this.voice.speak("Attention, je ne t'entends plus : mon micro est coupé. J'essaie de le relancer."); } catch (_) {}
+    } else if (this._sourd && this._sourd.pourquoi.startsWith('micro') && muet < 1000) this._sourdFin();
   }
   _backFromCall() {
     const c = this._callAfter; if (!c) return;

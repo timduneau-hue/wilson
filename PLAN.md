@@ -619,9 +619,42 @@ regarde ») (**1.26.4**). Journal du 04/11/26, 16h57-17h01 (téléphone relié �
   proches de « Wilson », la radio ne remplit pas la feuille), second avis avec délai maximal de 4 s.
 - Test `e2e_oreille_0411.py` (9 vérifications).
 
+Demandes de Timothée du 04/11/26, 17h25 (**1.26.5**, avec la 1.26.4 qui n'avait pas encore été publiée). Journal du 04/11/26,
+13h25 et 17h17-17h22 (téléphone relié à la voiture).
+- **Écran : du texte seulement s'il le demande** (« si je te demande rien, tu l'affiches pas » ; journal 13h25 : « Recherche
+  CRM » affiché de lui-même pendant une recherche, « je m'en fous de ça »). `afficher` avec du texte vérifie ce qu'il a dit ces
+  25 dernières secondes (« montre », « affiche », « par écrit », « écris », « à l'écran », « fais-moi voir », « je veux voir ») ;
+  sinon rien n'est affiché et Gemini doit le dire à voix haute. Plus de carte « Réponse du CRM » d'office, plus de liste de
+  courses ni d'idées affichée parce qu'elle est longue (seulement sur « affiche »). Consigne du direct réécrite.
+- **Photos, météo : 5 s par défaut**, puis l'écran se vide ; nouvel outil `reafficher` (« réaffiche la photo, j'ai pas eu le
+  temps de voir ») : ce qui vient d'être montré revient 60 s, ou la durée qu'il dit. Texte demandé : 90 s (4 min s'il est
+  long), fermable. Sonnerie, appel, itinéraire, confirmation d'écriture : inchangés (ce sont des boutons).
+- **« Ses dernières commandes » = les articles** (17h17 : il voulait ce qu'ils ont acheté, Wilson a donné la date et le
+  montant, puis une recherche à part) : consigne du direct → `crm_question` tout de suite (« les articles des dernières
+  commandes de X », sans passer par la fiche, 23 s de gagnées) ; consigne de l'analyste → articles et quantités d'abord.
+- **Recherches plus sûres et plus rapides** : la description des tableaux du CRM (`crm_schema`, 3 à 4 s) est gardée la
+  journée sur l'appareil, même après un redémarrage ; chaque lecture du CRM a un délai maximal (requête de l'analyste 60 s,
+  fiche/journée/bilan 45 s) : une requête bloquée sur le réseau mobile (17h18 : recherche partie, jamais revenue) compte
+  comme une coupure, l'analyste attend puis la relance. Les écritures n'ont pas de délai (jamais renvoyées deux fois).
+- **Tâches : 8 annoncées, 5 dans le CRM** (17h20-17h22) : les 3 en trop sont les sujets « À voir au prochain RDV » créés le
+  jour même dans le CRM (feuille RAPPELS_TIM, statut « rdv », sans date) : `crm_journee` du CRM les compte comme des tâches
+  du jour. Correction **côté CRM** (`WebApp_autonome.gs`, crm_journee et crm_client : les écarter des tâches, les donner
+  à part dans la fiche du client sous « À voir au prochain RDV ») : à faire dans l'éditeur Apps Script depuis le PC de
+  Timothée (Chrome injoignable le 04/11/26 à 17h30).
+- **« Wilson » appelé au moins 5 fois en voiture, aucune réaction** (17h40 : « même s'il y a un problème réseau ou autre
+  chose, il faut que je sois au courant ») : le journal du téléphone s'arrête à 17h22:57 (fin d'une discussion), plus rien
+  ensuite, pas même le pouls de l'onglet État : l'appli ne tournait plus (écran éteint ou autre appli devant : Chrome met la
+  page en pause, elle n'entend ni ne parle) ou n'avait plus du tout de réseau (les lignes seraient alors arrivées au retour).
+  **Garde « sourd »** (téléphone relié à la voiture seulement) : au passage en arrière-plan, petit son + « je passe en
+  arrière-plan, je ne t'entends plus » (tant que Chrome le laisse parler) et journal envoyé tout de suite ; au retour, il dit
+  combien de temps il n'a rien entendu ; micro muet plus de 5 s à l'écran : il le dit et relance le son, puis annonce qu'il
+  entend de nouveau. Avec la 1.26.4 : un « Wilson » entendu ne reste plus jamais sans réponse quand le réseau traîne.
+  Test `e2e_sourd_0411.py` (7 vérifications).
+- Test `e2e_crm_0411.py` (7 vérifications) ; `e2e_outils.py` et `e2e_question.py` passés à la nouvelle règle de l'écran.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 04/11/26 : **version 1.26.4** en ligne (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 04/11/26 : **version 1.26.5** en ligne (en voiture, il prévient quand il ne t'entend plus ; écran : texte seulement sur demande, photos et météo 5 s, « réaffiche » ; dernières commandes = articles ; recherches CRM gardées et protégées des blocages) ; 1.26.4 (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
