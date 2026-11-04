@@ -391,6 +391,7 @@ export class Crm {
     }
     if (!r.ok) { this.pending = p; return { ok: false, dire: `Le CRM a refusé : ${r.erreur || 'erreur'}. Rien n'est écrit ; dis-le simplement.`, phrase: 'Le CRM a refusé : rien n\'est écrit.' }; }
     this.log(`enregistré : ${p.relu}`, true);
+    this.dernierEnregistre = { at: Date.now(), relu: p.relu };
     if (p.type === 'tache') this.journee = null;          // la journée gardée n'a pas cette tâche
     const jour = p.date ? jourDit(new Date(+p.date.slice(6), +p.date.slice(3, 5) - 1, +p.date.slice(0, 2))) : '';
     return p.type === 'tache'
