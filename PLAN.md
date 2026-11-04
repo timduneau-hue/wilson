@@ -652,9 +652,26 @@ Demandes de Timothée du 04/11/26, 17h25 (**1.26.5**, avec la 1.26.4 qui n'avait
   Test `e2e_sourd_0411.py` (7 vérifications).
 - Test `e2e_crm_0411.py` (7 vérifications) ; `e2e_outils.py` et `e2e_question.py` passés à la nouvelle règle de l'écran.
 
+Demande de Timothée du 04/11/26, 17h57 (« il se met à me parler tout de suite même quand je lui parle pas… une fois pour
+toutes ») (**1.26.6**). Journal du 04/11/26, 17h53-17h55 (téléphone relié à la voiture, 1.26.5).
+- **Cause : la 1.26.4 se réveillait « quand même » quand la vérification de « Wilson » dépassait 4 s.** Or l'oreille locale
+  propose presque chaque phrase (écarts 69 à 118 pour une limite de 167 : elle ne trie pas) et, sur le réseau mobile, la
+  vérification par Gemini prend souvent plus de 4 s : chaque bruit ou phrase le réveillait (3 réveils en 2 min, « Oui ? »
+  sans qu'on lui parle). **Règle désormais : jamais de réveil sans « oui » de Gemini**, ni sur délai dépassé, ni sans
+  réseau (avant, sans réseau, il se réveillait aussi).
+- Pour que Timothée sache quand il ne peut pas l'entendre : vérification impossible (réseau trop lent après 10 s, ou pas de
+  réseau) → petit son et une phrase de la voix du téléphone (« je n'arrive pas à savoir si tu m'appelles, touche l'écran »),
+  une fois toutes les 5 minutes au plus.
+- Vérification plus rapide en voiture : délai maximal 10 s (au lieu de 4), son envoyé en 8 kHz (deux fois plus léger) ;
+  un « Wilson » possible pendant une vérification n'est plus ignoré : le dernier est vérifié juste après.
+- Garde « sourd » adoucie : en passant en arrière-plan, un petit son seulement (plus de phrase) ; au retour, il ne parle
+  que s'il a été caché plus d'une minute ; micro revenu : toujours annoncé (il avait prévenu).
+- Tests : `e2e_oreille_0411.py` réécrit (13 vérifications : pas de réveil sur délai ni sans réseau, prévenu une seule fois,
+  candidat gardé puis vérifié, 8 kHz, réveil sur « oui ») ; `e2e_sourd_0411.py` (8).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 04/11/26 : **version 1.26.5** en ligne (en voiture, il prévient quand il ne t'entend plus ; écran : texte seulement sur demande, photos et météo 5 s, « réaffiche » ; dernières commandes = articles ; recherches CRM gardées et protégées des blocages) ; 1.26.4 (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 04/11/26 : **version 1.26.6** en ligne (plus jamais de réveil sans « oui » de Gemini : fini les réveils sur des bruits ; il prévient quand il ne peut pas vérifier) ; 1.26.5 (en voiture, il prévient quand il ne t'entend plus ; écran : texte seulement sur demande, photos et météo 5 s, « réaffiche » ; dernières commandes = articles ; recherches CRM gardées et protégées des blocages) ; 1.26.4 (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

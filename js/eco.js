@@ -212,7 +212,7 @@ export class EcoBrain {
   // À la maison (E3) : on fait transcrire la phrase (ce que les modèles font bien, même de loin) ; c'est l'appli qui cherche
   // le prénom dans le texte (journal du 30/10/26, 10h11 : « Gemini, est-ce qu'on appelle Wilson ? » répondait non à de vrais
   // appels). → { appel, demande, texte }.
-  async appelDeLoin({ key, audio, signal }) {
+  async appelDeLoin({ key, audio, signal, rate = 16000 }) {
     const order = ECO_MODELS.rapide, now = Date.now();
     const models = [...order.filter((m) => !(this.refused[m] > now)), ...order.filter((m) => this.refused[m] > now)].slice(0, 3);
     // Journal du 30/10/26, 11h34-11h48 : la consigne « un mot qui ressemble est presque toujours Wilson » lui faisait
@@ -223,7 +223,7 @@ export class EcoBrain {
     let last = null;
     for (const model of models) {
       for (const think of [true, false]) {
-        const body = { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio) } }, { text: question }] }],
+        const body = { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio, rate) } }, { text: question }] }],
           generationConfig: { temperature: 0, maxOutputTokens: 200, responseMimeType: 'application/json', responseSchema: schema, ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' } } : {}) } };
         this.sent.push(performance.now());
         const res = await this._one(API + model + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, signal);

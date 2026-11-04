@@ -1,6 +1,6 @@
 """Garde « sourd » en voiture (demande de Timothée du 04/11/26, 17h40 : « il faut que je sois au courant ») :
-1. Appli cachée (écran éteint, autre appli) : noté au journal, petit son et phrase ; au retour, il dit combien de temps il
-   n'a rien entendu.
+1. Appli cachée (écran éteint, autre appli) : noté au journal, petit son ; au retour après plus d'une minute, il dit
+   combien de temps il n'a rien entendu.
 2. Micro muet plus de 5 s à l'écran : il le dit et relance le son ; dès que le micro revient, il dit qu'il entend de nouveau.
 3. À la maison (tablette), rien de tout ça."""
 
@@ -92,7 +92,10 @@ async def main():
         # 1. appli cachée
         await page.evaluate("wilson._sourdDebut('appli en arrière-plan ou écran éteint')")
         dit = await page.evaluate("window.__dit.slice()")
-        check('Appli cachée : journal + « je ne t\'entends plus »', has('Sourd : appli en arrière-plan') and any('je ne t\'entends plus' in str(x) for x in dit), str(dit))
+        check('Appli cachée : journal, petit son seulement (pas de phrase : 17h57 « tu parles tout seul »)', has('Sourd : appli en arrière-plan') and not any('entends plus' in str(x) for x in dit), str(dit))
+        await page.evaluate("wilson._sourd.at -= 20000; wilson._sourdFin(); wilson._sourdDebut('appli en arrière-plan ou écran éteint')")
+        dit = await page.evaluate("window.__dit.slice()")
+        check('Retour après 20 s (il a changé d\'appli lui-même) : rien à dire', not any('arrière-plan pendant' in str(x) for x in dit), str(dit))
         await page.evaluate("wilson._sourd.at -= 125000; wilson._sourdFin()")
         dit = await page.evaluate("window.__dit.slice()")
         check('Au retour : il dit combien de temps il n\'entendait pas (2 minutes)', has('Sourd pendant 125 s') and any('2 minutes' in str(x) and 'je ne t\'entendais pas' in str(x) for x in dit), str(dit))
