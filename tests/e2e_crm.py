@@ -143,7 +143,7 @@ async def main():
               and w.get('cle') == CLE and w.get('date') == jeudi().strftime('%d/%m/%Y') and w.get('texte') == 'Rappeler pour le devis volets', json.dumps(w, ensure_ascii=False))
         check('… la carte de confirmation disparaît', await page.evaluate("document.getElementById('cards').hidden"))
         r = await tool('crm_confirmer', {}, 'c12')
-        check('Rien en attente : une 2e confirmation n\'écrit rien', r and 'NON ENREGISTRÉ' in r and len(sc['writes']) == 1)
+        check('Rien en attente : une 2e confirmation n\'écrit rien (et ne fait rien redire : « déjà enregistré », 04/11/26)', r and 'DÉJÀ ENREGISTRÉ' in r and len(sc['writes']) == 1, str(r)[:80])
 
         # Compte rendu → brouillon ; RDV sans heure → il demande l'heure
         fin_tour(); await asyncio.sleep(0.1)

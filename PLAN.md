@@ -568,11 +568,10 @@ voiture : fait par lui à 10h09), 10h13:17, 10h13:52, 10h16:23, 10h44:43, 10h45:
 - Divers : « Wilson se tait » n'est plus écrit quand il attend simplement le résultat d'un outil ; délai « 90,7 s » (phrase
   ancienne, après un essai de voix) plus compté.
 - Test `e2e_doublon.py` (23 vérifications).
-- Question de Timothée (même message) : laisser Claude prendre le relais pour les demandes complexes (CRM, Internet,
-  e-mails) depuis la fenêtre de discussion, sans API, en gardant la voix de Gemini. Réponse : piloter claude.ai par un
-  programme n'est pas permis par les conditions d'Anthropic (accès automatisé seulement par l'API) ; possible en revanche :
-  une « boîte aux demandes » (onglet de la feuille, rempli par Wilson) traitée par une tâche planifiée de Claude, réponse
-  relue par Wilson avec sa voix — pas en temps réel (au mieux toutes les heures). En attente de sa décision.
+- Question de Timothée (même message) : laisser Claude prendre le relais pour les demandes complexes. Piloter claude.ai
+  par un programme n'est pas permis (accès automatisé : API seulement) ; proposé une « boîte aux demandes » traitée par une
+  tâche planifiée (pas en temps réel). **Abandonné par Timothée le 04/11/26, 11h06** (« oublie les tâches complexes pour
+  Claude ») : Wilson reste seul (Gemini + analyste du CRM).
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
