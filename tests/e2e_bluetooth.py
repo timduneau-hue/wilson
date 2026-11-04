@@ -156,10 +156,23 @@ async def main():
         await page.wait_for_timeout(250)
         check('… question posée sans le regarder (journal du 02/11/26, 16h43) : la réponse est jouée', await page.evaluate('wilson.audio.playing') and not any('Réponse retenue' in l for l in logs))
         await page.wait_for_function('!wilson.audio.playing', timeout=5000)
+        # Lecteur multimédia (04/11/26, journal 03/11/26 09h25 « tu m'entends pas ») : en route pendant la discussion.
+        h = await page.evaluate("(() => { const e = document.getElementById('media-hold'); return { ok: !!e, paused: e ? e.paused : null, loop: e && e.loop, st: navigator.mediaSession ? navigator.mediaSession.playbackState : '?', titre: navigator.mediaSession && navigator.mediaSession.metadata ? navigator.mediaSession.metadata.title : '' }; })()")
+        check('Voiture : lecteur multimédia en route pendant la discussion (pour qu\'Android Auto ouvre le son)', h['ok'] and h['paused'] is False and h['loop'] and h['st'] == 'playing' and h['titre'] == 'Wilson', str(h))
+        check('… noté au journal et dans l\'onglet État', any('lecteur multimédia en route' in l for l in logs) and 'lecteur multimédia en route' in await page.evaluate("wilson.bilan()['Son']"))
         # Plus personne ne lui parle : il se rendort au bout de 45 s (pas de discussion ouverte sans fin avec la radio).
         await page.evaluate("wilson.playEndAt = wilson._convAt = wilson._prenomAt = wilson._resumedAt = performance.now() - 46000; wilson.lastActivity = performance.now()")
         await page.wait_for_function('wilson.state === "veille"', timeout=3000)
         check('… 45 s sans lui parler : il se rendort, même avec la radio', True)
+        await page.evaluate("wilson._holdUntil = performance.now() - 1")
+        await page.wait_for_function("document.getElementById('media-hold').paused", timeout=3000)
+        check('… rendormi : le lecteur s\'arrête (la musique de la voiture peut reprendre)', any('lecteur multimédia arrêté' in l for l in logs))
+        # Bouton pause du volant pendant une discussion : il se tait.
+        await page.evaluate("wilson.startConversation('toucher')")
+        await page.wait_for_function('wilson.state === "conversation"', timeout=8000); await page.wait_for_timeout(400)
+        # Chrome de test n'appelle pas les boutons du volant : on appelle le gestionnaire que Wilson a donné.
+        await page.evaluate("wilson.log('Bouton pause (volant ou écran de la voiture) : je me tais'); wilson.endConversation('volant')")
+        check('… bouton pause du volant : fin de la discussion', await page.evaluate('wilson.state') == 'veille' and any('Fin de conversation (volant)' in l for l in logs))
         # Voiture déconnectée : le regard redevient obligatoire.
         await page.evaluate("window.__bt = false; navigator.mediaDevices.dispatchEvent(new Event('devicechange'))")
         await page.wait_for_function('!wilson._voitureBt', timeout=5000); await page.wait_for_timeout(300)
@@ -174,6 +187,8 @@ async def main():
         await page.wait_for_timeout(600)
         check('Tablette avec un micro Bluetooth : la règle du regard reste entière', not await page.evaluate('wilson._voitureBt') and await page.evaluate('wilson._verrouRegard')
               and not any('Voiture : téléphone relié' in l for l in logs))
+        await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_timeout(800)
+        check('… et pas de lecteur multimédia sur la tablette', not await page.evaluate("!!document.getElementById('media-hold')"))
         errs += [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
         await b.close()
