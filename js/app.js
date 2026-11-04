@@ -14,12 +14,12 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
-import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini } from './crm.js';
+import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini, netErr } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES, HA_MUET } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.26.5';
+const VERSION = '1.26.6';
 const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
 const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
 const SEG_VU_MIN = 8;             // R1 : une phrase « dite en le regardant » = au moins 8 blocs de 20 ms de voix avec le regard confirmé
@@ -33,7 +33,9 @@ const CRM_MAX_MS = 40000;         // question au CRM (script → CRM) : filet de
 // Demande de Timothée du 01/11/26 : « supprime le mode voiture ». Plus de bouton, plus de réglage, plus de démarrage en
 // roulant : le mode voiture ne peut plus s'allumer (le code reste en sommeil, testé, pour pouvoir le remettre).
 const VOITURE = false;
-const NOM_DELAI_VOITURE_MS = 4000, NOM_DELAI_MAISON_MS = 8000;   // vérification de « Wilson » par Gemini : délai maximal (journal du 04/11/26)
+const NOM_DELAI_VOITURE_MS = 10000, NOM_DELAI_MAISON_MS = 8000;   // 04/11/26, 17h57 : 4 s était trop court en voiture (réveils sur des bruits)
+const huitK = (p) => { const n = Math.floor(p.length / 2), o = new Int16Array(n); for (let i = 0; i < n; i++) o[i] = (p[2 * i] + p[2 * i + 1]) >> 1; return o; };   // 16 kHz → 8 kHz
+const PREVENIR_MS = 5 * 60000;                                    // « je n'arrive pas à vérifier » : une fois toutes les 5 min au plus   // vérification de « Wilson » par Gemini : délai maximal (journal du 04/11/26)
 const CAR_IDLE_MS = 60000;        // mode voiture : il se rendort après 1 min de silence (PLAN 2 quater, C5)
 const BYNAME_IDLE_MS = 45000;     // appelé par son prénom, pas regardé : 45 s sans rien dire → veille, même si on parle autour (journal du 30/10/26, 23h06)
 const NAME_GATE_MS = 7000;        // mode voiture : la 1re phrase doit contenir « Wilson » (vérifié sur la transcription, C6)
@@ -1590,9 +1592,12 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     // Journal du 04/11/26, 16h57-16h59 (téléphone dans la voiture) : 8 « Wilson » reconnus par l'oreille, aucun réveil.
     // Une vérification restée bloquée (réseau mobile, pas de délai maximal) faisait ignorer tous les suivants, sans un mot
     // au journal. Maintenant : chaque « Wilson » ignoré est noté, et la vérification a un délai maximal (plus bas).
-    if (this._nomEnCours) { this.log(`Oreille (${lieu}) : « Wilson » entendu (écart ${d.score.toFixed(1)}) pendant une vérification en cours depuis ${((performance.now() - (this._nomDepuis || 0)) / 1000).toFixed(0)} s : ignoré`); return; }
+    // 04/11/26, 17h53 : pendant une vérification, le candidat suivant est gardé et vérifié juste après (le dernier seulement).
+    if (this._nomEnCours) { this._nomSuivant = d; this.log(`Oreille (${lieu}) : « Wilson » possible (écart ${d.score.toFixed(1)}) pendant une vérification en cours depuis ${((performance.now() - (this._nomDepuis || 0)) / 1000).toFixed(0)} s : vérifié juste après`); return; }
     if (!this.settings.apiKey) return;
-    if (!navigator.onLine) { if (voiture && this.state === 'veille') { this.log('Oreille (voiture) : « Wilson » entendu sans réseau'); this.face.play('wake'); this.startConversation('prenom'); } return; }
+    // Sans réseau : jamais de réveil sur un simple candidat de l'oreille (presque toutes les phrases en sont, journal du
+    // 04/11/26) ; en voiture, il le dit (une fois toutes les 5 min au plus) pour que Timothée sache qu'il ne l'entendra pas.
+    if (!navigator.onLine) { if (voiture && this.state === 'veille') this._prevenirNom('pas de réseau'); return; }
     // Économie (journal du 30/10/26 : 40 vérifications épuisées en 15 min de discussions en famille, plus rien ensuite) :
     // après un « non », on laisse passer 8 s (une conversation enchaîne les faux candidats) ; et une réserve de 6
     // vérifications qui se recharge d'une par minute (60 par heure au plus, 400 par jour).
@@ -1608,9 +1613,11 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       const t0 = performance.now();                                    // fin de la phrase : 0,7 s de silence (4 s au plus)
       while (performance.now() - t0 < 4000 && (this.audio.speaking || performance.now() - this.audio.lastVoicedAt < 700)) await new Promise((r) => setTimeout(r, 100));
       pcm = this.audio.recent(Math.min(8000, performance.now() - t0 + 3000));
-      // Délai maximal : 4 s en voiture (il conduit, il attend sa réponse), 8 s à la maison.
+      // En voiture (réseau mobile) : son envoyé en 8 kHz, deux fois plus léger (la voix reste très lisible pour Gemini).
+      const leger = voiture ? huitK(pcm) : pcm;
+      // Délai maximal : 10 s en voiture, 8 s à la maison.
       ctl = new AbortController(); minuterie = setTimeout(() => ctl.abort(), voiture ? NOM_DELAI_VOITURE_MS : NOM_DELAI_MAISON_MS);
-      const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: pcm, signal: ctl.signal });
+      const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: leger, rate: voiture ? 8000 : 16000, signal: ctl.signal });
       clearTimeout(minuterie);
       this.log(`Oreille (${lieu}) : écart ${d.score.toFixed(1)} → Gemini entend « ${(r.texte || '').slice(0, 120)} » → ${r.appel ? `oui, « Wilson »${r.doute ? ' (pas certain)' : ''}${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non' + (r.pourquoi ? ' (' + r.pourquoi + ')' : '')}`, r.appel);
       if (!r.appel) { this._nomCalme = Date.now() + 3000; if (!r.texte && this._nomJetons) this._nomJetons.n = Math.min(10, this._nomJetons.n + 1); return; }   // rien d'intelligible : ne coûte rien
@@ -1635,22 +1642,32 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     } catch (e) {
       clearTimeout(minuterie);
       const lent = ctl && ctl.signal.aborted;
-      this.log(`Oreille (${lieu}) : vérification ${lent ? `trop lente (plus de ${(voiture ? NOM_DELAI_VOITURE_MS : NOM_DELAI_MAISON_MS) / 1000} s)` : 'impossible (' + e.message + ')'}${voiture && this.state === 'veille' ? ' : je me réveille quand même (voiture)' : ''}`);
-      // En voiture, un faux réveil coûte peu (il est seul, veille au bout de 45 s) ; un « Wilson » sans réponse agace.
-      // Gemini reçoit la phrase elle-même (début du son) et une consigne : « Oui ? » si c'était seulement son nom.
-      if (voiture && this.state === 'veille' && !this.settingsOpen) {
-        this._wakePcm = pcm && pcm.length ? pcm : null; this._wakeDemande = '';
-        this._wakeText = '[Timothée t\'appelle peut-être en voiture : c\'est le son que tu viens d\'entendre. S\'il a seulement dit « Wilson », dis seulement « Oui ? ». S\'il t\'a demandé quelque chose, réponds-y. Si ce n\'était pas lui (radio, bruit), ne dis rien.]';
-        this.face.play('wake'); this.startConversation('prenom');
-        return;
-      }
+      this.log(`Oreille (${lieu}) : vérification ${lent ? `trop lente (plus de ${(voiture ? NOM_DELAI_VOITURE_MS : NOM_DELAI_MAISON_MS) / 1000} s)` : 'impossible (' + e.message + ')'} : pas de réveil`);
+      // 1.26.4 se réveillait « quand même » en voiture : avec un réseau mobile lent, chaque bruit et chaque phrase de la
+      // radio le réveillait (journal du 04/11/26, 17h53-17h55 : « tu parles tout seul »). Plus jamais de réveil sans « oui »
+      // de Gemini ; en voiture, il prévient qu'il n'arrive pas à vérifier (une fois toutes les 5 min au plus).
+      if (voiture && this.state === 'veille' && (lent || netErr(e))) this._prevenirNom(lent ? 'réseau trop lent' : 'pas de réseau');
       // Maintenance de nuit du 31/10/26 (journal du 30/10/26, 22h56-22h58 : 12 essais en 90 s malgré « retry in 52s »
       // et « high demand ») : on attend ce que Google demande (2 min au plus), ou 20 s s'il est surchargé.
       const m = /retry in ([\d.]+)\s*s/i.exec(e.message || '');
       const att = m ? Math.min(120, Math.ceil(+m[1])) : /high demand|overloaded|unavailable|503/i.test(e.message || '') ? 20 : 0;
       if (att) { this._nomCalme = Date.now() + att * 1000; this.log(`Oreille (maison) : Google demande d'attendre, prochaine vérification dans ${att} s`); }
     }
-    finally { this._nomEnCours = false; }
+    finally {
+      this._nomEnCours = false;
+      const n = this._nomSuivant; this._nomSuivant = null;
+      if (n && (this.state === 'veille' || (this.state === 'conversation' && this.paused))) setTimeout(() => this._nomMaison(n), 0);
+    }
+  }
+  // En voiture, la vérification de « Wilson » n'aboutit pas : il ne se réveille pas, mais le dit (voix du téléphone, sans
+  // réseau), une fois toutes les 5 minutes au plus, pour que Timothée sache qu'il ne l'entendra pas.
+  _prevenirNom(pourquoi) {
+    const now = Date.now();
+    if (now - (this._prevenuAt || 0) < PREVENIR_MS) { this.log(`Oreille (voiture) : ${pourquoi}, déjà prévenu il y a moins de 5 min`); return; }
+    this._prevenuAt = now;
+    this.log(`Oreille (voiture) : ${pourquoi} — je préviens Timothée que je ne peux pas vérifier s'il m'appelle`, true);
+    try { this.audio.tone('ko'); } catch (_) {}
+    try { this.voice.speak(pourquoi === 'pas de réseau' ? "Je n'ai pas de réseau : je ne peux pas savoir si tu m'appelles. Touche l'écran pour me parler." : "Le réseau est trop lent : je n'arrive pas à savoir si tu m'appelles. Si c'est le cas, touche l'écran."); } catch (_) {}
   }
   _texteRegarde(demande) {
     return `[On vient de te dire, en te regardant : « ${demande} ». C'est pour toi : réponds maintenant, à voix haute, brièvement. La transcription peut être approximative : si elle ne veut rien dire, demande de répéter.]`;
@@ -2096,15 +2113,14 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   // « Wilson » dit plusieurs fois en voiture, aucune réaction (04/11/26, 17h40 : « même s'il y a un problème réseau ou
   // autre chose, il faut que je sois au courant ») : le journal s'arrête à 17h22:57, plus rien du téléphone ensuite. Une page
   // web cachée (écran éteint, autre appli devant) n'entend plus rien et ne peut rien dire. Désormais, en voiture :
-  //  - au moment où il passe en arrière-plan : petit son + « Je ne t'entends plus… » (tant que Chrome le laisse parler) ;
-  //  - au retour : il dit combien de temps il n'a rien entendu ;
+  //  - au moment où il passe en arrière-plan : petit son « dodo » seulement ;
+  //  - au retour, après plus d'une minute : il dit combien de temps il n'a rien entendu ;
   //  - micro muet plus de 5 s alors qu'il est à l'écran (micro pris, son suspendu) : il le dit tout de suite et relance le son.
   _sourdDebut(pourquoi) {
     if (!this._voitureBt || !this.started || this._sourd) return;
     this._sourd = { at: Date.now(), pourquoi };
     this.log(`Sourd : ${pourquoi} — je ne t'entends plus jusqu'à ce que tu me rouvres`, true);
-    try { this.audio.tone('dodo'); } catch (_) {}
-    try { this.voice.speak("Attention, je passe en arrière-plan : je ne t'entends plus. Rouvre-moi pour me parler."); } catch (_) {}
+    try { this.audio.tone('dodo'); } catch (_) {}            // un petit son seulement (17h57 : « tu parles tout seul »)
     try { this.remote.flush({ beacon: true }); } catch (_) {}
   }
   _sourdFin() {
@@ -2112,9 +2128,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this._sourd = null;
     const s = Math.round((Date.now() - S.at) / 1000);
     this.log(`Sourd pendant ${s} s (${S.pourquoi}) : je t'entends de nouveau`, true);
-    if (s < 15 || !this._voitureBt) return;
+    const micro = S.pourquoi.startsWith('micro');           // micro : il a prévenu, il dit aussi que c'est revenu
+    if (!this._voitureBt || (!micro && s < 60)) return;     // il a lui-même changé d'appli un instant : rien à dire
     const duree = s < 90 ? `${s} secondes` : `${Math.round(s / 60)} minutes`;
-    const phrase = S.pourquoi.startsWith('micro') ? `Je ne t'entendais plus depuis ${duree}, mon micro était coupé. C'est revenu, je t'écoute.`
+    const phrase = micro ? `Je ne t'entendais plus depuis ${duree}, mon micro était coupé. C'est revenu, je t'écoute.`
       : `J'étais en arrière-plan pendant ${duree} : je ne t'entendais pas. C'est bon, je t'écoute de nouveau.`;
     if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Dis-lui exactement : « ${phrase} »]`);
     else this._sayAfter(phrase);
