@@ -598,7 +598,12 @@ voiture et il ne répond pas ; il fait des recherches et je ne sais pas ce qu'il
   lui glisse (« Consigne à Gemini : … »), les outils annulés par Google (nom), le chien de garde, les faux enregistrements,
   l'oreille marquée « voiture » ou « maison », la fin de discussion avec le temps depuis la dernière parole de chacun, les trous
   de la voix ; délai « 34,1 s » (phrase d'avant l'ouverture) plus compté.
-- Test `e2e_voiture_0411.py` (18 vérifications).
+- **Recherche dans le CRM en arrière-plan** (question de Timothée du 04/11/26, 12h19 : « il peut travailler en arrière-plan et
+  me répondre sur ce qu'il fait ? ») : sur Gemini 3.1 (outils synchrones), `crm_question` rend tout de suite « je cherche, je te
+  tiens au courant » : la discussion continue ; points d'avancement en quelques mots (au plus toutes les 12 s, seulement si
+  personne ne parle) ; la réponse arrive en message dès qu'elle est prête (« J'ai la réponse à ta question sur … »), ou le
+  réveille si la discussion est finie. Sur 3.8 (outils en arrière-plan natifs), rien ne change.
+- Test `e2e_voiture_0411.py` (21 vérifications) ; `e2e_bluetooth.py` passé à la règle des 60 s.
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 

@@ -161,9 +161,10 @@ async def main():
         check('Voiture : lecteur multimédia en route pendant la discussion (pour qu\'Android Auto ouvre le son)', h['ok'] and h['paused'] is False and h['loop'] and h['st'] == 'playing' and h['titre'] == 'Wilson', str(h))
         check('… noté au journal et dans l\'onglet État', any('lecteur multimédia en route' in l for l in logs) and 'lecteur multimédia en route' in await page.evaluate("wilson.bilan()['Son']"))
         # Plus personne ne lui parle : il se rendort au bout de 45 s (pas de discussion ouverte sans fin avec la radio).
-        await page.evaluate("wilson.playEndAt = wilson._convAt = wilson._prenomAt = wilson._resumedAt = performance.now() - 46000; wilson.lastActivity = performance.now()")
+        # (04/11/26 : en voiture, ce qu'il dit compte aussi, 60 s de calme — remarque « tu te mets en veille alors que je parle »)
+        await page.evaluate("wilson.playEndAt = wilson._convAt = wilson._prenomAt = wilson._resumedAt = wilson._heardAt = performance.now() - 61000; wilson.lastActivity = performance.now()")
         await page.wait_for_function('wilson.state === "veille"', timeout=3000)
-        check('… 45 s sans lui parler : il se rendort, même avec la radio', True)
+        check('… 60 s sans que personne parle : il se rendort', True)
         await page.evaluate("wilson._holdUntil = performance.now() - 1")
         await page.wait_for_function("document.getElementById('media-hold').paused", timeout=3000)
         check('… rendormi : le lecteur s\'arrête (la musique de la voiture peut reprendre)', any('lecteur multimédia arrêté' in l for l in logs))
