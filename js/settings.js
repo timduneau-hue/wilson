@@ -2,7 +2,7 @@
 
 import { EXPRESSIONS, STYLES } from './face.js';
 import { checkKey, cleanKey, sessionsToday } from './brain.js';
-import { SCRIPT_URL, scanQR } from './remote.js';
+import { SCRIPT_URL, scanQR, deviceName } from './remote.js';
 import { settingsLink } from './sync.js';
 
 const AISTUDIO = '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>';
@@ -26,6 +26,7 @@ export const DEFAULTS = {
   logUrl: '', logContent: true,
   crm: false, voitureAuto: true, oreilleSens: 'normal', prenomMaison: false,   // prenomMaison : accord de Timothée du 01/11/26, à la maison seulement au regard      // CRM à la voix et mode voiture (PLAN 2 quater)
   haUrl: '', haToken: '',                                    // la maison par Home Assistant (PLAN 7 bis)
+  gardeAuto: true, gardePhoto: true, objectifActifs: 0,      // garde de la maison et objectif des clients actifs (PLAN 7 sexies)
 };
 export const VOICES = [
   ['Puck', 'enjoué'], ['Achird', 'amical'], ['Charon', 'posé'], ['Fenrir', 'énergique'], ['Umbriel', 'décontracté'],
@@ -97,6 +98,23 @@ export class SettingsUI {
     $('t-crm').onclick = () => this.crmStatus(true);
     $('t-ear').onclick = () => this.apprendreNom();
     $('t-eartest').onclick = () => this.testerOreille();
+    bind('s-objectif', 'objectifActifs', (v) => Math.max(0, Math.min(999, Math.round(Number(v) || 0))));
+
+    // Famille et garde (PLAN 7 sexies) : visages appris sur cet appareil, garde de la maison.
+    bind('s-gardeauto', 'gardeAuto', Boolean, 'checked'); bind('s-gardephoto', 'gardePhoto', Boolean, 'checked');
+    $('t-vis').onclick = () => this.apprendreVisage();
+    $('vis-list').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-oublier]'); if (!b) return;
+      if (!confirm(`Oublier le visage de ${b.dataset.oublier} ?`)) return;
+      app.qui.oublier(b.dataset.oublier); app.famille.synchroniser().catch(() => {}); this.renderVisages();
+    });
+    $('t-alerte').onclick = async () => {
+      const st = $('s-gardestatus'); st.hidden = false; st.className = 'status'; st.textContent = 'Envoi d\'une alerte d\'essai…';
+      if (!app.remote.on) { st.className = 'status err'; st.textContent = 'Pas de script sur cet appareil (rubrique « Journal à distance ») : pas d\'e-mail possible.'; return; }
+      const r = await app.remote.ask({ action: 'alerte', genre: 'essai', essai: true, texte: 'Essai : les alertes de Wilson arrivent bien ici', t: Date.now(), appareil: deviceName() }).catch((e) => ({ ok: false, erreur: e.message }));
+      st.className = 'status ' + (r && r.ok && r.envoye ? 'ok' : 'err');
+      st.textContent = r && r.ok ? (r.envoye ? 'E-mail d\'essai envoyé ✓ — regarde ta boîte.' : `Pas envoyé : ${r.raison}`) : /action inconnue/.test((r && r.erreur) || '') ? 'Ton script n\'est pas encore à jour : ajoute le fichier famille.gs et déploie une nouvelle version (voir PLAN.md, 7 sexies).' : `Échec : ${(r && r.erreur) || 'script injoignable'}`;
+    };
 
     // Journal à distance : l'adresse du script Apps Script (collée ou scannée en QR code) reste sur la tablette.
     bind('s-logcontent', 'logContent', Boolean, 'checked');
@@ -225,6 +243,10 @@ export class SettingsUI {
     $('s-logurl').value = s.logUrl || ''; $('s-logcontent').checked = s.logContent !== false;
     $('s-crm').checked = !!s.crm; $('s-prenommaison').checked = !!s.prenomMaison; $('s-earsens').value = s.oreilleSens || 'normal';
     this.crmStatus(false); this.oreilleStatus();
+    $('s-objectif').value = s.objectifActifs ? String(s.objectifActifs) : '';
+    $('s-gardeauto').checked = s.gardeAuto !== false; $('s-gardephoto').checked = s.gardePhoto !== false;
+    this.renderVisages();
+    const gs = $('s-gardestatus'); gs.hidden = false; gs.className = 'status'; gs.textContent = `Garde : ${this.app.famille.decrire()} — messages : ${this.app.famille.decrireMessages()}`;
     const sy = $('s-sync'), sys = this.app.sync.state;
     sy.className = 'status ' + (!this.app.remote.on ? '' : /^à jour/.test(sys) ? 'ok' : sys ? 'err' : '');
     sy.textContent = !this.app.remote.on ? 'Synchronisation : pas de script sur cet appareil (copie tes réglages depuis le téléphone).'
@@ -254,6 +276,24 @@ export class SettingsUI {
     $('mem-list').innerHTML = f.length
       ? f.map((x, i) => `<li><span>${esc(x.text)} <em>· ${x.date}</em></span><button data-i="${i}" aria-label="Oublier">×</button></li>`).join('')
       : '<li class="empty">Wilson ne sait encore rien. Dis-lui : « Wilson, retiens que… »</li>';
+  }
+  // Visages appris (prénoms seulement) et bouton « Oublier ».
+  renderVisages() {
+    const l = this.app.qui.liste(), el = $('vis-list');
+    el.innerHTML = l.length ? l.map((n) => `<li><span>${esc(n)}</span> <button class="btn small" data-oublier="${esc(n)}">Oublier</button></li>`).join('') : '<li class="fine">Aucun visage appris pour l\'instant.</li>';
+  }
+  async apprendreVisage() {
+    const app = this.app, st = $('s-visstatus'), nom = $('vis-nom').value.trim();
+    st.hidden = false; st.className = 'status';
+    if (!nom) { st.className = 'status err'; st.textContent = 'Écris d\'abord le prénom.'; return; }
+    if (!app.vision) { st.className = 'status err'; st.textContent = 'La caméra est coupée (rubrique « Maison »).'; return; }
+    $('t-vis').disabled = true;
+    const r = await app.qui.apprendre(nom, { onPas: (t, n, total) => { st.textContent = `${t || 'Je t\'apprends…'} (${n}/${total})`; } });
+    $('t-vis').disabled = false;
+    st.className = 'status ' + (r.ok ? 'ok' : 'err');
+    st.textContent = r.ok ? `Visage de ${r.nom} appris ✓ (${r.n} empreintes, gardées sur cet appareil seulement).` : r.raison;
+    if (r.ok) { $('vis-nom').value = ''; app.famille.synchroniser().catch(() => {}); }
+    this.renderVisages();
   }
   renderLog() { const el = $('log'); el.textContent = this.app.logs.join('\n'); el.scrollTop = el.scrollHeight; }
   logStatus(msg, cls) { const el = $('s-logstatus'); el.hidden = !msg; el.className = 'status ' + (cls || ''); el.textContent = msg; }

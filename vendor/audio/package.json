@@ -1,0 +1,27 @@
+{
+  "name": "@mediapipe/tasks-audio",
+  "version": "1.2.2",
+  "description": "MediaPipe Audio Tasks. See the privacy notice at https://goo.gle/mediapipe-privacy.",
+  "main": "audio_bundle.cjs",
+  "browser": "audio_bundle.mjs",
+  "module": "audio_bundle.mjs",
+  "exports": {
+    ".": {
+      "import": "./audio_bundle.mjs",
+      "require": "./audio_bundle.cjs",
+      "default": "./audio_bundle.mjs",
+      "types": "./audio.d.ts"
+    },
+    "./audio_bundle.js": "./audio_bundle.js",
+    "./audio_wasm_internal.js": "./wasm/audio_wasm_internal.js",
+    "./audio_wasm_internal.wasm": "./wasm/audio_wasm_internal.wasm",
+    "./audio_wasm_module_internal.js": "./wasm/audio_wasm_module_internal.js",
+    "./audio_wasm_module_internal.wasm": "./wasm/audio_wasm_module_internal.wasm"
+  },
+  "author": "mediapipe@google.com",
+  "license": "Apache-2.0",
+  "type": "module",
+  "types": "audio.d.ts",
+  "homepage": "http://mediapipe.dev",
+  "keywords": [ "AR", "ML", "Augmented", "MediaPipe", "MediaPipe Tasks" ]
+}

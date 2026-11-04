@@ -31,7 +31,7 @@ const sheets = { 'Journal': fakeSheet('Journal'), 'Délais': fakeSheet('Délais'
 sheets['Journal'].data[0] = ['Date', 'Version', 'Message'];
 sheets['Délais'].data[0] = ['Date', 'Envoi'];
 sheets['État'].data[0] = ['Clé', 'Valeur'];
-let opened = null, locked = 0; const fetched = [], logged = [], props = {};
+let opened = null, locked = 0; const fetched = [], logged = [], props = {}, mails = [];
 let tavily = () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ answer: 'Demain à Angers : éclaircies, 9 à 17 °C.', response_time: 0.8,
   results: [{ title: 'Météo Angers', url: 'https://meteo.example/angers', content: 'Samedi : éclaircies, minimales 9 °C, maximales 17 °C. '.repeat(20) }] }) });
 const ctx = {
@@ -41,8 +41,11 @@ const ctx = {
   ContentService: { createTextOutput: (t) => ({ text: t, getContent() { return t; }, setMimeType(m) { this.mime = m; return this; } }), MimeType: { JSON: 'json' } },
   UrlFetchApp: { fetch: (url, o) => { fetched.push({ url, o }); return tavily(url, o); } },
   Logger: { log: (x) => logged.push(x) },
-  PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (k in props ? props[k] : null), setProperty: (k, v) => { props[k] = String(v); } }) },
-  Utilities: { formatDate: () => '23/10/26 15h30:00' },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (k in props ? props[k] : null), setProperty: (k, v) => { if (String(v).length > 9000) throw new Error('propriété trop grande'); props[k] = String(v); },
+    getProperties: () => ({ ...props }), deleteProperty: (k) => { delete props[k]; } }) },
+  Session: { getEffectiveUser: () => ({ getEmail: () => 'moi@exemple.fr' }) },
+  MailApp: { sendEmail: (o) => mails.push(o) },
+  Utilities: { formatDate: (d, tz, f) => (f === 'yyyy-MM-dd' ? '2026-11-04' : f === "HH'h'mm" ? '14h12' : '23/10/26 15h30:00'), base64Decode: (b) => Buffer.from(b, 'base64'), newBlob: (bytes, type, name) => ({ bytes, type, name }) },
   ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' }), getOAuthToken: () => 'JETON-DE-TIMOTHEE' },
   DriveApp: { getRootFolder: () => ({ getName: () => 'Mon Drive' }) },
   HtmlService: { createHtmlOutput: (h) => ({ html: h, setTitle(t) { this.title = t; return this; } }) },
@@ -50,6 +53,7 @@ const ctx = {
 vm.createContext(ctx);
 const code = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'journal.gs'), 'utf8').replace('COLLE_ICI_L_ID_DE_LA_FEUILLE', 'ID_TEST');
 vm.runInContext(code, ctx);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'famille.gs'), 'utf8'), ctx);   // messages, garde, alertes (PLAN 7 sexies)
 
 const post = (o) => ctx.doPost({ postData: { contents: JSON.stringify(o) } });
 const t0 = Date.parse('2026-10-23T13:00:00Z');
@@ -136,5 +140,33 @@ check('Jeton refusé : il faut lancer essaiCRM', c.ok === false && /essaiCRM/.te
 tavily = () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ ok: true, contacts: 437 }) });
 logged.length = 0; ctx.essaiCRM();
 check('Fonction essaiCRM (demande Drive, état, journée)', logged.length === 2 && /437/.test(logged[0]));
+// La famille et la garde (famille.gs, PLAN 7 sexies)
+const JF = (o) => JSON.parse(post(o).text);
+let fa = JF({ action: 'msg_deposer', msg: { id: 'abc1', pour: 'Marie', de: 'Timothée', texte: 'je rentre vers 20h00', t: Date.now() } });
+check('Message déposé (une propriété par message)', fa.ok && props.msg_abc1 && JSON.parse(props.msg_abc1).pour === 'Marie');
+JF({ action: 'msg_deposer', msg: { id: 'abc1', pour: 'Marie', texte: 'autre chose', t: Date.now() } });
+check('Message renvoyé après une coupure (même id) : pas de doublon, pas d\'écrasement', JSON.parse(props.msg_abc1).texte === 'je rentre vers 20h00');
+check('Message incomplet refusé', JF({ action: 'msg_deposer', msg: { pour: 'Marie' } }).ok === false);
+fa = JF({ action: 'msg_lire', noms: ['Timothée', 'Marie'] });
+check('Lecture : messages et prénoms de la tablette (prénoms seulement)', fa.ok && fa.messages.length === 1 && JSON.parse(props.famille_noms).length === 2 && fa.noms.includes('Marie'));
+fa = JF({ action: 'msg_remis', id: 'abc1', t: 2000, a: 'Marie' });
+check('Remis : date et personne', fa.ok && JSON.parse(props.msg_abc1).remis.a === 'Marie');
+JF({ action: 'msg_annuler', id: 'abc1' });
+check('Annulé : n\'est plus lu', JF({ action: 'msg_lire' }).messages.length === 0);
+props.msg_vieux = JSON.stringify({ id: 'vieux', pour: 'Louis', texte: 'x', t: Date.now() - 15 * 24 * 3600000 });
+JF({ action: 'msg_lire' });
+check('Message de plus de 14 jours effacé', !('msg_vieux' in props));
+check('Garde : la plus récente gagne', JF({ action: 'garde_ecrire', garde: { on: true, t: 50, par: 'téléphone' } }).applique && !JF({ action: 'garde_ecrire', garde: { on: false, t: 40 } }).applique && JF({ action: 'msg_lire' }).garde.on === true);
+fa = JF({ action: 'alerte', genre: 'fumee', texte: 'détecteur de fumée', details: 'Wilson a entendu : détecteur de fumée.', photo: Buffer.from('PHOTO').toString('base64'), t: 1, appareil: 'tablette' });
+const m0 = mails[0] || {};
+check('Alerte : e-mail à Timothée lui-même, avec la photo (jointe et dans le message)', fa.ok && fa.envoye && m0.to === 'moi@exemple.fr' && /alerte : détecteur de fumée/.test(m0.subject) && m0.inlineImages && m0.attachments.length === 1 && /cid:photo/.test(m0.htmlBody), JSON.stringify(fa));
+fa = JF({ action: 'alerte', genre: 'fumee', texte: 'détecteur de fumée', t: 2 });
+check('Même alerte moins de 10 min après : pas d\'e-mail', fa.ok && !fa.envoye && mails.length === 1, JSON.stringify(fa));
+for (let i = 0; i < 25; i++) JF({ action: 'alerte', genre: 'g' + i, texte: 'essai ' + i, t: 3 });
+check('20 alertes par jour au plus', mails.length === 20, String(mails.length));
+check('Texte échappé dans l\'e-mail', JF({ action: 'alerte', genre: 'x', texte: '<b>', essai: true }) && !mails.slice(-1)[0].htmlBody.includes('<b><b>'));
+check('Action inconnue de famille.gs : erreur lisible', /action inconnue/.test(JF({ action: 'msg_truc' }).erreur));
+logged.length = 0; ctx.essaiFamille();
+check('Fonction essaiFamille', logged.length === 1 && /Alerte d'essai/.test(logged[0]));
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);

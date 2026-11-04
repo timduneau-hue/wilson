@@ -117,6 +117,11 @@ je peux recevoir des appels pendant que je parle à Wilson ») :
 | `js/analyste.js` | Moteur de questions (C11) : Gemini gratuit lit la description des tableaux du CRM, écrit des recherches (lecture seule) exécutées par le CRM, plusieurs étapes, puis la réponse orale | `crm.js` (actions `crm_schema`, `crm_requete` du CRM, section 54) |
 | `js/crm.js` | CRM à la voix : questions au CRM par le script, fiches gardées pour la journée, dates dites (« jeudi », « demain 10h »), verrou de confirmation des écritures, bouton d'appel | `remote.js`, CRM (`WebApp_autonome.gs`, action `doPost` → `wilson`) |
 | `js/oreille.js` | Oreille locale du mode voiture : reconnaît « Wilson » dit par Timothée (empreintes de sa voix, comparaison DTW), sur l'appareil | `audio.js` |
+| `js/qui.js` + `js/qui-worker.js` | Qui me regarde (7 sexies, V) : empreintes de visage sur l'appareil, apprentissage, reconnaissance prudente | `vision.js` (visage aligné), face-api + TF.js (`vendor/face-api/`) |
+| `js/famille.js` | Messages de la famille (M), garde de la maison (G), outils `messages`, `visages`, `garde` | `qui.js`, `garde.js`, `remote.js`, `apps-script/famille.gs` |
+| `js/garde.js` + `js/garde-worker.js` | Oreille de garde (G2) : sons reconnus sur l'appareil pendant la garde | `audio.js`, MediaPipe Audio + YAMNet (`vendor/audio/`) |
+| `js/reactions.js` | Réactions muettes du visage (Q) | `face.js`, `vision.js`, `qui.js` |
+| `apps-script/famille.gs` | Script de Timothée : messages partagés (`msg_…`), alertes par e-mail (`alerte`) | Propriétés du script, MailApp |
 
 ## 5. Choix techniques et pourquoi
 
@@ -179,8 +184,8 @@ Mode direct (Gemini Live), constaté dans le journal le 23/10/26 (réponses à 4
 ## 7. Lots suivants (prévus, pas dans ce lot)
 
 1. **Domotique via Home Assistant** — en cours (25/10/26), voir 7 bis.
-2. Alertes e-mail (intrusion, fumée) quand la maison est vide.
-3. Reconnaissance des membres de la famille.
+2. Alertes e-mail (intrusion, fumée) quand la maison est vide — fait en 1.27.0 (7 sexies, G).
+3. Reconnaissance des membres de la famille — fait en 1.27.0 (7 sexies, V).
 
 ## 7 bis. Domotique : Home Assistant (demande de Timothée, 25/10/26)
 
@@ -662,9 +667,87 @@ toutes ») (**1.26.6**). Journal du 04/11/26, 17h53-17h55 (téléphone relié à
 - Tests : `e2e_oreille_0411.py` réécrit (13 vérifications : pas de réveil sur délai ni sans réseau, prévenu une seule fois,
   candidat gardé puis vérifié, 8 kHz, réveil sur « oui ») ; `e2e_sourd_0411.py` (8).
 
+## 7 sexies. La famille, la garde, l'objectif et les réactions (accord de Timothée du 04/11/26, 20h16)
+
+Idées proposées par Claude le 04/11/26 (« réfléchis à d'autres capacités que pourrait avoir Wilson ») ; retenues par
+Timothée : « ok pour les 3 et reconnaissance faciale aussi, les réactions aussi » — le messager de la famille, l'oreille
+de garde, l'objectif des clients actifs, la reconnaissance des visages, les réactions sans parler. Version **1.27.0**.
+Tout reste gratuit, sans nouvelle clé ; R1 (le regard) et R9 (rien d'inutile ne quitte la maison) restent entières.
+
+**V. Qui me regarde (reconnaissance des visages)** — `js/qui.js`, `js/qui-worker.js`
+
+| # | Règle | Comment |
+|---|-------|---------|
+| V1 | Tout reste sur l'appareil. | Une « empreinte » de visage = 128 nombres calculés sur la tablette (réseau de reconnaissance de face-api, MIT, 6 Mo, téléchargé une fois). Aucune photo gardée. Les empreintes restent dans le stockage de **cet appareil** (`wilson.visages`) : jamais synchronisées, jamais dans le journal, la feuille, le dépôt ni chez Google. |
+| V2 | Apprendre un visage. | Réglages → « Famille et garde » → prénom + « Apprendre ce visage » ; ou à la voix, en le regardant : « Wilson, apprends mon visage, je suis Louis » (outil `visages`). Wilson guide (« Regarde-moi… tourne un peu la tête… ») et garde 12 empreintes en 20 s au plus, seulement avec **un seul** visage devant lui, de face et assez près. « Oublie le visage de Louis » ou le bouton « Oublier » effacent. |
+| V3 | Jamais un faux prénom. | « Sûr » seulement si 2 des 3 dernières analyses donnent la même personne, à une distance < 0,5 et nettement plus près que la suivante (écart ≥ 0,06) ; sinon « quelqu'un ». Mieux vaut pas de prénom qu'un faux. |
+| V4 | Fluide (R8). | Reconnaissance dans un travailleur à part (jamais dans celui du regard) ; seulement quand un visage est là, de face, assez grand ; une analyse toutes les 1,5 s au plus, toutes les 20 s une fois la personne sûre (aussitôt si le nombre de visages change). Rien n'est chargé tant que personne n'a été appris. |
+| V5 | À quoi ça sert. | Gemini sait à qui il parle (« Tu parles avec Louis ») ; messages (M) ; fin de la garde (G) ; réactions (Q). Ça n'ouvre aucun droit : le CRM demande toujours le « oui » (C2). |
+
+**M. Le messager de la famille** — `js/famille.js`, `apps-script/famille.gs`
+
+| # | Règle | Comment |
+|---|-------|---------|
+| M1 | Déposer. | « Dis à Marie que je rentre vers 20h00 » : outil `messages` (deposer : pour, de, texte mis au propre sans rien inventer). Wilson confirme en une phrase. |
+| M2 | Partagés entre appareils. | Rangés par le script de Timothée (propriétés du script, actions `msg_…`) : déposé sur le téléphone, remis par la tablette. Script pas encore à jour : gardés sur cet appareil (remis seulement par lui), et Wilson le dit. |
+| M3 | Remis à la bonne personne, quand elle le regarde. | Tablette : le destinataire, reconnu **sûr** (V3), **regarde** Wilson (R1) hors discussion, hors appel, hors nuit → Wilson ouvre la discussion et lui dit le message (« Louis, un message de papa : … »). Jamais à quelqu'un d'autre, jamais à l'écran sans demande. « Tout le monde » : la première personne de la famille reconnue. Téléphone (celui de Timothée) : les messages pour lui sont dits au début de sa discussion suivante, jamais de lui-même (remarque du 04/11/26, 17h57 : « il se met à me parler… »). « J'ai des messages ? » marche partout. |
+| M4 | Suivi. | Remis = date et heure ; « Marie a eu mon message ? » (statut) ; annuler. Effacés 14 jours après. |
+
+**G. L'oreille de garde** — `js/garde.js`, `js/garde-worker.js`
+
+Wilson n'est pas un système d'alarme : il prévient, sans rien promettre.
+
+| # | Règle | Comment |
+|---|-------|---------|
+| G1 | Quand. | Garde **demandée** (« Wilson, on part, surveille la maison » : outil `garde`) ; ou **automatique** (réglage, coché par défaut) : personne vu dans le salon depuis 45 min, hors nuit. |
+| G2 | Les sons sont reconnus sur l'appareil. | YAMNet (Google, 521 sortes de sons, MediaPipe Audio, Apache-2.0) dans un travailleur à part, **seulement pendant la garde**, sur le son du micro (16 kHz) ; rien ne part tant qu'il n'y a pas d'alerte. |
+| G3 | Alerte par e-mail. | Détecteur de fumée ou alarme incendie (3 fois en 20 s), bris de verre (une fois, net), alarme qui sonne depuis 45 s, **visage inconnu** (garde demandée seulement, et si quelqu'un a été appris : en garde automatique la maison n'est peut-être pas vide) → e-mail à Timothée par son script (action `alerte`), avec une photo de la pièce (réglage, coché par défaut : elle ne va que dans sa boîte). Une alerte du même genre toutes les 10 min au plus, 20 par jour. Sans script à jour : notée au journal seulement. |
+| G4 | Le reste est raconté au retour. | Sonnette, on frappe, chien, cris : notés (heure) ; au retour, la première personne de la famille reconnue qui le regarde l'entend (« Pendant votre absence, on a sonné à 14h12. »), comme un message. |
+| G5 | Fin. | « On est rentrés » (outil `garde`), un visage de la famille reconnu, ou (garde automatique) quelqu'un qui le regarde ou le touche. |
+
+**O. L'objectif des clients actifs** (CRM)
+
+| # | Règle | Comment |
+|---|-------|---------|
+| O1 | Sur demande seulement. | « Où j'en suis de mes clients actifs ? », « combien il m'en manque ? » → `crm_question` (OBJECTIF CLIENTS ACTIFS). Jamais de lui-même. |
+| O2 | Les chiffres du CRM. | Clients actifs du mois = ceux du bilan du CRM (`crm_bilan`, même chiffre qu'à l'écran) ; objectif = réglage « Objectif de clients actifs par mois » (CRM et prénom), ou dit à la voix (« mon objectif c'est 60 », retenu) ; sans objectif, il donne le nombre et demande l'objectif. |
+| O3 | « Sur ta route ». | Rendez-vous du prochain jour ouvré (agenda du CRM) : ceux qui n'ont pas encore commandé ce mois-ci ; plus les clients habituels (commande dans les 3 derniers mois) pas encore actifs ce mois-ci, dans les mêmes villes. Le nombre manquant d'abord, puis 3 noms au plus. |
+
+**Q. Les réactions sans parler** — `js/reactions.js`
+
+| # | Règle | Comment |
+|---|-------|---------|
+| Q1 | Muettes. | Le visage seulement : aucune parole, aucun son (R1 intacte). Jamais pendant une discussion, quand il parle, la nuit en dodo ou réglages ouverts. |
+| Q2 | Lesquelles. | Quelqu'un arrive (pièce vide depuis 5 min) → il se réveille, curieux ; regardé par quelqu'un de reconnu → sourire (la 1re fois de la journée, petit bond de joie), au plus une fois toutes les 30 min par personne ; regardé par un inconnu → tête penchée, curieux ; regardé 6 s sans qu'on lui parle → clin d'œil et sourire tendre (toutes les 2 min au plus) ; bruit fort soudain → sursaut (toutes les 30 s au plus) ; tout le monde part → il les suit des yeux puis s'assoupit ; le soir, avec quelqu'un → un bâillement de temps en temps (toutes les 8 à 12 min) ; le matin, premier visage → il s'étire et sourit. |
+
+Fait le 04/11/26 (**1.27.0**) :
+- V : `vision-worker.js` redresse le visage demandé (150 × 150, comme les « puces » de dlib : yeux à l'horizontale, cadre calé
+  sur les yeux et la bouche) ; `qui-worker.js` (face-api + TF.js, carte graphique sinon processeur, poids chargés à la main car
+  face-api attend une page web) en tire l'empreinte ; `qui.js` apprend (12 empreintes, 6 au moins, 20 s ou jusqu'à 45 s sur un
+  appareil lent ; arrêt si le visage est déjà celui d'un autre) et reconnaît. Visage trop petit (moins de 22 px d'un œil à
+  l'autre, soit au-delà de 2 à 3 m) ou tourné de plus de 32° : écarté (ni prénom, ni « inconnu »). Essai sur les fausses vidéos :
+  même personne à 0,00, autre personne à 0,90.
+- M : `famille.js` + `apps-script/famille.gs` (msg_lire / msg_deposer / msg_remis / msg_annuler) ; la tablette relit toutes les
+  minutes (le téléphone toutes les 3 min) ; « remis » quand la réponse de Wilson reprend des mots du message (ou « message »).
+- G : `garde.js` + `garde-worker.js` (MediaPipe Audio 1.2.2 + YAMNet) ; garde partagée par le script (`garde_ecrire`) ; alertes
+  par l'action `alerte` (MailApp, photo jointe). Garde automatique : tablette seulement.
+- O : `crm_question` reconnaît « OBJECTIF CLIENTS ACTIFS » : l'appli joint le bilan du CRM et l'agenda du prochain jour ouvré à
+  la question de l'analyste ; réglage `objectifActifs` (CRM et prénom).
+- Q : `reactions.js`.
+- Réglages : rubrique « Famille et garde » (visages appris, Oublier, garde automatique, photo des alertes, alerte d'essai).
+- Tests : `e2e_famille.py` (58), `e2e_famille_modeles.py` (13, vrais modèles), `apps_script_unit.js` (famille.gs).
+
+**À faire par Timothée (1.27.0)** : dans l'éditeur du script « Wilson journal », remplacer `journal.gs` (une ligne de plus
+dans doPost), ajouter le fichier `famille` (contenu de `apps-script/famille.gs`), lancer `essaiFamille` une fois (e-mail
+d'essai), puis Déployer → Gérer les déploiements → modifier → Nouvelle version. Sans ça : messages et garde restent sur chaque
+appareil, pas d'e-mail d'alerte. Puis apprendre les visages de la famille sur la tablette (un par un, seul devant elle).
+Remarques : « client actif » = le chiffre du bilan du CRM (à confirmer : commandé ou facturé dans le mois ?) ; MediaPipe
+(vision comme audio) envoie des statistiques d'usage anonymes à `odml.pa.googleapis.com` (déjà le cas avant 1.27.0, pas de
+réglage pour le couper : à voir avec Timothée si R9 l'exige).
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 04/11/26 : **version 1.26.6** en ligne (plus jamais de réveil sans « oui » de Gemini : fini les réveils sur des bruits ; il prévient quand il ne peut pas vérifier) ; 1.26.5 (en voiture, il prévient quand il ne t'entend plus ; écran : texte seulement sur demande, photos et météo 5 s, « réaffiche » ; dernières commandes = articles ; recherches CRM gardées et protégées des blocages) ; 1.26.4 (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 04/11/26 : **version 1.27.0** en ligne (la famille : visages reconnus sur la tablette, messages remis à la bonne personne quand elle le regarde, garde de la maison avec alertes par e-mail, objectif des clients actifs, réactions muettes — section 7 sexies ; le script doit être mis à jour par Timothée) ; 1.26.6 (plus jamais de réveil sans « oui » de Gemini : fini les réveils sur des bruits ; il prévient quand il ne peut pas vérifier) ; 1.26.5 (en voiture, il prévient quand il ne t'entend plus ; écran : texte seulement sur demande, photos et météo 5 s, « réaffiche » ; dernières commandes = articles ; recherches CRM gardées et protégées des blocages) ; 1.26.4 (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
