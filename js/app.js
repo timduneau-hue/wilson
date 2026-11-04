@@ -546,6 +546,7 @@ class App {
     const all = this.pending; this.pending = null;
     const flat = concat(all);
     for (let i = 0; i < flat.length; i += 3200) this.brain.sendAudio(flat.subarray(i, i + 3200));
+    this._derniereReponse = null; this._doublon = null;      // nouvelle discussion : rien à comparer
     if (reason === 'test') this.brain.sendText('Présente-toi en une phrase, avec chaleur.');
     if (reason === 'toucher') this.brain.sendText(this.car ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
     if (reason === 'apres_appel') this.brain.sendText(this._apresAppelTexte());
@@ -958,6 +959,8 @@ Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« 
 Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
 - Dès qu'il parle d'un client, d'un rendez-vous, d'une tâche, d'un devis, d'un chiffre ou d'un article, ${eco ? 'remplis le champ "crm"' : 'dis « Je regarde dans le CRM… » puis appelle l\'outil (crm_client, crm_agenda, crm_bilan, crm_produit)'}. Ne devine jamais un nom, un chiffre ou une date : dis seulement ce que le CRM répond. Pour « lui », « ce client », c'est le dernier client dont vous avez parlé.
 - Toute autre question sur ses données (un chiffre passé, un total, une liste, un détail, une comparaison, « qui… », « combien… », « quand… », les devis à relancer) : ${eco ? 'outil "question" avec la question complète dans "demande"' : 'dis « Je cherche l\'information… » puis appelle crm_question avec la question complète'}. Un analyste cherche dans tout le CRM : ça peut prendre une minute ou plus, attends le résultat sans relancer.
+- « Fais-moi un briefing », « prépare mon rendez-vous », « qu'est-ce que je dois savoir sur X » : ${eco ? 'outil "question"' : 'dis « Je prépare ton briefing, je te tiens au courant… » puis appelle crm_question'} en demandant un BRIEFING COMPLET du client (son nom) : ventes et tendance, ce qu'il achète, devis à relancer, derniers échanges, quoi proposer. Quand la réponse arrive, dis-la en entier, sans la raccourcir : tu es son coach commercial (remarque de Timothée du 04/11/26).
+- Avant toute recherche (CRM, analyste, Internet), dis d'abord en quelques mots que tu regardes (« Je regarde et je te tiens au courant… ») : en voiture, il ne voit pas l'écran.
 - « Emmène-moi chez X », « l'adresse de X » : ${eco ? 'outil "itineraire"' : 'outil itineraire'} (un bouton s'affiche, il appuie dessus pour lancer le GPS).
 - « Appelle X » : ${eco ? 'outil "appeler"' : 'outil appeler'} (un bouton vert s'affiche, il appuie dessus).
 - Écrire dans le CRM (tâche, compte rendu, rendez-vous, note) : JAMAIS sans son accord. ${eco ? 'Mets l\'outil "noter"' : 'Appelle crm_noter'}, relis-lui exactement la phrase préparée, demande « Je l'enregistre ? », et ${eco ? 'mets l\'outil "confirmer"' : 'dis « J\'enregistre… » puis appelle crm_confirmer'} seulement après son « oui ». S'il corrige, prépare de nouveau. Les comptes rendus, rendez-vous et notes arrivent en brouillon dans son CRM : il les valide lui-même.
@@ -1102,7 +1105,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this._liveAudio = (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
       // R1 (règle de Timothée du 01/11/26) : il ne parle que s'il est sûr qu'on le regardait en lui parlant.
-      if (this._retenu === this._turnN) return;
+      if (this._retenu === this._turnN || this._doublon === this._turnN) return;
       if (!this._liveTurn && !this.audio.playing && !this._reponsePermise()) {
         this._retenu = this._turnN; this._nRetenues = (this._nRetenues || 0) + 1;
         this.log(`Réponse retenue : personne ne me regardait vraiment pendant la phrase (${this._etatRegard()})`);
@@ -1122,7 +1125,9 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         const now = performance.now(), e = this._speechEndAt || 0, h = this._heardAt || 0, after = Math.max(this.playEndAt || 0, this._lastTurnAt || 0);
         // Fin de phrase détectée sur la tablette ; à défaut (bruit continu, dehors…), dernier mot transcrit par Google.
         const end = e > after && !this.audio.speaking ? e : h > after ? h : 0;
-        this._liveTurn = { t: now, sec: 0, delay: end ? Math.round((now - end) / 100) / 10 : null, search: this._searchMs || 0 };
+        // (plus de 60 s : ce n'était pas une attente, mais une phrase bien plus ancienne — « 90,7 s » après un essai de voix, 04/11/26)
+        const dl = end ? Math.round((now - end) / 100) / 10 : null;
+        this._liveTurn = { t: now, sec: 0, delay: dl != null && dl <= 60 ? dl : null, search: this._searchMs || 0 };
         this._searchMs = 0;
       }
       this._liveTurn.sec += i16.length / (rate || 24000);
@@ -1149,6 +1154,13 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       }
       this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._modelTalking = 0;
       wilson = cleanSpeech(wilson);
+      this._emoTour = null;
+      if (this._doublon === this._turnN - 1) {
+        // Réponse identique à la précédente, sans que personne ait parlé entre les deux : coupée (journal du 04/11/26).
+        this._doublon = null; this._liveTurn = null; this._modelTalking = 0;
+        this.log(`Réponse en double coupée (déjà dite) : « ${wilson.slice(0, 100)} »`, true);
+        return;
+      }
       if (this._retenu === this._turnN - 1) {
         // Réponse retenue (R1) : rien n'a été dit ; on note ce qu'il aurait dit, et surtout pas de relance.
         this._retenu = null; this._liveTurn = null; this._modelTalking = 0;
@@ -1174,8 +1186,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this._liveTurn = null; this._outPeak = 0;
       if (user || wilson) this.memory.addExchange(user, wilson);
       if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
+      if (user) this._parleDepuis = true;
       if (wilson) {
         this._demandeTexte = null;
+        this._derniereReponse = { texte: wilson, at: performance.now() }; this._parleDepuis = false;
         this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson);
         // Journal du 30/10/26, 22h39 : « To hear your thoughts on something specific, just let me know. » → il le redit en français.
         if (enAnglais(wilson) && this.brain.open && performance.now() - (this._anglaisAt || -1e9) > 15000) {
@@ -1199,15 +1213,29 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         const deLoin = this._byName && !this._gazing();
         this.log(`Wilson s'est tu alors qu'on lui parlait${deLoin ? ' (appelé par son prénom)' : ' en le regardant'}${this._dialogueEnCours() ? ', juste après sa réponse' : ''} : relance`);
         this.brain.sendText(`[On te parlait${deLoin ? '' : ' en te regardant'} : réponds maintenant, à voix haute, à ce qui vient d'être dit.]`);
-      } else this.log(`Wilson se tait (il pense que la phrase n'était pas pour lui${user && this._verrouRegard && !this._reponsePermise() ? ' : personne ne le regardait' : user && this._gazeMode && !this._dialogueEnCours() && !this._semblePourMoi(user) ? ' : pas une demande pour lui' : this.vision && this.vision.faces > 1 ? ' : plusieurs personnes devant lui' : ''})`);
+      } else if (hadTool && !wilson) this.log('Wilson attend le résultat de son outil : il répondra avec');
+      else this.log(`Wilson se tait (il pense que la phrase n'était pas pour lui${user && this._verrouRegard && !this._reponsePermise() ? ' : personne ne le regardait' : user && this._gazeMode && !this._dialogueEnCours() && !this._semblePourMoi(user) ? ' : pas une demande pour lui' : this.vision && this.vision.faces > 1 ? ' : plusieurs personnes devant lui' : ''})`);
       setTimeout(() => { if (!this.audio.playing) $('subtitle').textContent = ''; }, 5000);
     });
     b.on('heard', (t) => {
       if (this.state !== 'conversation') return;
       this.lastActivity = this._heardAt = performance.now(); this._noteHeard(t);
+      if (String(t || '').trim()) this._parleDepuis = true;
       if (this._gate && !this._gate.ok && nomDit(t)) this._gateOpen('nom entendu');
     });
-    b.on('said', (t) => { if (this._retenu === this._turnN) return; if (this.settings.subtitles || this.car) $('subtitle').textContent = cleanSpeech(t).slice(-220); });
+    b.on('said', (t) => {
+      if (this._retenu === this._turnN || this._doublon === this._turnN) return;
+      if (this._estDoublon(t)) {
+        this._doublon = this._turnN; this.audio.flush(); this.face.setTalk(0); this._liveTurn = null; this._modelTalking = 0;
+        $('subtitle').textContent = '';
+        return;
+      }
+      if (this.brain.syncTools) {                          // pas d'outil du visage sur ce modèle : l'expression suit le texte
+        const e = emotionDuTexte(t);
+        if (e && e !== this._emoTour) { this._emoTour = e; this.face.setEmotion(e, 6500, 0.8); }
+      }
+      if (this.settings.subtitles || this.car) $('subtitle').textContent = cleanSpeech(t).slice(-220);
+    });
     b.on('toolcall', (calls) => this._tools(calls));
     b.on('toolcancel', (ids) => {        // la personne a coupé Wilson pendant une recherche : on l'abandonne
       for (const id of ids) {
@@ -1332,9 +1360,20 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this.log(`Phrase gardée pendant la coupure (${(W.phrase.length / 16000).toFixed(1)} s)`);
   }
 
+  // Réponse en double : même début que sa réponse précédente (moins de 45 s), sans que personne ait parlé entre les deux.
+  _estDoublon(t) {
+    const D = this._derniereReponse;
+    if (!D || this._parleDepuis || String(this.brain.inText || '').trim() || performance.now() - D.at > 45000) return false;
+    if (!memeDebut(cleanSpeech(t), D.texte)) return false;
+    this.log(`Réponse en double évitée : il redisait « ${D.texte.slice(0, 80)} »`);
+    return true;
+  }
+
   _tools(calls) {
     const res = [];
-    if (calls.some((c) => c.name !== 'exprimer_emotion' && c.name !== 'memoriser')) this._toolTurn = this._turnN;
+    // Modèle aux outils synchrones (3.1 Flash Live) : il reprend la parole après CHAQUE outil, mémoriser compris ; une relance
+    // en plus lui faisait répondre deux fois (journal du 04/11/26, 10h02 et 10h45).
+    if (this.brain.syncTools ? calls.length : calls.some((c) => c.name !== 'exprimer_emotion' && c.name !== 'memoriser')) this._toolTurn = this._turnN;
     for (const c of calls) {
       const a = c.args || {};
       if (!['exprimer_emotion'].includes(c.name) && !this._reponsePermise()) {
@@ -1696,6 +1735,12 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         let g = C.gate(heard || this._heard, { turn: this._turnN });
         // transcription de son « oui » encore en route : on l'attend un peu (2 s au plus)
         for (let i = 0; !g.ok && !heard && /pas de réponse/.test(g.why) && i < 8; i++) { await sleep(250); g = C.gate(this._heard); }
+        const D = C.dernierEnregistre;
+        if (!g.ok && !C.pending && D && Date.now() - D.at < 120000) {
+          // Déjà enregistré juste avant (il rappelait crm_confirmer et redisait « c'est enregistré », journal du 04/11/26, 10h49)
+          this.log(`crm_confirmer de trop : déjà enregistré il y a ${Math.round((Date.now() - D.at) / 1000)} s, rien redit`);
+          return { info: `DÉJÀ ENREGISTRÉ il y a quelques secondes (« ${D.relu} »). Tu l'as déjà dit : ne redis rien, attends qu'il parle.`, dire: null };
+        }
         if (!g.ok) {
           this.log(`Écriture REFUSÉE par le verrou : ${g.why}`);
           const p = C.pending;
@@ -2127,6 +2172,13 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this._holdOn = garde; this._holdTry = now;
       this.audio.mediaHold(garde, (a) => { this.log(`Bouton ${a} (volant ou écran de la voiture) : je me tais`); if (this.state === 'conversation') this.endConversation('volant'); });
     }
+    // Remarque de Timothée du 04/11/26, 10h13 : en voiture il ne regarde pas l'écran ; pendant qu'il cherche (CRM, analyste,
+    // Internet), un petit « tic-tac » doux toutes les 2,5 s dit qu'il réfléchit (jusqu'à 32 s de silence ce matin-là).
+    const cherche = this.state === 'conversation' && ((this._searches && this._searches.size) || (this._analyses && [...this._analyses.values()].some((A) => !A.cancelled)));
+    if (cherche && vb && !this.audio.playing) {
+      if (!this._chercheDepuis) this._chercheDepuis = now;
+      if (now - this._chercheDepuis > 1500 && now - (this._ticAt || 0) > 2500) { this._ticAt = now; try { this.audio.tone('reflexion'); } catch (_) {} if (!this._ticN++) this.log('Je cherche : petit son de réflexion (voiture)'); }
+    } else { this._chercheDepuis = 0; this._ticN = 0; }
     // Veille → dodo quand la pièce est vide (ou la nuit).
     if (v && v.hasPerson) this.presenceAt = now;
     if (this.state === 'veille' && !this.car) {
@@ -2180,8 +2232,35 @@ function enAnglais(t) {
 }
 
 function cleanSpeech(t) {
-  t = String(t || '').replace(/<[^>]{0,40}>|\{[^}]{0,40}\}/g, ' ').replace(/\s*\[…\]\s*$/, '').replace(/\s+/g, ' ').trim();
+  t = String(t || '').replace(/<[^>]{0,40}>|\{[^}]{0,40}\}/g, ' ')
+    // bouts de code ou de consigne lus par le modèle (journal du 04/11/26 : « response:exprimer_emotion », « try{ »,
+    // « Wait for the result of mes_remarques before responding. »)
+    .replace(/\b(?:response|tool_code|default_api|print|call)\s*[:.]\s*[a-z_]+(?:\([^)]{0,80}\))?/gi, ' ')
+    .replace(/\btry\s*\{/g, ' ').replace(/\bWait for the result of [a-z_]+[^.]*\.?/gi, ' ').replace(/\s*\[…\]\s*$/, '').replace(/\s+/g, ' ').trim();
   return /^[\s.…!?,;:-]*$/.test(t) ? '' : t;      // « ... » seul : il n'a rien dit
+}
+// Expression du visage d'après ce qu'il dit (modèles sans outil du visage). null : rien de net.
+export function emotionDuTexte(t) {
+  t = String(t || '').toLowerCase();
+  if (t.length < 6) return null;
+  if (/\b(ha ?ha|hi ?hi|mdr)\b/.test(t)) return 'rire';
+  if (/\b(d[ée]sol[ée]|pardon|excuse)/.test(t)) return 'gene';
+  if (/\b(oh l[àa]|oula|houla|waouh|wow|ah bon|incroyable)\b/.test(t)) return 'surprise';
+  if (/\b(dommage|malheureusement|triste)\b/.test(t)) return 'triste';
+  if (/\b(je regarde|je cherche|voyons|attends?)\b/.test(t) && t.length < 60 && !/\?\s*$/.test(t)) return 'reflexion';
+  if (/\b(g[ée]nial|super|bravo|parfait|ravi|chouette|avec plaisir|top)\b/.test(t)) return 'joie';
+  if (/\?\s*$/.test(t)) return 'curieux';
+  return null;
+}
+// Texte comparable : sans la phrase d'attente du début (« Je regarde dans le CRM… »), lettres et chiffres seuls.
+export function texteCompare(t) {
+  return String(t || '').toLowerCase().replace(/^\s*(je (regarde|cherche)[^.…!?]*[.…!?]+\s*)+/, '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+}
+// La réponse en cours redit-elle la précédente ? (au moins 20 lettres identiques au début)
+export function memeDebut(cur, prec) {
+  const a = texteCompare(cur), b = texteCompare(prec);
+  return a.length >= 20 && b.length >= 20 && b.startsWith(a.slice(0, 40));
 }
 // Une vraie phrase (et pas un bruit transcrit au hasard : « Eh », « Aí. ») : au moins 3 mots, ou une question de 2 mots.
 function realPhrase(t) {

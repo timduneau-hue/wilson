@@ -540,9 +540,43 @@ la relance. Journal : « lecteur multimédia en route… » / « arrêté » ; o
 (23 vérifications). À vérifier au prochain trajet. Si toujours muet, plan C : faire passer la voix elle-même par la balise
 audio (flux de la page vers la balise), au lieu du son Web Audio.
 
+Demande de Timothée du 04/11/26, 10h53 (« vérifie le journal de Wilson et corrige les bugs ») (**1.26.2**). Journal du
+04/11/26, 10h00-10h50 (téléphone en voiture, 1.26.1, Gemini **3.1 Flash Live**). Le son en voiture marche enfin (« je
+t'entends parfaitement », 10h02 : la 1.26.1 est validée). Remarques de Timothée lues : 10h06 (réapprendre « Wilson » en
+voiture : fait par lui à 10h09), 10h13:17, 10h13:52, 10h16:23, 10h44:43, 10h45:47.
+- **Réponses en double** (remarque de 10h44 « pas besoin de répéter deux fois la même phrase » ; 10h16 « on dirait que tu
+  t'endors ») : la même réponse jouée 2 ou 3 fois à ~5 s (10h33, 10h44-10h45, 10h49). Cause : Gemini 3.1 Flash Live n'a que
+  des outils **synchrones** (doc Google : « Asynchronous function calling is not yet supported ») ; après l'outil du visage
+  (`exprimer_emotion`, appelé presque à chaque phrase) il reprenait la parole et redisait tout ; un tour muet avec un outil
+  déclenchait en plus une relance → deux réponses ; il disait même « response:exprimer_emotion » et « try{ ». Corrigé :
+  sur les modèles sans outils en arrière-plan (`asyncTools` dans `brain.js` : tout sauf 3.8 et 2.5), plus d'outil du visage
+  (ni sa consigne, ni `behavior`) : l'expression suit le texte de sa réponse (`emotionDuTexte`) ; tout outil compte comme
+  « la réponse viendra avec le résultat » (pas de relance) ; garde-fou : une réponse qui commence comme la précédente
+  (20 lettres, phrase d'attente « Je regarde… » ôtée, moins de 45 s), sans que personne ait parlé entre les deux, est
+  coupée (journal « Réponse en double évitée »). Texte parasite ôté du journal et des sous-titres.
+- **crm_confirmer de trop** (10h49:37-38, « Ça y est, c'est enregistré » redit deux fois) : déjà enregistré il y a moins de
+  2 min → « ne redis rien » (`dernierEnregistre` dans `crm.js`).
+- **Prévenir et faire patienter** (remarque de 10h13:17 : « dis “je regarde et je te tiens au courant”, et une animation ou
+  un bruit pour savoir que tu réfléchis, je ne te regarde pas en voiture » ; jusqu'à 32 s de silence à 10h12) : consigne
+  « avant toute recherche, dis que tu regardes » ; en voiture, petit « tic-tac » doux (deux notes, toutes les 2,5 s) tant
+  qu'une recherche, le CRM ou l'analyste travaille (pas sur la tablette, où le visage réfléchit).
+- **Briefings** (remarque de 10h13:52 : « une analyse poussée des ventes, des devis et des échanges, pas un résumé de
+  quelques secondes ; tu es mon coach commercial ») : « fais-moi un briefing », « prépare mon rendez-vous » → crm_question
+  demande un BRIEFING COMPLET ; l'analyste cherche tout (commandes de l'exercice et du précédent par famille, dernières
+  commandes, devis à relancer, comptes rendus, tâches, veille) et répond en 6 à 10 phrases de coach, même en voiture
+  (seule réponse longue permise) ; Wilson la dit en entier.
+- Divers : « Wilson se tait » n'est plus écrit quand il attend simplement le résultat d'un outil ; délai « 90,7 s » (phrase
+  ancienne, après un essai de voix) plus compté.
+- Test `e2e_doublon.py` (23 vérifications).
+- Question de Timothée (même message) : laisser Claude prendre le relais pour les demandes complexes (CRM, Internet,
+  e-mails) depuis la fenêtre de discussion, sans API, en gardant la voix de Gemini. Réponse : piloter claude.ai par un
+  programme n'est pas permis par les conditions d'Anthropic (accès automatisé seulement par l'API) ; possible en revanche :
+  une « boîte aux demandes » (onglet de la feuille, rempli par Wilson) traitée par une tâche planifiée de Claude, réponse
+  relue par Wilson avec sa voix — pas en temps réel (au mieux toutes les heures). En attente de sa décision.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 04/11/26 : **version 1.26.1** en ligne (en voiture, lecteur multimédia pour qu'Android Auto joue la voix) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 04/11/26 : **version 1.26.2** en ligne (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).

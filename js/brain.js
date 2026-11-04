@@ -50,7 +50,17 @@ const QUOTA_SKIP_MS = 6 * 3600000;    // un modèle refusé pour quota est essay
 // proactive : false = Gemini répond à TOUT ce qu'il entend (il n'entend que ce qu'on lui dit en le regardant) ; sans ce réglage
 // explicite, il jugeait souvent que la phrase n'était pas pour lui et restait muet (journal du 24/10/26, sans photo).
 // extra : outils en plus (CRM à la voix, PLAN 2 quater), déclarés seulement quand le CRM est relié.
-function buildSetup({ model, voice, system, level, handle, think, interrupts = false, proactive, extra = [] }) {
+// Outils « en arrière-plan » (NON_BLOCKING) : seulement les Gemini 3.8 et 2.5. Gemini 3.1 Flash Live ne connaît que les
+// outils synchrones (doc Google) : après CHAQUE outil il attend la réponse puis reprend la parole. L'outil du visage,
+// appelé après presque chaque phrase, lui faisait redire sa réponse 2 ou 3 fois et dire « response:exprimer_emotion »
+// à voix haute (journal du 04/11/26, 10h33-10h49, remarque de Timothée « pas besoin de répéter deux fois la même phrase »).
+// Sur ces modèles, pas d'outil du visage : l'expression suit le texte de sa réponse (app.js, emotionDuTexte).
+export function asyncTools(model) { return /3\.8|2\.5/.test(model || ''); }
+const SANS_VISAGE = /^Ton visage : appelle exprimer_emotion[^\n]*\n/m;
+
+export function buildSetup({ model, voice, system, level, handle, think, interrupts = false, proactive, extra = [] }) {
+  const async = asyncTools(model);
+  if (!async) system = system.replace(SANS_VISAGE, '');
   const setup = {
     model: `models/${model}`,
     generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
@@ -59,7 +69,8 @@ function buildSetup({ model, voice, system, level, handle, think, interrupts = f
     sessionResumption: handle ? { handle } : {},
   };
   if (level <= 1) {
-    setup.tools = [{ functionDeclarations: [...TOOLS[0].functionDeclarations, ...extra].map(({ behavior, ...f }) => (level === 0 ? { behavior, ...f } : f)) }];
+    const decl = [...TOOLS[0].functionDeclarations, ...extra].filter((f) => async || f.name !== 'exprimer_emotion');
+    setup.tools = [{ functionDeclarations: decl.map(({ behavior, ...f }) => (level === 0 && async && behavior ? { behavior, ...f } : f)) }];
     setup.realtimeInputConfig = { automaticActivityDetection: { prefixPaddingMs: 200, silenceDurationMs: 700 } };
   }
   // Gemini 2.5 « native audio » réfléchit par défaut avant de parler : plusieurs secondes de silence. On coupe la réflexion.
@@ -215,6 +226,8 @@ export class Brain {
   }
   // Les réponses « silencieuses » aux outils n'existent qu'avec la configuration complète du modèle 3.8.
   get canSchedule() { return this.level === 0 && /3\.8/.test(this.modelUsed || ''); }
+  // Modèle aux outils synchrones (3.1 Flash Live) : chaque outil est suivi d'une reprise de parole.
+  get syncTools() { return !asyncTools(this.modelUsed); }
 
   _open(url, { model, voice, system, resume = true, level = 0, think, interrupts, proactive, extra }) {
     countSession();
