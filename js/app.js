@@ -19,7 +19,7 @@ import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES, HA_MUET } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS } from './analyste.js';
 
-const VERSION = '1.26.0';
+const VERSION = '1.26.1';
 const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
 const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
 const SEG_VU_MIN = 8;             // R1 : une phrase « dite en le regardant » = au moins 8 blocs de 20 ms de voix avec le regard confirmé
@@ -2005,6 +2005,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     s.on('tap', () => {
       if (!this.started) { this.boot(); return; }
       this.voice.warm();
+      if (this.audio.holdErr && this._voitureBt) this._holdTry = 0;            // lecteur refusé faute de geste : un toucher le relance
       if (!this.audio.running) { this.audio.resume(); this._hideWake(); return; }
       if (this.speaking) { this.interrupt('toucher'); return; }
       if (this.state === 'veille' || this.state === 'dodo') { this.face.setEmotion('surprise', 900); this.startConversation('toucher'); return; }
@@ -2117,6 +2118,14 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         this.log(`Voiture : téléphone relié en Bluetooth — je réponds sans qu'on me regarde ; réveil en disant « Wilson »${this.oreille.ready ? ` (oreille prête, limite ${this.oreille.limite.toFixed(1)})` : ' (oreille pas apprise : toucher l\'écran)'}`);
         this.badge(this.oreille.ready ? 'En voiture : dis « Wilson » pour me parler' : 'En voiture : touche l\'écran pour me parler (apprends-moi ton nom : Réglages → CRM et prénom)', 6000);
       } else this.log('Voiture : plus de Bluetooth — de nouveau, je réponds quand on me regarde');
+    }
+    // Lecteur multimédia (04/11/26) : en voiture, pendant une discussion (et 8 s après), pour qu'Android Auto joue sa voix.
+    const veutLecteur = vb && (this.state === 'eveil' || this.state === 'conversation' || this.audio.playing);
+    if (veutLecteur) this._holdUntil = now + 8000;
+    const garde = vb && now < (this._holdUntil || 0);
+    if (garde !== !!this._holdOn || (garde && !this.audio.holding && now - (this._holdTry || 0) > 5000)) {
+      this._holdOn = garde; this._holdTry = now;
+      this.audio.mediaHold(garde, (a) => { this.log(`Bouton ${a} (volant ou écran de la voiture) : je me tais`); if (this.state === 'conversation') this.endConversation('volant'); });
     }
     // Veille → dodo quand la pièce est vide (ou la nuit).
     if (v && v.hasPerson) this.presenceAt = now;

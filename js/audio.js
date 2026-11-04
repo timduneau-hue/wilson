@@ -154,6 +154,56 @@ export class AudioIO {
     });
   }
   // Deux notes : « perdu » (descendantes, réseau coupé) ou « revenu » (montantes). Marche sans Internet.
+  // ---------- Lecteur multimédia pour la voiture (journal du 03/11/26, 09h25, téléphone en Android Auto : « Et ben non,
+  // tu m'entends pas », alors que le micro du téléphone était bien pris) ----------
+  // Le son fabriqué par la page (Web Audio) ne demande pas la main sur la musique à Android : Android Auto n'ouvre pas son
+  // canal, et comme tout le son du téléphone part vers la voiture, rien ne sort nulle part. Un vrai lecteur (balise audio,
+  // comme une musique) demande cette main : pendant une discussion en voiture, il joue en boucle un son inaudible ; la
+  // voiture ouvre son canal « musique » (la radio ou la musique se coupe) et la voix de Wilson y passe. Arrêté → la
+  // musique reprend. Les boutons du volant (pause, stop) coupent Wilson.
+  static silenceWav(sec = 10, rate = 16000) {
+    const n = sec * rate, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const w = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+    let x = 12345;                                    // souffle à ±2 (sur 32 768) : inaudible, mais ce n'est pas du « rien »
+    for (let i = 0; i < n; i++) { x = (x * 1103515245 + 12345) & 0x7fffffff; v.setInt16(44 + i * 2, (x % 5) - 2, true); }
+    return new Blob([buf], { type: 'audio/wav' });
+  }
+  async mediaHold(on, onStop) {
+    if (!on) {
+      if (this._hold && !this._hold.paused) { this._hold.pause(); this._emit('info', 'lecteur multimédia arrêté (la musique de la voiture peut reprendre)'); }
+      try { if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; } catch (_) {}
+      return;
+    }
+    try {
+      if (!this._hold) {
+        const el = this._hold = document.createElement('audio');
+        el.id = 'media-hold'; el.loop = true; el.preload = 'auto'; el.setAttribute('playsinline', '');
+        el.src = URL.createObjectURL(AudioIO.silenceWav());
+        el.style.display = 'none'; document.body.appendChild(el);
+      }
+      if (navigator.mediaSession) {
+        try {
+          if (window.MediaMetadata) navigator.mediaSession.metadata = new MediaMetadata({ title: 'Wilson', artist: 'Je t\'écoute', album: 'Wilson' });
+          for (const a of ['pause', 'stop']) navigator.mediaSession.setActionHandler(a, () => { if (onStop) onStop(a); });
+          navigator.mediaSession.playbackState = 'playing';
+        } catch (_) {}
+      }
+      if (this.ctx && this.ctx.state !== 'running') { try { await this.ctx.resume(); } catch (_) {} }
+      if (this._hold.paused) {
+        await this._hold.play();
+        this._emit('info', `lecteur multimédia en route (pour qu'Android Auto ouvre le son), sortie ${this.ctx && this.ctx.outputLatency ? Math.round(this.ctx.outputLatency * 1000) + ' ms' : '?'}`);
+      }
+      this.holdErr = '';
+    } catch (e) {
+      this.holdErr = e.message || String(e);
+      this._emit('info', `lecteur multimédia impossible (${this.holdErr}) : touche l'écran une fois`);
+    }
+  }
+  get holding() { return !!(this._hold && !this._hold.paused); }
+
   tone(kind) {
     if (!this.ctx) return;
     const t0 = this.ctx.currentTime + 0.03, f = kind === 'ecoute' ? [880] : kind === 'revenu' ? [523.25, 783.99] : [659.25, 440];
@@ -168,7 +218,7 @@ export class AudioIO {
   describe() {
     const c = this.ctx; if (!c) return 'pas démarré';
     const lat = Math.round(((c.baseLatency || 0) + (c.outputLatency || 0)) * 1000);
-    return `${c.state}, ${c.sampleRate} Hz, latence de sortie ${lat} ms, annulation d'écho ${this.aec ? 'oui (Android : son en mode appel)' : 'non (haut-parleur normal)'}, voix du direct jouée : ${Math.round(this.playedSec)} s${this.micInfo ? ', ' + this.micInfo : ''}${this.takenN ? `, micro pris par le téléphone ${this.takenN} fois${this.micTaken ? ' (EN CE MOMENT)' : ''}` : ''}`;
+    return `${c.state}, ${c.sampleRate} Hz, latence de sortie ${lat} ms, annulation d'écho ${this.aec ? 'oui (Android : son en mode appel)' : 'non (haut-parleur normal)'}, voix du direct jouée : ${Math.round(this.playedSec)} s${this.micInfo ? ', ' + this.micInfo : ''}${this.holding ? ', lecteur multimédia en route' : this.holdErr ? ', lecteur multimédia refusé (' + this.holdErr.slice(0, 60) + ')' : ''}${this.takenN ? `, micro pris par le téléphone ${this.takenN} fois${this.micTaken ? ' (EN CE MOMENT)' : ''}` : ''}`;
   }
 
   get running() { return this.ctx && this.ctx.state === 'running'; }

@@ -526,9 +526,23 @@ de 3 s, discussion fermée après 45 s sans qu'il parle ni qu'on l'appelle (radi
 bouton, caméra toujours allumée, rien ne démarre en roulant). Oreille du téléphone apprise le 27/10/26 (limite 146,7).
 Test `e2e_bluetooth.py` (18 vérifications, dont tablette avec Bluetooth : R1 entière).
 
+Demande de Timothée du 04/11/26, 08h42 (**1.26.1**) : « je le vois parler mais je n'entends rien, peu importe la source
+utilisée depuis la voiture ». Journal du 03/11/26, 09h24-09h26 (téléphone, 1.26.0) : micro « Speakerphone » (micro
+Bluetooth présent, évité) — la 1.25.3 a bien pris le micro du téléphone — et pourtant « Tu m'entends Wilson ? » → réponse
+jouée (3,7 s), puis « Et ben non, tu m'entends pas. » : la cause n'était pas (seulement) le micro. Cause retenue : le son
+Web Audio ne demande pas la main sur l'audio d'Android (« audio focus ») ; Android Auto n'ouvre son canal « musique » que
+pour une appli qui la demande (un lecteur), et comme tout le son du téléphone part vers la voiture, rien ne sort. Corrigé
+dans `audio.js` (`mediaHold`) : en voiture (`_voitureBt`), pendant une discussion et 8 s après, une balise audio joue en
+boucle un son inaudible (souffle à ±2/32 768, 10 s) avec Media Session « Wilson » : Chrome demande la main comme pour une
+musique, la voiture ouvre son canal et la voix y passe ; la radio se coupe pendant la discussion et reprend après. Boutons
+pause / stop du volant → fin de discussion. Si Chrome refuse la lecture (faute de geste), le journal le dit et un toucher
+la relance. Journal : « lecteur multimédia en route… » / « arrêté » ; onglet État, ligne « Son ». Test `e2e_bluetooth.py`
+(23 vérifications). À vérifier au prochain trajet. Si toujours muet, plan C : faire passer la voix elle-même par la balise
+audio (flux de la page vers la balise), au lieu du son Web Audio.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 03/11/26 : **version 1.26.0** en ligne (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 04/11/26 : **version 1.26.1** en ligne (en voiture, lecteur multimédia pour qu'Android Auto joue la voix) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
