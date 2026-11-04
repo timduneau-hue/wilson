@@ -9,6 +9,8 @@ un visage animé qui voit quand on le regarde, écoute, répond et se souvient.
 - **Le couper** : toucher l'écran.
 - **En voiture** (téléphone) : bouton voiture en haut à gauche, ou tout seul en roulant ; Wilson se réveille quand on dit « Wilson ».
 - **CRM** (facultatif) : questions sur les clients, appels, tâches et brouillons, par le script du propriétaire (voir PLAN.md, 2 quater).
+- **La famille** : « Wilson, apprends mon visage, je suis Louis » (ou Réglages → Famille et garde) ; « dis à Louis que… » :
+  Wilson le lui dit quand il le regarde. « On part, surveille la maison » : garde (sons, visage inconnu → e-mail). Voir PLAN.md, 7 sexies.
 
 Fonctionnement et règles : voir [PLAN.md](PLAN.md).
 
@@ -24,6 +26,11 @@ Fonctionnement et règles : voir [PLAN.md](PLAN.md).
   propre jeton (le CRM reste en accès « Moi uniquement »). Les fiches utiles sont gardées sur l'appareil pour la journée.
   Rien n'est écrit dans le CRM sans confirmation ; les comptes rendus, rendez-vous et notes y arrivent en brouillon.
 - Mode voiture : l'oreille qui reconnaît « Wilson » tourne sur le téléphone ; ses empreintes de voix restent dessus.
+- Visages (7 sexies) : reconnus sur la tablette ; leurs « empreintes » (128 nombres, aucune photo) restent dans son stockage,
+  jamais synchronisées ni envoyées. Seuls les prénoms appris partent au script du propriétaire (pour que le téléphone les connaisse).
+- Messages de la famille et garde : rangés par le script du propriétaire (propriétés du script). Les sons de la garde sont
+  reconnus sur la tablette, seulement pendant la garde ; une alerte part par e-mail au propriétaire (photo de la pièce jointe
+  si le réglage est coché).
 - Journal à distance (facultatif) : si l'adresse d'un script Apps Script est indiquée, le journal, les délais et l'état
   de la tablette partent dans une feuille Google du propriétaire (les phrases échangées peuvent être exclues dans les réglages).
 
@@ -32,3 +39,7 @@ Fonctionnement et règles : voir [PLAN.md](PLAN.md).
 - [MediaPipe Face Detection](https://www.npmjs.com/package/@mediapipe/face_detection) (modèle longue portée) — Apache-2.0 (`vendor/face_detection/`)
 - Modèle MediaPipe Face Landmarker (`face_landmarker.task`) — Apache-2.0 (`vendor/models/`)
 - [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) 1.4.4 (Kazuhiko Arase) — MIT (`vendor/qrcode/`) : QR code de copie des réglages
+- [face-api](https://github.com/vladmandic/face-api) 1.7.15 (Vladimir Mandic, d'après face-api.js de Vincent Mühler), avec TensorFlow.js — MIT
+  (`vendor/face-api/`) : réseau de reconnaissance des visages (d'après dlib, Davis King)
+- [MediaPipe Tasks Audio](https://github.com/google-ai-edge/mediapipe) 1.2.2 — Apache-2.0 (`vendor/audio/`)
+- Modèle YAMNet avec métadonnées (`vendor/models/yamnet.tflite`, dépôt tensorflow/tflite-support) — Apache-2.0 : sons de la garde

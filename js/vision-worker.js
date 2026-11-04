@@ -126,7 +126,7 @@ function pageShim() {
     addEventListener: noop, removeEventListener: noop, querySelector: () => null, getElementById: () => null, createEvent: () => ({ initEvent: noop }), title: '' };
 }
 
-async function analyse(bmp, maxFaces) {
+async function analyse(bmp, maxFaces, wantId = false) {
   const t0 = performance.now(), W = bmp.width, H = bmp.height;
   // Lumière de la pièce + mouvement.
   sg.drawImage(bmp, 0, 0, 64, 48);
@@ -136,7 +136,7 @@ async function analyse(bmp, maxFaces) {
   let mx = 0, my = 0, mn = 0;
   if (prev) for (let j = 0; j < gray.length; j++) if (Math.abs(gray[j] - prev[j]) > 0.09) { mn++; mx += j % 64; my += (j / 64) | 0; }
   prev = gray;
-  const out = { type: 'result', light: sum / gray.length, mn, mx: mn ? mx / mn / 64 : 0, my: mn ? my / mn / 48 : 0, boxes: null, faces: [] };
+  const out = { type: 'result', light: sum / gray.length, mn, mx: mn ? mx / mn / 64 : 0, my: mn ? my / mn / 48 : 0, boxes: null, faces: [], transfer: [] };
 
   if (fd) {
     // Le détecteur travaille en 192 × 192 : une image réduite suffit (envoi plus léger au moteur).
@@ -165,7 +165,10 @@ async function analyse(bmp, maxFaces) {
         if (!r || !r.facialTransformationMatrixes || !r.facialTransformationMatrixes.length) { out.faces.push(null); continue; }
         const bs = {};
         if (r.faceBlendshapes && r.faceBlendshapes[0]) for (const c of r.faceBlendshapes[0].categories) if (BS.includes(c.categoryName)) bs[c.categoryName] = c.score;
-        out.faces.push({ m: Array.from(r.facialTransformationMatrixes[0].data), bs, size: b.w });
+        const m = Array.from(r.facialTransformationMatrixes[0].data), F = { m, bs, size: b.w };
+        // Qui me regarde (PLAN 7 sexies, V) : visage redressé 150 × 150 pour la reconnaissance, seulement quand on le demande.
+        if (wantId && r.faceLandmarks && r.faceLandmarks[0]) { const id = alignFace(bmp, r.faceLandmarks[0], b.cx * W - s / 2, b.cy * H - s / 2, s, m); if (id) { F.id = id; out.transfer.push(id.bmp); } }
+        out.faces.push(F);
       }
     }
     out.lmMs = performance.now() - tl;
@@ -174,6 +177,26 @@ async function analyse(bmp, maxFaces) {
   bmp.close();
   out.ms = performance.now() - t0;
   return out;
+}
+
+// Visage redressé pour la reconnaissance, comme les « puces » de dlib sur lesquelles le réseau a appris (150 × 150, marge
+// 0,25) : yeux à l'horizontale, milieu des yeux à (0,493 ; 0,311), écart des yeux 0,352 et yeux-bouche 0,389 de la largeur
+// (visage moyen de dlib). Repères MediaPipe : coins des yeux 33/133 et 362/263, lèvres 13/14 et 61/291.
+const ali = new OffscreenCanvas(150, 150), ag = ali.getContext('2d');
+function alignFace(bmp, L, x0, y0, s, m) {
+  const P = (i) => ({ x: x0 + L[i].x * s, y: y0 + L[i].y * s });
+  const mid = (...ix) => { const ps = ix.map(P); return { x: ps.reduce((a, p) => a + p.x, 0) / ps.length, y: ps.reduce((a, p) => a + p.y, 0) / ps.length }; };
+  const eR = mid(33, 133), eL = mid(362, 263), mo = mid(13, 14, 61, 291);
+  const eye = Math.hypot(eL.x - eR.x, eL.y - eR.y); if (eye < 8) return null;
+  const th = Math.atan2(eL.y - eR.y, eL.x - eR.x), mx = (eR.x + eL.x) / 2, my = (eR.y + eL.y) / 2;
+  const v = Math.abs(-Math.sin(th) * (mo.x - mx) + Math.cos(th) * (mo.y - my));          // yeux → bouche, perpendiculaire aux yeux
+  const size = Math.max(eye / 0.352, v / 0.389), k = 150 / size;                          // la plus grande : une tête tournée ou penchée raccourcit l'autre
+  ag.setTransform(1, 0, 0, 1, 0, 0); ag.fillStyle = '#000'; ag.fillRect(0, 0, 150, 150);
+  ag.translate(0.493 * 150, 0.311 * 150); ag.scale(k, k); ag.rotate(-th); ag.translate(-mx, -my);
+  ag.drawImage(bmp, 0, 0);
+  ag.setTransform(1, 0, 0, 1, 0, 0);
+  const deg = 180 / Math.PI;
+  return { bmp: ali.transferToImageBitmap(), eye: Math.round(eye), yaw: Math.round(Math.atan2(-m[2], Math.hypot(m[6], m[10])) * deg), pitch: Math.round(Math.atan2(m[6], m[10]) * deg) };
 }
 
 const ready = init();
@@ -185,7 +208,7 @@ onmessage = (e) => {
   if (health.debug.stall) { try { d.bmp.close(); } catch (_) {} return; }   // test : analyse bloquée
   // Une image à la fois, dans l'ordre ; pendant le chargement des modèles, seulement lumière et mouvement.
   busy = busy.then(async () => {
-    try { postMessage(await analyse(d.bmp, d.maxFaces || 2)); }
+    try { const out = await analyse(d.bmp, d.maxFaces || 2, !!d.id); const tr = out.transfer; delete out.transfer; postMessage(out, tr); }
     catch (err) {
       try { d.bmp.close(); } catch (_) {}
       // Détecteur de visages sur la carte graphique en panne : retour au processeur.

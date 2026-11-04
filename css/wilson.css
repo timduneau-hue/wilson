@@ -68,6 +68,7 @@ textarea.field { resize: vertical; }
 .memlist li { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .memlist li button { flex: none; background: none; border: none; color: var(--ink-3); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
 .memlist .empty { color: var(--ink-3); }
+.memlist li button.btn.small { font-size: 13px; color: var(--ink-2, inherit); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; }
 .log { max-height: 200px; overflow: auto; font: 12px/1.4 ui-monospace, monospace; color: var(--ink-3); white-space: pre-wrap; margin: 0; }
 .eartest { margin-top: 10px; font-size: 14px; color: var(--ink-2); }
 .eartest b { color: var(--ink); font-weight: 600; }

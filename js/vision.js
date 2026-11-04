@@ -100,7 +100,11 @@ export class Vision {
     this._busy = true; this._sentAt = now;
     const maxFaces = this.fps >= 8 && this.stats.n % 2 === 0 ? 2 : 1;   // 2e visage une fois sur deux
     createImageBitmap(this.video)
-      .then((bmp) => { if (this.worker) this.worker.postMessage({ type: 'frame', bmp, maxFaces }, [bmp]); else bmp.close(); })
+      .then((bmp) => {
+        // Qui me regarde (PLAN 7 sexies, V4) : un visage redressé est demandé seulement quand la reconnaissance est prête à le traiter.
+        const id = !!this.idWanted && performance.now() >= (this.idAfter || 0); if (id) this.idWanted = false;
+        if (this.worker) this.worker.postMessage({ type: 'frame', bmp, maxFaces, id }, [bmp]); else bmp.close();
+      })
       .catch(() => { this._busy = false; });
   }
 
@@ -139,11 +143,17 @@ export class Vision {
       if (d.boxes.length) {
         const b = d.boxes[0]; this.faceAt = now;
         found = [b.cx, b.cy - b.h * 0.1, b.w];
+        let idK = -1;
         d.faces.forEach((f, k) => {
           const g = f ? gazeFrom(f.m, f.bs, f.size, this.calib) : null;
           if (k === 0) this.gaze = g;
-          if (g && g.facing) facing = true;
+          if (g && g.facing) { facing = true; if (f.id && (idK < 0 || !(d.faces[idK] && d.faces[idK].facing))) idK = k; }
+          if (f) f.facing = !!(g && g.facing);
+          if (f && f.id && idK < 0) idK = k;
         });
+        // Visage redressé pour la reconnaissance : celui qui regarde Wilson, sinon le plus proche. Les autres sont libérés.
+        d.faces.forEach((f, k) => { if (f && f.id && k !== idK) { try { f.id.bmp.close(); } catch (_) {} } });
+        if (idK >= 0) { const f = d.faces[idK]; if (this.onFaceId) this.onFaceId({ ...f.id, facing: f.facing, faces: d.boxes.length, size: f.size }); else try { f.id.bmp.close(); } catch (_) {} }
       } else this.gaze = null;
     } else if (d.mn > 25) found = [d.mx, d.my, 0.2];
     if (this.forceLook) { facing = true; this.faceAt = now; }

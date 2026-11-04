@@ -143,6 +143,7 @@
         <label class="row check"><input id="s-crm" type="checkbox"><span>Relier Wilson à mon CRM : questions sur les clients, appels, tâches et brouillons (rien n'est écrit sans ton accord)</span></label>
         <p id="s-crmstatus" class="status" hidden></p>
         <div class="buttons wrap"><button id="t-crm" class="btn">Vérifier le CRM</button></div>
+        <label class="row"><span>Objectif de clients actifs par mois</span><input id="s-objectif" class="field small" type="number" min="0" max="999" inputmode="numeric" placeholder="Ex. : 60"></label>
         <label class="row check" style="margin-top:14px"><input id="s-prenommaison" type="checkbox"><span>À la maison, me réveiller aussi quand on dit « Wilson » sans me regarder (sinon : seulement quand on me regarde)</span></label>
         <p class="fine" style="margin:0 0 10px">Si la case ci-dessus est cochée, Wilson se réveille aussi quand tu l'appelles du canapé. Apprends-lui ton appel une fois : Wilson te demande 8 fois de dire « Wilson » en changeant de place à chaque fois, puis 15 s sans son nom.</p>
         <div class="buttons wrap"><button id="t-ear" class="btn">Apprendre mon nom</button><button id="t-eartest" class="btn">Tester l'oreille</button></div>
@@ -153,6 +154,19 @@
             <option value="normal">Normale</option>
             <option value="sensible">Sensible : pour une voiture bruyante</option>
           </select></label>
+      </section>
+
+      <section class="group">
+        <h3>Famille et garde</h3>
+        <p class="fine" style="margin:0 0 10px">Wilson reconnaît les visages qu'on lui apprend (sur cette tablette seulement : rien n'est envoyé ni copié ailleurs), remet les messages de la famille à la bonne personne quand elle le regarde, et garde la maison quand elle est vide.</p>
+        <ul id="vis-list" class="memlist"></ul>
+        <label class="row"><span>Prénom</span><input id="vis-nom" class="field" type="text" autocomplete="off" placeholder="Ex. : Louis"></label>
+        <div class="buttons wrap"><button id="t-vis" class="btn primary">Apprendre ce visage</button></div>
+        <p id="s-visstatus" class="status" hidden></p>
+        <label class="row check" style="margin-top:14px"><input id="s-gardeauto" type="checkbox"><span>Garder la maison tout seul quand personne n'est passé depuis 45 min (hors nuit) : fumée, verre brisé, alarme → e-mail ; sonnette, chien → raconté au retour</span></label>
+        <label class="row check"><input id="s-gardephoto" type="checkbox"><span>Joindre une photo de la pièce aux alertes (envoyée seulement à ton adresse e-mail)</span></label>
+        <div class="buttons wrap"><button id="t-alerte" class="btn">Envoyer une alerte d'essai</button></div>
+        <p id="s-gardestatus" class="status" hidden></p>
       </section>
 
       <section class="group">
