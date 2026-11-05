@@ -253,7 +253,7 @@ export class Crm {
     const e = { cle: r.cle, societe: r.societe, contact: r.contact, ville: r.ville || '', adresse: r.adresse || '', contacts: r.contacts || [], texte: r.texte, rdv: r.rdv || '', at: Date.now(),
       noms: [r.contact, ...(r.contacts || []).map((c) => c.nom)].filter(Boolean) };
     this.cache.delete(r.cle); this.cache.set(r.cle, e); this._save();
-    this.last = e;
+    this.last = e; this.lastAt = Date.now();
     return e;
   }
   // Fiche gardée qui correspond clairement à ce qui a été dit (sinon null : on demande au CRM).
@@ -267,11 +267,11 @@ export class Crm {
   _isLast(q) { return !q || /^(lui|elle|ce client|cette societe|le meme|la meme|il|eux)$/i.test(plat(q).trim()); }
 
   async client({ client = '', cle = '' } = {}, signal) {
-    if (!cle && this._isLast(client) && this.last) return { ok: true, e: this.last, cached: true };
+    if (!cle && this._isLast(client) && this.last) { this.lastAt = Date.now(); return { ok: true, e: this.last, cached: true }; }
     const net = cle ? client : nomNet(client);
     if (net !== String(client || '').replace(/\s+/g, ' ').trim()) this.log(`nom cherché : « ${net} » (dit : « ${client} »)`);
     const hit = cle ? this.cache.get(cle) : this._fromCache(net);
-    if (hit && Date.now() - hit.at < CACHE_MS) { this.last = hit; this.log(`fiche gardée : ${hit.societe}`); return { ok: true, e: hit, cached: true }; }
+    if (hit && Date.now() - hit.at < CACHE_MS) { this.last = hit; this.lastAt = Date.now(); this.log(`fiche gardée : ${hit.societe}`); return { ok: true, e: hit, cached: true }; }
     let r;
     try { r = await this.ask(cle ? { action: 'crm_client', cle } : { action: 'crm_client', client: net }, signal); }
     catch (e) {
@@ -281,7 +281,16 @@ export class Crm {
     }
     if (!r.ok) return r;
     if (!r.cle) {                                                                      // inconnu ou plusieurs possibles
-      if (r.texte || (r.choix && r.choix.length)) this.dernierChoix = { at: Date.now(), dit: client, texte: `${r.texte || ''} ${JSON.stringify(r.choix || [])}` };
+      const liste = `${r.texte || ''} ${JSON.stringify(r.choix || [])}`;
+      if (r.texte || (r.choix && r.choix.length)) this.dernierChoix = { at: Date.now(), dit: client, texte: liste };
+      // Protocole voiture (journal du 05/11/26, 16h04 : « Gallet » → ART DU BOIS 72 ou GALLAIS SARL, alors qu'on parlait de
+      // GALLAIS) : parmi les clients possibles, celui dont on parle depuis moins de 30 min est pris, et Wilson le fait confirmer.
+      const L = this.last;
+      if (L && this.lastAt && Date.now() - this.lastAt < 30 * 60000 && dansTexte(liste, L.societe)) {
+        this.log(`plusieurs clients possibles pour « ${net} » : je prends ${L.societe}, celui dont on parlait (à faire confirmer)`);
+        this.lastAt = Date.now();
+        return { ok: true, e: L, cached: true, approx: true, parmi: r.texte || '' };
+      }
       return { ok: true, texte: r.texte, choix: r.choix || [] };
     }
     const e = this._keep(r);
@@ -481,7 +490,7 @@ export class Crm {
     const D = this.dernierChoix, douteux = !!(D && Date.now() - D.at < 5 * 60000 && dansTexte(D.texte, e.societe));
     const target = { societe: e.societe, cle: e.cle, contact: e.contact, adresse: e.adresse, douteux,
       maps: `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`, waze: `https://waze.com/ul?q=${q}&navigate=yes` };
-    return { ok: true, target, dire: `Le bouton pour aller chez ${e.societe} (${e.adresse}) est affiché : dis-lui d'appuyer dessus pour lancer le GPS.` };
+    return { ok: true, target, dire: `Le bouton pour aller chez ${e.societe} (${e.adresse}) est affiché : dis-lui en une phrase d'appuyer sur « Y aller » ; le guidage s'ouvre sur le téléphone et sur l'écran de la voiture, et pour te reparler il reviendra sur Wilson.` };
   }
 
   // ---- appeler (C4) ----

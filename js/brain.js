@@ -58,7 +58,8 @@ const QUOTA_SKIP_MS = 6 * 3600000;    // un modèle refusé pour quota est essay
 export function asyncTools(model) { return /3\.8|2\.5/.test(model || ''); }
 const SANS_VISAGE = /^Ton visage : appelle exprimer_emotion[^\n]*\n/m;
 
-export function buildSetup({ model, voice, system, level, handle, think, interrupts = false, proactive, extra = [] }) {
+// garder : en voiture (protocole, PLAN 2 quinquies), seulement les outils utiles en conduisant ; moins d'outils, mieux appelés.
+export function buildSetup({ model, voice, system, level, handle, think, interrupts = false, proactive, extra = [], garder = null }) {
   const async = asyncTools(model);
   if (!async) system = system.replace(SANS_VISAGE, '');
   const setup = {
@@ -69,7 +70,7 @@ export function buildSetup({ model, voice, system, level, handle, think, interru
     sessionResumption: handle ? { handle } : {},
   };
   if (level <= 1) {
-    const decl = [...TOOLS[0].functionDeclarations, ...extra].filter((f) => async || f.name !== 'exprimer_emotion');
+    const decl = [...TOOLS[0].functionDeclarations, ...extra].filter((f) => (async || f.name !== 'exprimer_emotion') && (!garder || garder.includes(f.name)));
     setup.tools = [{ functionDeclarations: decl.map(({ behavior, ...f }) => (level === 0 && async && behavior ? { behavior, ...f } : f)) }];
     setup.realtimeInputConfig = { automaticActivityDetection: { prefixPaddingMs: 200, silenceDurationMs: 700 } };
   }
@@ -229,7 +230,7 @@ export class Brain {
   // Modèle aux outils synchrones (3.1 Flash Live) : chaque outil est suivi d'une reprise de parole.
   get syncTools() { return !asyncTools(this.modelUsed); }
 
-  _open(url, { model, voice, system, resume = true, level = 0, think, interrupts, proactive, extra }) {
+  _open(url, { model, voice, system, resume = true, level = 0, think, interrupts, proactive, extra, garder }) {
     countSession();
     return new Promise((resolve, reject) => {
       this._closing = false; this.ready = false;
@@ -238,7 +239,7 @@ export class Brain {
       this.ws = ws;
       const timer = setTimeout(() => { reject(new Error('Délai de connexion dépassé (Google ne répond pas)')); try { ws.close(); } catch (_) {} }, 15000);
       ws.onopen = () => {
-        const setup = buildSetup({ model, voice, system, level, think, interrupts, proactive, extra, handle: resume ? this.handle : null });
+        const setup = buildSetup({ model, voice, system, level, think, interrupts, proactive, extra, garder, handle: resume ? this.handle : null });
         ws.send(JSON.stringify({ setup }));
       };
       ws.onmessage = async (e) => {

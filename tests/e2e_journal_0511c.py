@@ -170,15 +170,15 @@ async def main():
         c = await toucher()
         check('Toucher l\'écran : il se réveille et dit seulement « Oui ? »', any("vient de toucher l'écran" in t and 'Oui ?' in t for t in c['texts']), str(c['texts'])[:300])
         sp = sysp(c)
-        check('Consigne : en voiture il se réveille au toucher, ne jamais lui demander de dire « Wilson »', "il te réveille en touchant l'écran" in sp and 'ne lui demande jamais de dire « Wilson »' in sp)
-        check('Consigne : ce qu\'il dit de l\'écran doit être vrai (bouton seulement par l\'outil, rappeler l\'outil si le client change)', "Ce que tu dis de l'écran doit être vrai" in sp)
+        check('Consigne : en voiture il se réveille au toucher, ne jamais lui demander de dire « Wilson »', "Il te réveille en touchant l'écran" in sp and 'Ne lui demande jamais de dire « Wilson »' in sp)
+        check('Consigne : un bouton ne s\'affiche que par l\'outil, rappeler l\'outil si le client change (protocole 1.30.0)', "ne dis jamais « j'affiche » sans les appeler" in sp and 'si le client change, rappelle l\'outil' in sp)
         await finir('silence : personne ne lui parle')
         # à la maison (téléphone sans voiture), l'oreille revient si la case est cochée
-        await page.evaluate("wilson.audio.btIn = false; window.__feeds = 0")
+        await page.evaluate("wilson._voitureGraceMs = 0; wilson.audio.btIn = false; window.__feeds = 0")
         await page.wait_for_timeout(1500)
         n2 = await page.evaluate("[wilson._voitureBt, wilson._oreilleMaison, window.__feeds]")
         check('Sans la voiture (case « prenomMaison » cochée), l\'oreille écoute de nouveau', n2[0] is False and n2[1] is True and n2[2] > 0, str(n2))
-        await page.evaluate("wilson.audio.btIn = true")
+        await page.evaluate("wilson.audio.btIn = true; wilson._voitureGraceMs = null")
         await page.wait_for_timeout(500)
 
         # ---------- 2. Le bouton d'itinéraire suit le bon client ----------
