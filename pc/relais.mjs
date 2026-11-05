@@ -1,0 +1,190 @@
+// Wilson — relais Claude du PC de la maison (PLAN.md, section 10).
+// Attend les questions difficiles de Wilson dans la file du script « Wilson journal », les passe à Claude Code (claude -p,
+// abonnement de Timothée, aucune clé API) et rend la réponse. Claude n'a que la recherche Internet, la lecture de pages et
+// le CRM en lecture seule (crm-mcp.mjs) : aucune commande, aucun fichier, aucune écriture.
+// Lancé tout seul à l'ouverture de session (boucle.cmd, fenêtre cachée) ; Node 18 ou plus, sans bibliothèque.
+
+import { spawn, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export const VERSION = 'relais 1';
+const DIR = path.dirname(fileURLToPath(import.meta.url));
+const MAX_EN_COURS = 2;                 // deux questions en même temps au plus
+const CLAUDE_MAX_MS = 4 * 60000;        // au-delà, Claude est arrêté (Wilson a dit qu'il attendait 4 min au plus)
+const MAX_TOURS = 30;
+const OUTILS = 'WebSearch,WebFetch';
+export const MARQUE_DIRE = /^\s*(?:\*\*)?À DIRE\s*:?(?:\*\*)?\s*:?\s*$/im;
+export const MARQUE_DETAIL = /^\s*(?:\*\*)?DÉTAIL\s*:?(?:\*\*)?\s*:?\s*$/im;
+
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const heure = (d = new Date()) => `${String(d.getHours()).padStart(2, '0')}h${String(d.getMinutes()).padStart(2, '0')}`;
+const jour = (d = new Date()) => `${['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'][d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`;
+
+// ---------- Ce que Claude rend : « À DIRE » (oral) et « DÉTAIL » (références, sources) ----------
+export function decouper(texte) {
+  const t = String(texte || '').replace(/\r/g, '').trim();
+  const i = t.search(MARQUE_DIRE), j = t.search(MARQUE_DETAIL);
+  let dire = t, detail = '';
+  if (i >= 0 || j >= 0) {
+    const finDire = j > i ? j : t.length;
+    dire = i >= 0 ? t.slice(i, finDire).replace(MARQUE_DIRE, '') : t.slice(0, j);
+    detail = j >= 0 ? t.slice(j).replace(MARQUE_DETAIL, '') : '';
+  }
+  dire = dire.replace(/https?:\/\/\S+/g, '').replace(/[*_#`>]+/g, '').replace(/^\s*[-•]\s+/gm, '').replace(/\s+/g, ' ').trim();
+  return { dire: dire.slice(0, 3000), detail: detail.trim().slice(0, 12000) };
+}
+
+// ---------- La demande faite à Claude ----------
+export function demande(q, maintenant = new Date()) {
+  return [
+    `Date et heure : ${jour(maintenant)} ${heure(maintenant)} (heure de Paris).`,
+    `Type de question : ${q.type === 'crm' ? 'CRM (ses données de commercial)' : 'recherche (Internet, produits, technique)'}.`,
+    `Timothée est en voiture : ${q.voiture ? 'oui (réponse très courte, il conduit)' : 'non'}.`,
+    `Question de Timothée, dictée à Wilson : « ${q.question} »`,
+    q.contexte ? `\nContexte donné par Wilson :\n${q.contexte}` : '',
+    q.regles ? `\nRègles du CRM (à suivre pour toute question sur ses données) :\n${q.regles}` : '',
+    '\nRéponds dans le format demandé : « À DIRE : » puis « DÉTAIL : ».',
+  ].filter(Boolean).join('\n');
+}
+
+// consigne : le texte de consigne.md (passé tel quel : --system-prompt remplace la consigne de développeur de Claude Code).
+export function argumentsClaude({ mcp, consigne, modele = 'sonnet' }) {
+  return ['-p', '--output-format', 'json', '--model', modele, '--max-turns', String(MAX_TOURS),
+    '--tools', OUTILS, '--allowedTools', `${OUTILS},mcp__crm`, '--permission-mode', 'dontAsk',
+    '--mcp-config', mcp, '--strict-mcp-config', '--system-prompt', consigne, '--no-session-persistence'];
+}
+
+// ---------- Le relais ----------
+export class Relais {
+  constructor({ dir = DIR, config, fetchImpl = globalThis.fetch, lancer, log } = {}) {
+    this.dir = dir;
+    this.cfg = config || JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
+    this.fetch = fetchImpl; this.enCours = 0; this.lignes = []; this.stop = false;
+    this.lancerClaude = lancer || ((q) => this._claude(q));
+    this.log = log || ((m) => this._log(m));
+  }
+
+  _log(m) {
+    const l = `${new Date().toISOString()} ${m}`;
+    console.log(l);
+    try {
+      const f = path.join(this.dir, 'relais.log');
+      if (fs.existsSync(f) && fs.statSync(f).size > 1e6) fs.renameSync(f, f + '.1');
+      fs.appendFileSync(f, l + os.EOL);
+    } catch (_) {}
+  }
+  // Ligne pour le journal de Wilson (onglet Journal, colonne B « relais 1 · PC ») : Claude le lit pour diagnostiquer.
+  journal(m) { this.log(m); this.lignes.push({ t: Date.now(), m: 'Relais Claude : ' + m }); }
+  async viderJournal() {
+    if (!this.lignes.length) return;
+    const lignes = this.lignes.splice(0, 50);
+    try { await this.post({ version: `${VERSION} · PC`, appareil: 'PC (relais Claude)', lignes }, 30000, true); }
+    catch (e) { this.lignes.unshift(...lignes.slice(-20)); this.log('journal pas envoyé : ' + e.message); }
+  }
+
+  async post(o, ms = 40000, texte = false) {
+    const r = await this.fetch(this.cfg.script, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(o), signal: AbortSignal.timeout(ms) });
+    const t = await r.text();
+    if (texte) return t;
+    try { return JSON.parse(t); } catch (_) { throw new Error(`réponse illisible du script (${r.status}) : ${t.slice(0, 120)}`); }
+  }
+
+  async boucle() {
+    let attente = 5000;
+    this.journal(`démarré (${os.hostname()}, Node ${process.versions.node})`);
+    let dernierJournal = Date.now();
+    while (!this.stop) {
+      try {
+        if (Date.now() - dernierJournal > 10000) { dernierJournal = Date.now(); await this.viderJournal(); }
+        if (this.enCours >= MAX_EN_COURS) {                                   // occupé : il dit seulement qu'il est là
+          await this.post({ action: 'claude_prendre', secret: this.cfg.secret, max: 0, occupe: this.enCours, version: VERSION }, 30000);
+          await pause(20000); continue;
+        }
+        const t0 = Date.now();
+        const r = await this.post({ action: 'claude_prendre', secret: this.cfg.secret, attente: 25, occupe: this.enCours, version: VERSION }, 45000);
+        if (!r.ok) throw new Error(r.erreur || 'refus du script');
+        attente = 5000;
+        if (r.question) this.traiter(r.question);
+        else if (Date.now() - t0 < 2000) await pause(2000);                    // le script n'a pas attendu : on ne le harcèle pas
+      } catch (e) {
+        this.log(`script injoignable ou refus : ${e.message} — nouvel essai dans ${Math.round(attente / 1000)} s`);
+        await pause(attente); attente = Math.min(attente * 2, 60000);
+      }
+    }
+  }
+
+  async traiter(q) {
+    this.enCours++;
+    const t0 = Date.now();
+    this.journal(`question reçue (${q.type}${q.voiture ? ', en voiture' : ''}) : « ${String(q.question).slice(0, 160)} »`);
+    let rendu;
+    try {
+      const r = await this.lancerClaude(q);
+      const s = Math.round((Date.now() - t0) / 1000);
+      if (!r.dire) throw new Error('Claude n\'a rien répondu');
+      rendu = { ok: true, dire: r.dire, detail: r.detail, duree: s, etapes: r.etapes || 0 };
+      this.journal(`réponse en ${s} s (${r.etapes || '?'} étape(s)) : ${r.dire.slice(0, 200)}`);
+    } catch (e) {
+      rendu = { ok: false, erreur: String(e.message || e).slice(0, 400), duree: Math.round((Date.now() - t0) / 1000) };
+      this.journal(`échec après ${rendu.duree} s : ${rendu.erreur}`);
+    }
+    for (let n = 0; n < 4; n++) {                                           // rendre la réponse, même si le réseau hoquette
+      try { const r = await this.post({ action: 'claude_rendre', secret: this.cfg.secret, id: q.id, ...rendu }, 30000); if (r.ok) break; this.log('réponse refusée : ' + r.erreur); break; }
+      catch (e) { this.log('réponse pas rendue : ' + e.message); await pause(3000 * (n + 1)); }
+    }
+    this.enCours--;
+    await this.viderJournal();
+  }
+
+  exe() {
+    const c = [this.cfg.claude, process.env.CLAUDE_EXE, path.join(os.homedir(), '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude')].filter(Boolean);
+    for (const x of c) if (fs.existsSync(x)) return x;
+    try { return execFileSync(process.platform === 'win32' ? 'where' : 'which', ['claude'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim(); } catch (_) {}
+    throw new Error('Claude Code introuvable sur le PC (relancer l\'installation)');
+  }
+
+  _claude(q) {
+    return new Promise((ok, ko) => {
+      const travail = path.join(this.dir, 'travail'); fs.mkdirSync(travail, { recursive: true });
+      const args = argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet' });
+      const env = { ...process.env, ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER || '' };
+      delete env.ANTHROPIC_API_KEY;                                         // jamais de facturation à l'usage : l'abonnement seulement
+      const p = spawn(this.exe(), args, { cwd: travail, env, windowsHide: true });
+      let out = '', err = '';
+      const minuteur = setTimeout(() => { try { p.kill(); } catch (_) {} ko(new Error(`Claude n'a pas fini en ${CLAUDE_MAX_MS / 60000} min`)); }, CLAUDE_MAX_MS);
+      p.stdout.on('data', (b) => { out += b; });
+      p.stderr.on('data', (b) => { err += b; });
+      p.on('error', (e) => { clearTimeout(minuteur); ko(e); });
+      p.on('close', (code) => {
+        clearTimeout(minuteur);
+        let j = null; try { j = JSON.parse(out.trim().split(/\r?\n/).filter(Boolean).pop() || ''); } catch (_) {}
+        if (!j) return ko(new Error(`Claude s'est arrêté (code ${code}) : ${(err || out).trim().slice(0, 300) || 'aucune sortie'}`));
+        if (j.is_error && !j.result) return ko(new Error(`Claude : ${j.subtype || 'erreur'} ${String(j.result || err).slice(0, 200)}`));
+        const r = decouper(j.result || '');
+        ok({ ...r, etapes: j.num_turns || 0 });
+      });
+      p.stdin.end(demande(q), 'utf8');
+    });
+  }
+}
+
+// Une seule copie du relais à la fois (la tâche planifiée peut le relancer) : un petit port réservé sur la machine elle-même.
+function verrou() {
+  return new Promise((ok) => {
+    const srv = net.createServer();
+    srv.once('error', () => ok(false));
+    srv.listen(47613, '127.0.0.1', () => ok(true));
+  });
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.includes('--essai')) {                                 // essai à la main : node relais.mjs --essai « question »
+    const R = new Relais();
+    const q = { id: 'essai', type: 'internet', question: process.argv.slice(process.argv.indexOf('--essai') + 1).join(' ') || 'Quelle est la charge maximale d\'une paumelle Simonswerk Tectus TE 340 3D ?' };
+    R.lancerClaude(q).then((r) => { console.log('\nÀ DIRE :', r.dire, '\n\nDÉTAIL :', r.detail); process.exit(0); }, (e) => { console.error('Échec :', e.message); process.exit(1); });
+  } else verrou().then((libre) => { if (!libre) { console.log('Le relais tourne déjà.'); process.exit(3); } new Relais().boucle(); });
+}
