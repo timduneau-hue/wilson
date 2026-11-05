@@ -24,7 +24,7 @@ import { Reactions } from './reactions.js';
 import { Memoire } from './memoire.js';
 import { Questions, QUESTION_TOOL } from './questions.js';
 
-const VERSION = '1.28.0';
+const VERSION = '1.28.1';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -42,6 +42,10 @@ const CRM_MAX_MS = 40000;         // question au CRM (script → CRM) : filet de
 // roulant : le mode voiture ne peut plus s'allumer (le code reste en sommeil, testé, pour pouvoir le remettre).
 const VOITURE = false;
 const NOM_DELAI_VOITURE_MS = 10000, NOM_DELAI_MAISON_MS = 8000;   // 04/11/26, 17h57 : 4 s était trop court en voiture (réveils sur des bruits)
+const NOM_RELAIS_MS = 3000;       // vérification de « Wilson » sans réponse après 3 s : un 2e modèle en même temps (05/11/26)
+const APRES_OUTIL_MS = 3000;      // muet après le résultat d'un outil : relance au bout de 3 s (5 s avant le 05/11/26)
+const ATTENTE_GOOGLE_MS = 5000;   // voiture : phrase transcrite, plus un mot depuis 5 s et pas de réponse → « réponds » (05/11/26)
+const NOM_SON_MAX_MS = 12000;     // son envoyé pour la vérification : tout ce qui a été dit depuis la précédente, 12 s au plus
 const huitK = (p) => { const n = Math.floor(p.length / 2), o = new Int16Array(n); for (let i = 0; i < n; i++) o[i] = (p[2 * i] + p[2 * i + 1]) >> 1; return o; };   // 16 kHz → 8 kHz
 const PREVENIR_MS = 5 * 60000;                                    // « je n'arrive pas à vérifier » : une fois toutes les 5 min au plus   // vérification de « Wilson » par Gemini : délai maximal (journal du 04/11/26)
 const CAR_IDLE_MS = 60000;        // mode voiture : il se rendort après 1 min de silence (PLAN 2 quater, C5)
@@ -57,6 +61,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const OBJECTIF_Q = /OBJECTIF CLIENTS ACTIFS|clients? actifs/i;
+const OBJECTIF_NB = /objectif\b[^\d\n]{0,30}?(?<![nN]\s?-\s?)(\d{1,3})\b(?!\s?%)/i;   // « objectif clients actifs 50 », « objectif de 60 »
 
 class App {
   constructor() {
@@ -1312,6 +1317,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     b.on('heard', (t) => {
       if (this.state !== 'conversation') return;
       this.lastActivity = this._heardAt = performance.now(); this._noteHeard(t);
+      if (String(t || '').trim()) this._heardTurnN = this._turnN;          // phrase en cours de transcription (pas encore de réponse)
       if (String(t || '').trim()) this._parleDepuis = true;
       if (this._gate && !this._gate.ok && nomDit(t)) this._gateOpen('nom entendu');
     });
@@ -1649,40 +1655,63 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   // Flash-Lite écoute toute la phrase (8 s au plus) : est-ce qu'on appelle « Wilson », et que lui demande-t-on ?
   // La demande est transmise en texte à la discussion (le son de loin, avec la télé, était souvent mal compris : il
   // fallait répéter 5 fois) ; rien ne s'affiche si ce n'était pas pour lui. 40 vérifications par heure au plus.
-  async _nomMaison(d) {
+  async _nomMaison(d, debutImpose = null) {
     const voiture = this._voitureBt, lieu = voiture ? 'voiture' : 'maison';
+    // Début de la phrase candidate : l'oreille dit depuis combien de temps elle a commencé.
+    const debut = debutImpose != null ? debutImpose : performance.now() - Math.min(8000, ((d && d.duree) || 1.5) * 1000);
     // Journal du 04/11/26, 16h57-16h59 (téléphone dans la voiture) : 8 « Wilson » reconnus par l'oreille, aucun réveil.
     // Une vérification restée bloquée (réseau mobile, pas de délai maximal) faisait ignorer tous les suivants, sans un mot
     // au journal. Maintenant : chaque « Wilson » ignoré est noté, et la vérification a un délai maximal (plus bas).
-    // 04/11/26, 17h53 : pendant une vérification, le candidat suivant est gardé et vérifié juste après (le dernier seulement).
-    if (this._nomEnCours) { this._nomSuivant = d; this.log(`Oreille (${lieu}) : « Wilson » possible (écart ${d.score.toFixed(1)}) pendant une vérification en cours depuis ${((performance.now() - (this._nomDepuis || 0)) / 1000).toFixed(0)} s : vérifié juste après`); return; }
+    // 04/11/26, 17h53 : pendant une vérification, le candidat suivant est gardé et vérifié juste après.
+    // 05/11/26 (journal 09h31-09h40 en voiture, « pourquoi il faut que je t'appelle trois fois ? ») : le candidat gardé
+    // était remplacé par le suivant (radio, bruit de la route : une phrase toutes les 3 s), puis jeté sans un mot après
+    // chaque « non », et quand il passait enfin, le son envoyé ne contenait plus sa phrase. Maintenant on garde le début
+    // de la PREMIÈRE phrase en attente, et la vérification suivante envoie tout ce qui a été dit depuis (voir plus bas).
+    if (this._nomEnCours) {
+      const S = this._nomSuivant;
+      this._nomSuivant = { d, debut: S ? Math.min(S.debut, debut) : debut };
+      this.log(`Oreille (${lieu}) : « Wilson » possible (écart ${d.score.toFixed(1)}) pendant une vérification en cours depuis ${((performance.now() - (this._nomDepuis || 0)) / 1000).toFixed(0)} s : vérifié juste après${S ? ' (avec la phrase d\'avant)' : ''}`);
+      return;
+    }
     if (!this.settings.apiKey) return;
     // Sans réseau : jamais de réveil sur un simple candidat de l'oreille (presque toutes les phrases en sont, journal du
     // 04/11/26) ; en voiture, il le dit (une fois toutes les 5 min au plus) pour que Timothée sache qu'il ne l'entendra pas.
     if (!navigator.onLine) { if (voiture && this.state === 'veille') this._prevenirNom('pas de réseau'); return; }
     // Économie (journal du 30/10/26 : 40 vérifications épuisées en 15 min de discussions en famille, plus rien ensuite) :
-    // après un « non », on laisse passer 8 s (une conversation enchaîne les faux candidats) ; et une réserve de 6
-    // vérifications qui se recharge d'une par minute (60 par heure au plus, 400 par jour).
+    // une seule vérification à la fois, chacune couvrant tout ce qui a été dit depuis la précédente ; et une réserve de 10
+    // vérifications qui se recharge d'une toutes les 40 s (400 par jour au plus). L'attente de 3 s après un « non » est
+    // supprimée (05/11/26) : elle jetait le « Wilson » dit juste après. Seule reste l'attente que Google demande (quota).
     const now = Date.now();
-    if (now < (this._nomCalme || 0)) return;
+    if (now < (this._nomCalme || 0)) {
+      if (this._calmeDit !== this._nomCalme) { this._calmeDit = this._nomCalme; this.log(`Oreille (${lieu}) : Google demande d'attendre encore ${Math.ceil((this._nomCalme - now) / 1000)} s : « Wilson » pas vérifié`); }
+      return;
+    }
     const B = this._nomJetons || (this._nomJetons = { n: 10, t: now, jour: new Date().toDateString(), total: 0 });
     B.n = Math.min(10, B.n + (now - B.t) / 40000); B.t = now;          // réserve de 10, une de plus toutes les 40 s (journal 10h12 : 6 vidée en 3 min)
     if (B.jour !== new Date().toDateString()) { B.jour = new Date().toDateString(); B.total = 0; }
-    if (B.n < 1 || B.total >= 400) { if (!this._avisPlein) { this._avisPlein = true; this.log('Oreille (maison) : réserve de vérifications vide, j\'attends (le regard marche toujours)'); } return; }
+    if (B.n < 1 || B.total >= 400) { if (!this._avisPlein) { this._avisPlein = true; this.log(`Oreille (${lieu}) : réserve de vérifications vide, j'attends${voiture ? '' : ' (le regard marche toujours)'}`); } return; }
     B.n -= 1; B.total++; this._avisPlein = false; this._nomEnCours = true; this._nomDepuis = performance.now();
     let pcm = null, ctl = null, minuterie = null;
     try {
       const t0 = performance.now();                                    // fin de la phrase : 0,7 s de silence (4 s au plus)
       while (performance.now() - t0 < 4000 && (this.audio.speaking || performance.now() - this.audio.lastVoicedAt < 700)) await new Promise((r) => setTimeout(r, 100));
-      pcm = this.audio.recent(Math.min(8000, performance.now() - t0 + 3000));
+      // Le son envoyé (05/11/26) : du début de la phrase (de la première en attente) jusqu'à maintenant, sans ce que
+      // Gemini a déjà entendu (1 s de recouvrement) ni la fin de sa propre voix (09h38:07 : « N'hésite pas si tu as besoin
+      // de moi plus tard » vérifié) ; 1,2 s au moins, 12 s au plus (les dernières : c'est là qu'il répète « Wilson »).
+      const fin = performance.now();
+      let de = Math.max(debut - 300, (this._nomCouvert || 0) - 1000, (this.playEndAt || 0) + 700, fin - NOM_SON_MAX_MS);
+      if (fin - de < 1200) de = fin - 1200;
+      pcm = this.audio.recent(fin - de);
       // En voiture (réseau mobile) : son envoyé en 8 kHz, deux fois plus léger (la voix reste très lisible pour Gemini).
       const leger = voiture ? huitK(pcm) : pcm;
-      // Délai maximal : 10 s en voiture, 8 s à la maison.
+      // Délai maximal : 10 s en voiture, 8 s à la maison. Sans réponse après 3 s, un 2e modèle est interrogé en même temps.
       ctl = new AbortController(); minuterie = setTimeout(() => ctl.abort(), voiture ? NOM_DELAI_VOITURE_MS : NOM_DELAI_MAISON_MS);
-      const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: leger, rate: voiture ? 8000 : 16000, signal: ctl.signal });
+      const r = await this.eco.appelDeLoin({ key: this.settings.apiKey, audio: leger, rate: voiture ? 8000 : 16000, signal: ctl.signal, hedgeMs: this.eco.canExtra() ? NOM_RELAIS_MS : 0 });
       clearTimeout(minuterie);
-      this.log(`Oreille (${lieu}) : écart ${d.score.toFixed(1)} → Gemini entend « ${(r.texte || '').slice(0, 120)} » → ${r.appel ? `oui, « Wilson »${r.doute ? ' (pas certain)' : ''}${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non' + (r.pourquoi ? ' (' + r.pourquoi + ')' : '')}`, r.appel);
-      if (!r.appel) { this._nomCalme = Date.now() + 3000; if (!r.texte && this._nomJetons) this._nomJetons.n = Math.min(10, this._nomJetons.n + 1); return; }   // rien d'intelligible : ne coûte rien
+      this._nomCouvert = fin;                                           // ce son-là est entendu : la prochaine vérification part d'ici
+      const duree = `${r.ms != null ? (r.ms / 1000).toFixed(1) + ' s, ' : ''}son de ${(pcm.length / 16000).toFixed(1)} s${r.model ? ', ' + r.model : ''}`;
+      this.log(`Oreille (${lieu}) : écart ${d.score.toFixed(1)} → Gemini entend « ${(r.texte || '').slice(0, 120)} » → ${r.appel ? `oui, « Wilson »${r.doute ? ' (pas certain)' : ''}${r.demande ? ' — « ' + r.demande.slice(0, 100) + ' »' : ''}` : 'non' + (r.pourquoi ? ' (' + r.pourquoi + ')' : '')} (${duree})`, r.appel);
+      if (!r.appel) { if (!r.texte && this._nomJetons) this._nomJetons.n = Math.min(10, this._nomJetons.n + 1); return; }   // rien d'intelligible : ne coûte rien
       if (this.settingsOpen) return;
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) {      // déjà en discussion : la demande part tout de suite
         this._byName = true; this._prenomAt = performance.now(); if (this.paused) this._resume();
@@ -1701,6 +1730,9 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this._wakeText = r.demande ? this._texteDeLoin(r.demande, r.doute) : null; this._wakeDemande = r.demande || ''; this._wakePcm = new Int16Array(0);
       this.face.play('wake'); await this.startConversation('prenom');
       if (!r.demande) this._ecouteSeule();
+      // Remarque de Timothée du 05/11/26, 09h45 (« le petit bip bip, c'était bien ») : en voiture, il ne voit pas l'écran ;
+      // une petite note dit tout de suite qu'il a été entendu, avant la réponse de Gemini.
+      else if (voiture) setTimeout(() => { try { this.audio.tone('ecoute'); } catch (_) {} }, 250);
     } catch (e) {
       clearTimeout(minuterie);
       const lent = ctl && ctl.signal.aborted;
@@ -1718,7 +1750,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     finally {
       this._nomEnCours = false;
       const n = this._nomSuivant; this._nomSuivant = null;
-      if (n && (this.state === 'veille' || (this.state === 'conversation' && this.paused))) setTimeout(() => this._nomMaison(n), 0);
+      if (n && (this.state === 'veille' || (this.state === 'conversation' && this.paused))) setTimeout(() => this._nomMaison(n.d, n.debut), 0);
     }
   }
   // En voiture, la vérification de « Wilson » n'aboutit pas : il ne se réveille pas, mais le dit (voix du téléphone, sans
@@ -1952,8 +1984,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     const conv = this.convId, t0 = performance.now(), lent = call.name === 'meteo' || (call.name === 'afficher' && (call.args || {}).image) || call.name === 'courses';
     const pid = lent || call.name === 'remarque' ? this.pill({ meteo: 'Je regarde la météo…', afficher: 'Je cherche une image…', courses: 'Liste de courses…', remarque: 'Je note ta remarque…' }[call.name]) : 0;
     let info, ok = true; if (call.name === 'remarque') this._remarqueAt = performance.now();
+    this._outilsEnCours = (this._outilsEnCours || 0) + 1;                // petit son de réflexion en voiture pendant ce temps
     try { info = await this.outils.run(call.name, call.args || {}); }
     catch (e) { ok = false; info = `Impossible pour l'instant (${e.message || 'erreur'}). Dis-le simplement.`; this.log(`Outil ${call.name} : ${e.message}`); }
+    finally { this._outilsEnCours--; }
     if (pid) this.pillEnd(pid, ok, call.name === 'remarque' ? 'Noté pour ma mise à jour' : '');
     if (conv !== this.convId) return;
     this._noteToolMs(performance.now() - t0);
@@ -1963,7 +1997,9 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   // L'objectif des clients actifs (PLAN 7 sexies, O) : le chiffre officiel du bilan du CRM, l'objectif (réglage, ou dit à la
   // voix : retenu), et les rendez-vous du prochain jour ouvré, donnés à l'analyste avec la question.
   async _contexteObjectif(q, signal) {
-    const C = this.crm, m = /objectif\D{0,12}(\d{1,3})\b/i.exec(q);
+    // Journal du 05/11/26, 09h36:55 : « OBJECTIF CLIENTS ACTIFS 50 » n'était pas compris (12 lettres au plus entre
+    // « objectif » et le chiffre) : l'objectif n'a jamais été retenu. Jusqu'à 30 lettres ; jamais « N-1 » ni une année.
+    const C = this.crm, m = OBJECTIF_NB.exec(q);
     if (m && +m[1] > 0 && +m[1] !== +this.settings.objectifActifs) { this.settings.objectifActifs = +m[1]; this.applySettings('objectifActifs'); this.log(`Objectif de clients actifs retenu : ${m[1]} par mois`); }
     const obj = +this.settings.objectifActifs || 0;
     const j = new Date(); j.setDate(j.getDate() + 1); while (j.getDay() === 0 || j.getDay() === 6) j.setDate(j.getDate() + 1);
@@ -1972,7 +2008,8 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     try { const b = await C.bilan(signal); bilan = b && b.ok !== false ? String(b.texte || '').slice(0, 1500) : `(bilan indisponible : ${(b && b.erreur) || '?'})`; } catch (e) { if (e.name === 'AbortError') throw e; bilan = '(bilan indisponible)'; }
     try { const a = await C.agenda(demain, signal); agenda = a && a.ok !== false ? String(a.texte || '').slice(0, 1500) : '(agenda indisponible)'; } catch (e) { if (e.name === 'AbortError') throw e; agenda = '(agenda indisponible)'; }
     this.log(`Objectif des clients actifs : objectif ${obj || 'pas encore donné'}, rendez-vous de ${demain} joints`, true);
-    return `OBJECTIF CLIENTS ACTIFS. Objectif du mois : ${obj ? obj + ' clients actifs' : 'pas encore donné (demande-le-lui à la fin)'}.\nBilan du CRM (chiffre officiel des clients actifs du mois, ne le recalcule pas) :\n${bilan}\nRendez-vous du prochain jour ouvré (${demain}, ${pad(j.getDate())}/${pad(j.getMonth() + 1)}) :\n${agenda}`;
+    // Règle de Timothée du 05/11/26, 09h37 : « l'objectif de clients actifs, c'est au moins celui de N-1. Toujours. »
+    return `OBJECTIF CLIENTS ACTIFS. Objectif du mois : ${obj ? obj + ' clients actifs (donné par Timothée)' : 'pas donné par Timothée'}. Règle de Timothée : l'objectif est TOUJOURS au moins le nombre de clients actifs du même mois l'an dernier (N-1) ; prends le plus grand des deux${obj ? '' : ' (sans objectif donné, c\'est le chiffre de N-1)'}.\nBilan du CRM (chiffre officiel des clients actifs du mois, ne le recalcule pas) :\n${bilan}\nRendez-vous du prochain jour ouvré (${demain}, ${pad(j.getDate())}/${pad(j.getMonth() + 1)}) :\n${agenda}`;
   }
 
   // Réponse de Timothée à une question de Claude (7 septies, D) : rangée à côté de la question dans la feuille.
@@ -2445,6 +2482,9 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       if (vb) {
         this.log(`Voiture : téléphone relié en Bluetooth — je réponds sans qu'on me regarde ; réveil en disant « Wilson »${this.oreille.ready ? ` (oreille prête, limite ${this.oreille.limite.toFixed(1)})` : ' (oreille pas apprise : toucher l\'écran)'}`);
         this.badge(this.oreille.ready ? 'En voiture : dis « Wilson » pour me parler' : 'En voiture : touche l\'écran pour me parler (apprends-moi ton nom : Réglages → CRM et prénom)', 6000);
+        // Remarque du 05/11/26, 09h47 (« stocker des informations en local pour aller plus vite ») : en montant dans la
+        // voiture, la journée est préparée (fiches des clients du jour gardées) : la 1re question sur un client va plus vite.
+        if (this.crm && this.crm.on) this.crm.prefetch();
       } else this.log('Voiture : plus de Bluetooth — de nouveau, je réponds quand on me regarde');
     }
     // Lecteur multimédia (04/11/26) : en voiture, pendant une discussion (et 8 s après), pour qu'Android Auto joue sa voix.
@@ -2456,18 +2496,36 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this.audio.mediaHold(garde, (a) => { this.log(`Bouton ${a} (volant ou écran de la voiture) : je me tais`); if (this.state === 'conversation') this.endConversation('volant'); });
     }
     const AO = this._apresOutil;
+    // Journal du 05/11/26, 09h40-09h46 (voiture) : 4 fois muet après « remarque » ou « rappel », relancé au bout de 5 s
+    // (« c'est pas normal que tu mettes autant de temps ») → 3 s, s'il ne parle plus depuis 1,5 s (sinon 6 s : le bruit de
+    // la route peut passer pour de la voix).
     if (AO && (AO.conv !== this.convId || this.state !== 'conversation')) this._apresOutil = null;
-    else if (AO && now - AO.at > 5000 && !this.audio.playing && this.brain.open && !this.paused && !(this._searches && this._searches.size) && !(this._analyses && [...this._analyses.values()].some((A) => !A.cancelled))) {
+    else if (AO && now - AO.at > APRES_OUTIL_MS && ((!this.audio.speaking && now - (this.audio.lastVoicedAt || 0) > 1500) || now - AO.at > 2 * APRES_OUTIL_MS) && !this.audio.playing && this.brain.open && !this.paused && !(this._searches && this._searches.size) && !(this._analyses && [...this._analyses.values()].some((A) => !A.cancelled))) {
       this._apresOutil = null;
-      this.log(`Wilson muet 5 s après le résultat de ${AO.noms} : relance`);
+      this.log(`Wilson muet ${((now - AO.at) / 1000).toFixed(0)} s après le résultat de ${AO.noms} : relance`);
       this.brain.sendText('[Tu as le résultat de ton outil : réponds-lui maintenant à voix haute, brièvement, en français.]');
+    }
+    // Journal du 05/11/26, 09h47:21 (voiture) : 1er son 44,9 s après la fin de sa phrase. Le bruit de la route faisait
+    // croire à Google qu'il parlait encore : il attendait la fin de la phrase. Phrase transcrite, plus un mot depuis 5 s,
+    // le micro du téléphone n'entend plus de voix depuis 2 s, pas de réponse ni d'outil en cours → on lui dit de répondre
+    // (une fois par phrase).
+    if (vb && this.state === 'conversation' && this.mode === 'live' && this.brain.open && !this.paused && !this.netWait
+      && this._heardTurnN === this._turnN && this._heardAt && now - this._heardAt > ATTENTE_GOOGLE_MS && this._nudgedTurn !== this._turnN
+      && !this.audio.playing && !this.audio.speaking && !this.audio.micTaken && now - (this.audio.lastVoicedAt || 0) > 2000 && !this._liveTurn && !this._apresOutil
+      && this._toolTurn !== this._turnN && !(this._searches && this._searches.size) && !(this._analyses && [...this._analyses.values()].some((A) => !A.cancelled))) {
+      this._nudgedTurn = this._turnN;
+      this.log(`Google attend encore la fin de ta phrase (${((now - this._heardAt) / 1000).toFixed(0)} s sans un mot, bruit de la route ?) : je lui dis de répondre`);
+      this.brain.sendText('[Il a fini sa phrase : réponds-lui maintenant, à voix haute, brièvement.]');
     }
     // En voiture, personne ne regarde l'écran : caméra à 2 analyses/s et visage à 30 images/s pendant la discussion, pour que
     // le téléphone garde de la marge pour le son (grésillements, remarque du 04/11/26, 11h32).
     if (vb && this.state === 'conversation') { if (this.vision && this.vision.fps > 2) this.vision.setRate(2); if (this.face.fpsDiv < 2) this.face.setFps(30); }
     // Remarque de Timothée du 04/11/26, 10h13 : en voiture il ne regarde pas l'écran ; pendant qu'il cherche (CRM, analyste,
     // Internet), un petit « tic-tac » doux toutes les 2,5 s dit qu'il réfléchit (jusqu'à 32 s de silence ce matin-là).
-    const cherche = this.state === 'conversation' && ((this._searches && this._searches.size) || (this._analyses && [...this._analyses.values()].some((A) => !A.cancelled || A.fond)));
+    // Remarque du 05/11/26, 09h44-09h45 (« dis-moi quand tu réfléchis ou que tu enregistres quelque chose », « le petit bip
+    // bip, c'était bien ») : aussi pendant qu'un outil travaille (remarque, rappel, météo…) et tant qu'il n'a pas répondu après.
+    const cherche = this.state === 'conversation' && ((this._searches && this._searches.size) || (this._analyses && [...this._analyses.values()].some((A) => !A.cancelled || A.fond))
+      || this._outilsEnCours > 0 || !!this._apresOutil);
     if (cherche && vb && !this.audio.playing && !this.audio.speaking) {
       if (!this._chercheDepuis) this._chercheDepuis = now;
       if (now - this._chercheDepuis > 1500 && now - (this._ticAt || 0) > 2500) { this._ticAt = now; try { this.audio.tone('reflexion'); } catch (_) {} if (!this._ticN++) this.log('Je cherche : petit son de réflexion (voiture)'); }

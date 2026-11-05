@@ -1,6 +1,8 @@
 // Wilson — plus d'outils (PLAN.md, section 7 quater) : afficher à l'écran, minuteurs, rappels, météo, liste de courses.
 // Tout est gratuit et sans nouvelle clé : Wikipédia (images), Open-Meteo (météo), Home Assistant (liste de courses).
 
+import { deviceName } from './remote.js';
+
 const S = { type: 'STRING' }, N = { type: 'NUMBER' };
 export const OUTILS = [
   { name: 'afficher', behavior: 'BLOCKING',
@@ -29,7 +31,7 @@ export const OUTILS = [
     description: "Ses idées (« note cette idée », « écris ça quelque part », « qu'est-ce que j'ai noté ? », « envoie-moi mes idées ») : noter (texte = l'idée mise au propre, sans rien inventer), lire (les dernières), afficher (à l'écran), envoyer (par e-mail à Timothée, avec le lien du document). Elles sont rangées dans le document Google « Wilson — mes idées » de son Drive.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['noter', 'lire', 'afficher', 'envoyer'] }, texte: S }, required: ['action'] } },
   { name: 'remarque', behavior: 'BLOCKING',
-    description: "Remarque de Timothée sur ton fonctionnement, pour ta prochaine mise à jour (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile.",
+    description: "Remarque de Timothée sur ton fonctionnement, pour ta prochaine mise à jour (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile. Une seule fois par remarque. Ensuite, dis seulement « C'est noté. », puis réponds au reste de ce qu'il a dit ou écoute la suite.",
     parameters: { type: 'OBJECT', properties: { texte: S }, required: ['texte'] } },
   { name: 'mes_remarques', behavior: 'BLOCKING',   // accord de Timothée du 01/11/26 (« je t'avais demandé de noter des choses hier »)
     description: "Relire les remarques que Timothée t'a faites pour tes mises à jour (« qu'est-ce que je t'ai demandé de changer ? », « tu te rappelles ce que je t'ai fait noter hier ? »), avec leur date." },
@@ -249,7 +251,10 @@ export class Outils {
       const d = new Date(t), auj = new Date(), dem = new Date(Date.now() + 86400000);
       const jour = d.toDateString() === auj.toDateString() ? "aujourd'hui" : d.toDateString() === dem.toDateString() ? 'demain' : `${JOURS[d.getDay()]} ${d.getDate()}/${pad(d.getMonth() + 1)}`;
       this.log(`Rappel ajouté : ${jour} ${this._heure(t)} — ${r.texte}`, true);
-      return `Rappel noté pour ${jour} à ${this._heure(t)} : « ${r.texte} ». (La tablette doit rester allumée.)`;
+      // Journal du 05/11/26, 09h41 (rappel dicté en voiture, sur le téléphone) : « La tablette doit rester allumée » était
+      // faux ; il sonne sur l'appareil où il a été dicté, si Wilson y est ouvert à cette heure-là.
+      const ici = deviceName() === 'téléphone' ? 'Il sonnera sur ce téléphone si Wilson y est ouvert à cette heure-là : dis-le-lui.' : 'La tablette doit rester allumée.';
+      return `Rappel noté pour ${jour} à ${this._heure(t)} : « ${r.texte} ». (${ici})`;
     }
     if (action === 'annuler') {
       const n = norm(texte), r = this.rappels.find((x) => n && norm(x.texte).includes(n)) || (this.rappels.length === 1 ? this.rappels[0] : null);
@@ -371,10 +376,16 @@ export class Outils {
   // ---------- F7 : remarques pour la prochaine mise à jour (lues chaque nuit par Claude dans le journal) ----------
   remarque({ texte = '' }) {
     const t = String(texte).trim(); if (!t) return 'Quelle remarque ?';
+    // Journal du 05/11/26 : la même remarque notée deux fois (09h37:45 et 09h37:46, outil annulé par Google puis rappelé ;
+    // 09h44:02 puis 09h45:16) → une remarque identique dans les 10 min n'est pas notée de nouveau.
+    const l = lire('wilson.remarques', []), cle = norm(t), now = Date.now();
+    if (l.some((r) => r && now - r.t < 10 * 60000 && norm(r.texte) === cle)) { this.log(`Remarque déjà notée (pas de doublon) : ${t.slice(0, 80)}`); return "C'est noté."; }
     this.log(`REMARQUE DE TIMOTHÉE : ${t}`, true);
-    const l = lire('wilson.remarques', []); l.push({ t: Date.now(), texte: t }); ecrire('wilson.remarques', l.slice(-50));
+    l.push({ t: now, texte: t }); ecrire('wilson.remarques', l.slice(-50));
     // Remarque du 04/11/26, 11h51 : « noter mes remarques en arrière-plan, sans rester bloqué ni arrêter de m'écouter ».
-    return 'Remarque notée pour ta prochaine mise à jour (chaque semaine). Dis seulement « C\'est noté. » (trois mots), puis réponds tout de suite à ce qu\'il a dit d\'autre ou écoute la suite.';
+    // 05/11/26, 09h46:11 : Gemini 3.1 a lu à voix haute le résultat « {result: Remarque notée. Dis « C'est noté. » (trois
+    // mots)… » → le résultat est maintenant la phrase à dire elle-même ; la consigne est dans la description de l'outil.
+    return "C'est noté.";
   }
 
   mesRemarques() {
