@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 2';
+export const VERSION = 'relais 3';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
 const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
@@ -50,16 +50,18 @@ export function demande(q, maintenant = new Date()) {
     `Question de Timothée, dictée à Wilson : « ${q.question} »`,
     q.contexte ? `\nContexte donné par Wilson :\n${q.contexte}` : '',
     q.regles ? `\nRègles du CRM (à suivre pour toute question sur ses données) :\n${q.regles}` : '',
+    q.type !== 'crm' && q.crm === false ? '\nCe n\'est pas Timothée qui demande : tu n\'as pas accès à son CRM et tu n\'en parles pas.' : '',
     '\nRéponds dans le format demandé : « À DIRE : » puis « DÉTAIL : ».',
   ].filter(Boolean).join('\n');
 }
 
 // consigne : le texte de consigne.md (passé tel quel : --system-prompt remplace la consigne de développeur de Claude Code).
 // effort : réflexion de Claude (low, medium, high, xhigh, max) ; « high » par défaut : des réponses fiables (06/11/26).
-export function argumentsClaude({ mcp, consigne, modele = 'sonnet', effort = 'high' }) {
+// crm : le CRM n'est branché que si c'est Timothée qui demande (règle du 06/11/26) ; sinon Claude n'a qu'Internet.
+export function argumentsClaude({ mcp, consigne, modele = 'sonnet', effort = 'high', crm = true }) {
   return ['-p', '--output-format', 'json', '--model', modele, '--effort', effort, '--max-turns', String(MAX_TOURS),
-    '--tools', OUTILS, '--allowedTools', `${OUTILS},mcp__crm`, '--permission-mode', 'dontAsk',
-    '--mcp-config', mcp, '--strict-mcp-config', '--system-prompt', consigne, '--no-session-persistence'];
+    '--tools', OUTILS, '--allowedTools', crm ? `${OUTILS},mcp__crm` : OUTILS, '--permission-mode', 'dontAsk',
+    ...(crm ? ['--mcp-config', mcp] : []), '--strict-mcp-config', '--system-prompt', consigne, '--no-session-persistence'];
 }
 
 // ---------- Le relais ----------
@@ -186,7 +188,7 @@ export class Relais {
   _claude(q) {
     return new Promise((ok, ko) => {
       const travail = path.join(this.dir, 'travail'); fs.mkdirSync(travail, { recursive: true });
-      const args = argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: this.cfg.effort || 'high' });
+      const args = argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: this.cfg.effort || 'high', crm: q.type === 'crm' || q.crm !== false });
       const env = { ...process.env, ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER || '' };
       delete env.ANTHROPIC_API_KEY;                                         // jamais de facturation à l'usage : l'abonnement seulement
       const p = spawn(this.exe(), args, { cwd: travail, env, windowsHide: true });

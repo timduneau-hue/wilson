@@ -71,6 +71,7 @@ async def main():
         page.on('console', lambda m: logs.append(m.text)); page.on('pageerror', lambda e: logs.append('PAGEERROR ' + str(e)))
         await page.goto('http://127.0.0.1:8765/index.html')
         await page.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
+        await page.evaluate("wilson._crmAutorise = () => ({ ok: true, pourquoi: 'essai' })")   # CRM réservé à Timothée (06/11/26) : ici on fait comme s'il était reconnu
         has = lambda t: any(t in l for l in logs)
 
         await page.evaluate("wilson.startConversation('toucher')")

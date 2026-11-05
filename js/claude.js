@@ -53,13 +53,14 @@ export class ClaudePC {
 
   // La question → { ok: true, dire, detail, etapes, ms } ou { ok: false, raison, message } (raison : absent, pas_pris, trop_long,
   // erreur, script). Jamais d'exception sauf annulation (AbortError).
-  async repondre({ question, type = 'internet', contexte = '', regles = '', voiture = false, appareil = '', signal, onPris } = {}) {
+  // crm : Claude peut-il lire le CRM (seulement si c'est Timothée qui demande, règle du 06/11/26) ?
+  async repondre({ question, type = 'internet', contexte = '', regles = '', voiture = false, crm = false, appareil = '', signal, onPris } = {}) {
     const t0 = Date.now(), id = `w${t0.toString(36)}${(++this.n).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     // PC absent il y a moins d'une minute : pas la peine de redemander (la recherche de secours part tout de suite).
     if (this.pc && !this.pc.vivant && Date.now() - this.pcAt < 60000) return { ok: false, raison: 'absent', message: this.pc.vu != null ? `vu il y a ${Math.round(this.pc.vu / 60)} min` : 'jamais vu' };
     let r = null;
     for (let essai = 0; ; essai++) {                                          // réseau mobile capricieux : on redemande (même id, pas de doublon)
-      try { r = await this._ask({ action: 'claude_demander', id, question, type, contexte, regles, voiture, appareil }, signal, 20000); break; }
+      try { r = await this._ask({ action: 'claude_demander', id, question, type, contexte, regles, voiture, crm: !!crm, appareil }, signal, 20000); break; }
       catch (e) {
         if (e.name === 'AbortError' && signal && signal.aborted) throw e;
         if (!reseau(e) || essai >= 2) return { ok: false, raison: 'script', message: e.message };

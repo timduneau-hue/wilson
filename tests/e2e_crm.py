@@ -80,6 +80,7 @@ async def main():
         await page.route_web_socket(re.compile(r'.*generativelanguage\.googleapis\.com.*'), handler)
         await page.goto('http://127.0.0.1:8765/index.html')
         await page.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
+        await page.evaluate("wilson._crmAutorise = () => ({ ok: true, pourquoi: 'essai' })")   # CRM réservé à Timothée (06/11/26) : ici on fait comme s'il était reconnu
         await page.evaluate("wilson.startConversation('toucher')")
         await page.wait_for_function('wilson.state === "conversation" && wilson.mode === "live"', timeout=10000)
         conn = conns[-1]
@@ -198,6 +199,7 @@ async def main():
         await page2.route(re.compile(r'.*generativelanguage\.googleapis\.com/v1beta/models/.*Content.*'), gen)
         await page2.goto('http://127.0.0.1:8765/index.html')
         await page2.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
+        await page2.evaluate("wilson._crmAutorise = () => ({ ok: true, pourquoi: 'essai' })")   # CRM réservé à Timothée (06/11/26) : ici on fait comme s'il était reconnu
         await page2.evaluate("wilson.startConversation('toucher')")
         await page2.wait_for_function('wilson.state === "conversation" && wilson.mode === "eco"', timeout=10000)
         await page2.wait_for_function('!wilson.voice.speaking', timeout=8000)

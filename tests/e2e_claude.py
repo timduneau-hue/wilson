@@ -80,6 +80,7 @@ async def main():
         page.on('console', lambda m: logs.append(m.text)); page.on('pageerror', lambda e: logs.append('PAGEERROR ' + str(e)))
         await page.goto('http://127.0.0.1:8765/index.html')
         await page.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
+        await page.evaluate("wilson._crmAutorise = () => ({ ok: true, pourquoi: 'essai' })")   # CRM réservé à Timothée (06/11/26) : ici on fait comme s'il était reconnu
         has = lambda t: any(t in l for l in logs)
 
         await page.evaluate("wilson.startConversation('toucher')")
@@ -130,6 +131,44 @@ async def main():
         res = await attendre_resp(conn, 'd0', 20)
         check('Recherche longue à la maison : petit son de réflexion (bip-bip)', (json.loads(dbg).get('tic') or 0) > t_dep and json.loads(dbg).get('vb') is not True and DIRE[:20] in res, dbg)
         st['mode'] = 'faite'
+
+        # 2 ter. Le CRM, seulement pour Timothée (règle du 06/11/26, 00h39) : visage reconnu, ou téléphone en voiture
+        await page.evaluate("""delete wilson._crmAutorise; wilson.__q = wilson.qui.qui; wilson.__t = wilson.qui.trouver;
+            wilson.qui.trouver = (n) => ({ nom: n }); window.__visage = { nom: 'Camille', sur: true }; wilson.qui.qui = () => window.__visage""")
+        st['demandes'].clear(); g0 = st['gem']
+        await tool(conn, 'crm_question', {'question': "Combien j'ai fait de chiffre ce mois-ci ?"}, 'k1')
+        res = await attendre_resp(conn, 'k1')
+        check('CRM : Camille devant la tablette → refusé, rien demandé au PC ni à l\'analyste', 'REFUSÉ' in res and 'Désolé Camille' in res and not st['demandes'] and st['gem'] == g0 and has('CRM refusé'), res)
+        await tool(conn, 'question_difficile', {'question': 'Compare deux perceuses Makita'}, 'k2')
+        res = await attendre_resp(conn, 'k2')
+        dem = st['demandes'][0] if st['demandes'] else {}
+        check('… sa question Internet part bien à Claude, mais sans le CRM (crm = false)', dem.get('type') == 'internet' and dem.get('crm') is False and DIRE[:20] in res, json.dumps(dem, ensure_ascii=False)[:200])
+        await page.evaluate("window.__visage = { inconnu: true, sur: false }")
+        await tool(conn, 'crm_client', {'client': 'AD2M'}, 'k3')
+        res = await attendre_resp(conn, 'k3')
+        check('… un visage inconnu → refusé aussi (fiche client comprise)', 'REFUSÉ' in res and 'seulement pour Timothée' in res, res)
+        await page.evaluate("window.__visage = { nom: 'Camille', sur: true }; wilson.car = { why: 'bouton', at: Date.now() }")
+        await tool(conn, 'crm_question', {'question': 'Mon CA ?'}, 'k4')
+        res = await attendre_resp(conn, 'k4')
+        check('… tablette en « mode voiture » : toujours le visage qui compte (refusé)', 'REFUSÉ' in res, res)
+        await page.evaluate("wilson.car = null; window.__visage = { nom: 'Timothée', sur: true }")
+        st['demandes'].clear(); st['dire'] = 'Ce mois-ci, tu as fait 41 200 euros.'
+        await tool(conn, 'crm_question', {'question': 'Mon CA ?'}, 'k5')
+        res = await attendre_resp(conn, 'k5')
+        dem = st['demandes'][0] if st['demandes'] else {}
+        check('CRM : visage de Timothée reconnu → la question part (type crm)', '41 200' in res and dem.get('type') == 'crm' and dem.get('crm') is True, res + json.dumps(dem, ensure_ascii=False)[:200])
+        st['demandes'].clear(); st['dire'] = DIRE
+        await tool(conn, 'question_difficile', {'question': 'Équivalent Boschat de la Setin 4455 ?'}, 'k6')
+        await attendre_resp(conn, 'k6')
+        check('… et sa question difficile a le CRM (crm = true)', st['demandes'] and st['demandes'][0].get('crm') is True, json.dumps(st['demandes'][:1], ensure_ascii=False)[:200])
+        await page.evaluate("""window.__visage = null; Object.defineProperty(wilson.famille, 'telephone', { get: () => true, configurable: true }); Object.defineProperty(wilson, '_voitureBt', { get: () => true, configurable: true })""")
+        st['demandes'].clear(); st['dire'] = 'Ce mois-ci, tu as fait 41 200 euros.'
+        await tool(conn, 'crm_question', {'question': 'Mon CA ?'}, 'k7')
+        res = await attendre_resp(conn, 'k7')
+        check('CRM : téléphone relié à la voiture → pas besoin du visage', '41 200' in res and st['demandes'] and st['demandes'][0].get('type') == 'crm', res)
+        await page.evaluate("""delete wilson._voitureBt; delete wilson.famille.telephone; wilson.qui.qui = wilson.__q; wilson.qui.trouver = wilson.__t;
+            wilson._crmAutorise = () => ({ ok: true, pourquoi: 'essai' })""")
+        st['dire'] = DIRE; st['demandes'].clear()
 
         # 3. PC absent : l'analyste répond, et Wilson le dit une fois
         st['pc'] = {'vivant': False, 'vu': 400}; st['demandes'].clear(); g0 = st['gem']
