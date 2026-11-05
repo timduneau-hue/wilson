@@ -101,7 +101,7 @@ async def main():
         sp = await page.evaluate('window.__spoken')
         check('Réponse lue par la voix de la tablette', sp[-1] == "C'est noté, Moustache !", str(sp))
         await page.wait_for_timeout(150)
-        info = await page.evaluate("({facts: wilson.memory.facts.map(f=>f.text), emo: wilson.face.emotion, talk: wilson.face.talk, sub: document.getElementById('subtitle').textContent, log: wilson.memory.log.slice(-1)[0]})")
+        info = await page.evaluate("({facts: wilson.memoire.items.map(f=>f.texte), emo: wilson.face.emotion, talk: wilson.face.talk, sub: document.getElementById('subtitle').textContent, log: wilson.memory.log.slice(-1)[0]})")
         check('Souvenir enregistré', "Le chat de la famille s'appelle Moustache." in info['facts'])
         check('Émotion « joie »', info['emo'] == 'joie')
         check('Bouche animée pendant la voix', info['talk'] > 0.05, f"{info['talk']:.2f}")

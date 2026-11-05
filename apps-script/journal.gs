@@ -5,7 +5,8 @@
 //  3. réglages communs à tous les appareils (téléphone, tablette, PC) : rangés dans les propriétés du script, le plus récent gagne ;
 //  4. CRM à la voix : les questions de Wilson (actions « crm_… ») sont relayées à l'application Web du CRM avec le jeton
 //     de Timothée. Le CRM reste en accès « Moi uniquement » : sans ce jeton, personne d'autre ne peut l'ouvrir.
-//  5. la famille et la garde (fichier famille.gs) : messages partagés entre ses appareils, garde, alertes par e-mail.
+//  5. la famille et la garde (fichier famille.gs) : messages partagés entre ses appareils, garde, alertes par e-mail, agenda Famille,
+//     la mémoire de Wilson (onglet « Mémoire ») et les questions de Claude à Timothée (onglet « Questions »).
 // Déploiement : Déployer → Nouveau déploiement → Application Web → Exécuter en tant que « moi », accès « Tout le monde ».
 // Ouvrir ensuite l'adresse du déploiement : la page affiche un QR code que Wilson scanne (Réglages → Journal à distance).
 
@@ -23,7 +24,7 @@ function doPost(e) {
       if (d.action === 'reglages_lire') return json_(lireReglages_());
       if (d.action === 'reglages_ecrire') return json_(ecrireReglages_(d));
       if (String(d.action).indexOf('idees_') === 0) return json_(idees_(d));   // « Mes idées » (fichier idees.gs)
-      if (/^(msg_|garde_|alerte|agenda_)/.test(String(d.action))) return json_(famille_(d));   // messages, garde, alertes, agenda (fichier famille.gs)
+      if (/^(msg_|garde_|alerte|agenda_|mem_|q_)/.test(String(d.action))) return json_(famille_(d));   // messages, garde, alertes, agenda, mémoire, questions (fichier famille.gs)
       if (String(d.action).indexOf('crm_') === 0) return json_(crm_(d));
       return json_({ ok: false, erreur: 'action inconnue : ' + d.action });
     } catch (err) { return json_({ ok: false, erreur: 'script : ' + String(err && err.message || err) }); }   // ex. autorisation manquante

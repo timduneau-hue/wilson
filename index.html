@@ -43,8 +43,6 @@
     </ol>
     <input id="w-key" class="field" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Clé API Gemini (commence par AQ. ou AIza)">
     <p id="w-status" class="status" hidden></p>
-    <label class="row"><span>Qui vit à la maison ? <em>(facultatif)</em></span></label>
-    <textarea id="w-home" class="field" rows="2" placeholder="Ex. : Timothée, sa femme, leurs enfants… et le chat."></textarea>
     <button id="w-go" class="btn primary">Réveiller Wilson</button>
     <p class="fine"><b>Tu as déjà Wilson sur un autre appareil ?</b> Inutile de tout ressaisir : sur cet autre appareil, ouvre les réglages (appui long sur le visage) → « Copier mes réglages sur un autre appareil », puis scanne le code avec l'appareil photo de celui-ci.</p>
     <p class="fine">La clé reste sur cette tablette. Rien n'est envoyé tant qu'on ne le regarde pas en lui parlant.</p>
@@ -167,27 +165,17 @@
         <label class="row check"><input id="s-gardephoto" type="checkbox"><span>Joindre une photo de la pièce aux alertes (envoyée seulement à ton adresse e-mail)</span></label>
         <div class="buttons wrap"><button id="t-alerte" class="btn">Envoyer une alerte d'essai</button></div>
         <p id="s-gardestatus" class="status" hidden></p>
+        <p id="s-memoire" class="fine" style="margin:14px 0 0"></p>
       </section>
 
       <section class="group">
         <h3>Maison</h3>
-        <label class="row"><span>Qui vit ici</span><textarea id="s-home" class="field" rows="2"></textarea></label>
         <label class="row"><span>Ville (météo)</span><input id="s-city" class="field" type="text" placeholder="Ex. : Angers"></label>
         <label class="row"><span>Nuit</span>
           <span class="inline"><select id="s-night1" class="field small"></select> à <select id="s-night2" class="field small"></select></span></label>
         <label class="row check"><input id="s-cam" type="checkbox"><span>Caméra (suivi du regard et vue)</span></label>
         <label class="row check"><input id="s-mirror" type="checkbox"><span>Inverser le sens du regard</span></label>
         <label class="row check"><input id="s-subs" type="checkbox"><span>Sous-titres</span></label>
-      </section>
-
-      <section class="group">
-        <h3>Souvenirs <small id="mem-n"></small></h3>
-        <ul id="mem-list" class="memlist"></ul>
-        <div class="buttons">
-          <button id="m-export" class="btn">Exporter</button>
-          <label class="btn">Importer<input id="m-import" type="file" accept="application/json" hidden></label>
-          <button id="m-clear" class="btn danger">Tout effacer</button>
-        </div>
       </section>
 
       <section class="group">

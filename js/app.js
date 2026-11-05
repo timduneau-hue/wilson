@@ -21,10 +21,12 @@ import { ANALYSE_MAX_MS } from './analyste.js';
 import { Qui } from './qui.js';
 import { Famille, FAMILLE_TOOLS, FAMILLE_TOOL_NAMES } from './famille.js';
 import { Reactions } from './reactions.js';
+import { Memoire } from './memoire.js';
+import { Questions, QUESTION_TOOL } from './questions.js';
 
-const VERSION = '1.27.1';
+const VERSION = '1.28.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
-// actif ». Mise à jour seulement entre 4h00 et 5h00 (après la maintenance du lundi, vers 2h47) ; « Relancer l'appli » reste immédiat.
+// actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
 const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
 const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
@@ -88,7 +90,10 @@ class App {
     this.face.setMood('somnolent'); this.face.setBrightness(0.35);
     this.audio = new AudioIO(); this.brain = new Brain();
     { const r0 = this.brain.respond.bind(this.brain); this.brain.respond = (x) => { this._outilRepAt = performance.now(); return r0(x); }; }   // R1 : résultat d'outil rendu
-    this.memory = new Memory(); this.vision = null; this.sensors = new Sensors($('face'));
+    this.memory = new Memory(); this.vision = null;
+    this.memoire = new Memoire(this);            // ce qu'il retient d'utile (onglet « Mémoire » de la feuille, PLAN 7 septies)
+    this.questions = new Questions(this);        // les questions de Claude à Timothée (onglet « Questions »)
+    this.sensors = new Sensors($('face'));
     this.voice = new Voice(); this.eco = new EcoBrain(); this.mode = null; this.ecoState = null;
     this.ui = new SettingsUI(this);
     this.state = 'demarrage'; this.started = false; this.continuous = false;
@@ -176,7 +181,8 @@ class App {
       'Quota direct': this.quotaUntil && now < this.quotaUntil ? `en pause : ${this.quotaMsg || ''}` : 'pas de pause',
       'Quota économique': this.ecoQuotaUntil && now < this.ecoQuotaUntil ? `en pause : ${this.ecoQuotaMsg || ''}` : 'pas de pause',
       'Voix de la tablette': `${s.ecoVoice || 'automatique'} (${this.voice.voices().length} voix françaises)`,
-      'Souvenirs': `${this.memory.facts.length}`,
+      'Mémoire': this.memoire.decrire(),
+      'Questions de Claude': this.questions.decrire(),
       'Visages (sur cet appareil)': this.qui.decrire(),
       'Messages de la famille': this.famille.decrireMessages(),
       'Garde de la maison': this.famille.decrire(),
@@ -227,6 +233,7 @@ class App {
     setTimeout(() => this.remote.flush(), 20000);   // 1er bilan une fois la vision chargée
     if (this._imported) { this.log('Réglages copiés depuis un autre appareil'); this.badge('Réglages copiés depuis ton autre appareil ✓', 6000); }
     setTimeout(() => this.sync.pull(), 3000);       // réglages communs : le plus récent gagne
+    setTimeout(() => { this.memoire.synchroniser(); this.questions.synchroniser(); }, 6000);   // mémoire et questions (7 septies)
     this.setState('veille');
     this.applySettings();
   }
@@ -415,10 +422,16 @@ class App {
     return '';
   }
 
+  // Les prénoms de la maison : sa mémoire, les visages appris, l'ancien réglage « Qui vit ici » (gardé caché).
+  _prenomsMaison() {
+    const l = [...this.memoire.prenoms(), ...this.famille.noms(), ...((this.settings.home || '').match(/\b[A-ZÉÈÀÂÎÔ][a-zéèêëàâîïôöûüç-]{2,}\b/g) || [])];
+    return [...new Set(l)].filter((n) => n.toLowerCase() !== 'wilson');
+  }
+
   // Wilson vient de parler (moins de 20 s) : un « oui », « non », « il va faire chaud ? » est sa réponse (journal du 30/10/26, 11h26).
   _dialogueEnCours() { return !!(this.playEndAt && performance.now() - this.playEndAt < 20000); }
   _autrePrenom(t) {
-    const low = String(t || '').toLowerCase(), autres = (this.settings.home || '').match(/\b[A-ZÉÈÀÂÎÔ][a-zéèêëàâîïôöûüç-]{2,}\b/g) || [];
+    const low = String(t || '').toLowerCase(), autres = this._prenomsMaison();
     const tete = (low.match(/^\s*(?:allez\s+|hé\s+|eh\s+|oh\s+)?([a-zéèêëàâîïôöûüç-]{3,})\s*[,!]/) || [])[1];
     return !!(tete && (autres.some((n) => n.toLowerCase() === tete && n.toLowerCase() !== 'wilson') || /^(loulou|maman|papa|chéri|chérie|bébé|mamie|papi|doudou|minou)$/.test(tete)));
   }
@@ -428,8 +441,8 @@ class App {
   _semblePourMoi(t) {
     const x = String(t || '').trim(), low = x.toLowerCase();
     if (/\bwilson\b/i.test(x)) return true;
-    const autres = (this.settings.home || '').match(/\b[A-ZÉÈÀÂÎÔ][a-zéèêëàâîïôöûüç-]{2,}\b/g) || [];
-    // Un autre prénom (« Qui vit ici ») ou un petit nom (« loulou », « maman »…) en tête de phrase : ce n'est pas pour lui.
+    const autres = this._prenomsMaison();
+    // Un autre prénom (sa mémoire, les visages appris) ou un petit nom (« loulou », « maman »…) en tête de phrase : ce n'est pas pour lui.
     const tete = (low.match(/^\s*(?:allez\s+|hé\s+|eh\s+|oh\s+)?([a-zéèêëàâîïôöûüç-]{3,})\s*[,!]/) || [])[1];
     if (tete && (autres.some((n) => n.toLowerCase() === tete) || /^(loulou|maman|papa|chéri|chérie|cheri|cherie|bébé|bebe|mamie|papi|mon cœur|ma puce|doudou|minou)$/.test(tete))) return false;
     if (/^\s*allez\s+(loulou|maman|papa|chéri|chérie|ma puce|mon cœur)\b/.test(low)) return false;
@@ -511,6 +524,7 @@ class App {
       if (this.car || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant', 'reponse_tardive'].includes(reason)) this._netLost('hors ligne au réveil', { start: { reason, pcm, handle: opts.handle } });
       return;
     }
+    this._convDebut = Date.now();   // 7 septies : début de la discussion, pour la passe de mémoire
     // Quel cerveau ? Direct (Gemini Live) si possible, sinon mode économique (Gemini Flash + voix de la tablette).
     const now = Date.now(), want = this.settings.brainMode || 'auto';
     const liveBlocked = this.quotaUntil && now < this.quotaUntil, ecoBlocked = this.ecoQuotaUntil && now < this.ecoQuotaUntil;
@@ -841,8 +855,8 @@ class App {
         const logTiming = () => this.log(`Délais : envoi ${ms(tSend)} s${req.spec ? ' (anticipé)' : ''} · Google ${ms(tNet || tAll)} s · 1re phrase ${ms(tFirst || tAll)} s · voix ${this.voice.startedAt ? ms(this.voice.startedAt) + ' s' : '—'} · complet ${ms(tAll)} s`
           + ` (${out.model}, réflexion ${out.think || 'par défaut'}${out.hedged ? ', relancée' : ''}${tSearch ? `, recherche ${((tAll - tSearch) / 1000).toFixed(1)} s${last.hedged ? ' relancée' : ''}` : ''}, phrase de ${req.audio ? (req.audio.length / 16000).toFixed(1) + ' s' : '—'})`);
         const mesure = timing; timing = () => { logTiming(); mesure(); };
-        this.memory.addExchange(out.entendu, said);
-        this.famille.dit(said);
+        this.memory.addExchange(out.entendu, said, this.famille._parle());
+        this.famille.dit(said); this.questions.dit(said, conv);
         this._lastReply = said;
         if (this.settings.subtitles || this.car) $('subtitle').textContent = said.slice(0, 220);
       }
@@ -877,8 +891,8 @@ class App {
   // Effets d'une réponse : émotion (si pas déjà montrée pendant l'écriture), souvenirs, geste.
   _applyEco(out, emoShown) {
     if (!emoShown && out.emotion) { if (out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9); else this.face.clearEmotion(); }
-    for (const f of out.memoriser) { this.memory.add(f); this.log('Retenu : ' + f, true); }
-    if (out.oublier) { const g = this.memory.forget(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}`, true); }
+    for (const f of out.memoriser) { if (this.memoire.ajouter(f, { qui: this.famille._parle(), origine: 'demandé' })) this.log('Retenu (demandé) : ' + f, true); }
+    if (out.oublier) { const g = this.memoire.oublier(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}${g.length ? ' (' + g.join(' ; ') + ')' : ''}`, true); }
     const g = { oui: 'nod', non: 'shake', sautiller: 'bounce', pencher_la_tete: 'tilt' }[out.geste];
     if (g) this.face.play(g); if (out.geste === 'clin_oeil') this.face.doWink(1);
     if (out.memoriser.length && !g) this.face.play('nod');
@@ -965,6 +979,10 @@ class App {
     if (this.state !== 'conversation' && this.state !== 'eveil') return;
     if (this.netWait && !this.netWait.start) { clearTimeout(this.netWait.timer); this.netWait = null; }
     const depuis = (t) => (t ? `${Math.round((performance.now() - t) / 1000)} s` : '—');
+    { // 7 septies : la passe de mémoire relit la discussion 15 s après (en arrière-plan) ; les questions de Claude posées sont notées tout de suite
+      const t0 = this._convDebut || 0, t1 = Date.now(), qs = this.questions.poseesSansReponse(this.convId); this._convDebut = 0;
+      if (t0 && why !== 'essai de voix') setTimeout(() => this._passeMemoire(t0, t1, qs), 15000);
+    }
     this.log(`Fin de conversation (${why}) — dernière parole de Wilson il y a ${depuis(this.playEndAt)}, de Timothée il y a ${depuis(this._heardAt)}${this._voitureBt ? ', en voiture' : ''}`); this._byName = false; this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false; this._searchMs = 0;
     // Les outils du CRM vont au bout (une préparation affiche sa carte « Oui / Non ») ; les recherches s'arrêtent.
     if (this._searches) { for (const c of this._searches.values()) if (!c.crm) c.abort(); this._searches.clear(); }
@@ -978,7 +996,7 @@ class App {
   }
 
   _system(mode = 'live') {
-    const s = this.settings, m = this.memory.forPrompt();
+    const s = this.settings, souv = this.memoire.pourConsigne(), recents = this.memory.recent(10);
     const bat = this.battery && !this.battery.charging && !this._batTold && !/Mobile/.test(navigator.userAgent) ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le une seule fois, brièvement, puis n'en reparle plus.` : '';
     if (bat) this._batTold = true;
     const nv = this._nouveautes(mode);
@@ -986,7 +1004,7 @@ class App {
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
     const crm = this.crm.on, car = !!this.car, maison = this.maison.on;
     const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch, crm, maison }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
-Ta mémoire : quand on te confie une information durable (prénoms, goûts, anniversaires, habitudes, rendez-vous, la ville où vous habitez, où sont rangées les choses), appelle memoriser avec une phrase courte et autonome, puis confirme en quelques mots. Si on te demande d'oublier, appelle oublier.
+Ta mémoire : après chaque discussion, tu relis toi-même ce qui s'est dit et tu retiens ce qui est utile (prénoms, goûts, dates, habitudes) : inutile d'appeler memoriser pour ça. Appelle memoriser seulement quand on te demande clairement de retenir quelque chose (« retiens que… », « n'oublie pas que… »), avec une phrase courte et autonome, puis confirme en quelques mots. « Oublie que… » : appelle oublier.
 Tu parles toujours en français, et tu ne dis jamais à voix haute tes réflexions, ce que tu vas faire avec tes outils ou des remarques sur toi-même (journal du 30/10/26 : « I need to check why the TV… »).
 La fin : si on te dit clairement au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation. Jamais sur un reproche ou une remarque : reste et écoute.
 Tes progrès : quand Timothée fait une remarque sur ta façon de fonctionner (« c'est un bug », « tu devrais… », « j'aimerais que tu… », « ne fais plus ça », une fonction qui manque), appelle remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. S'il demande ce qu'il t'a fait noter ou demandé de changer : mes_remarques (pas idees). Ne dis jamais « c'est noté » sans avoir appelé remarque. Une remarque sur ton apparence ou une chose qu'il trouve bizarre (« je ne vois plus tes pupilles », « tes yeux sont tout blancs ») en est une aussi. N'invente jamais d'explication sur ton propre fonctionnement (« c'est une mise à jour de mon visage ») : si tu ne sais pas, dis-le et note la remarque. Ne prétends pas pouvoir te modifier toi-même sur-le-champ.
@@ -1024,8 +1042,10 @@ ${inv || '(inventaire pas encore lu : appelle maison_etat)'}
 `;
     // La famille (PLAN 7 sexies) : qui te regarde, messages à dire, garde ; outils messages, visages, garde (direct seulement).
     const fam = this.famille.contexte(mode);
-    const famille = eco ? (fam ? `\nLa famille : ${fam}\n` : '') : `
-La famille : ${fam}
+    // 7 septies, D : une question de Claude à poser à Timothée (à lui seulement, une par discussion).
+    const qst = this.questions.contexte({ parle: this.famille._parle(), conv: this.convId, mode: eco ? 'eco' : 'live', voiture: car });
+    const famille = eco ? (fam || qst ? `\nLa famille : ${[fam, qst].filter(Boolean).join('\n')}\n` : '') : `
+La famille : ${fam}${qst ? '\n' + qst : ''}
 - « Dis à X que… », « laisse un message à X » : outil messages (deposer : pour = son prénom, de = qui te parle, texte = le message tel quel, mis au propre). Tu le lui diras toi-même quand il ou elle te regardera. « J'ai des messages ? » : messages (lire). « X a eu mon message ? » : statut.
 - « Apprends mon visage, je suis X » : dis « Regarde-moi bien… » puis outil visages (apprendre) ; « oublie le visage de X » : oublier. Ne prétends jamais reconnaître quelqu'un si ce n'est pas écrit ici.
 - « On part, surveille la maison » : outil garde (activer) ; « on est rentrés » : garde (arreter).
@@ -1054,13 +1074,12 @@ ${travail}${maisonTxt}${famille}${voiture}${eco ? (s.city ? `La maison est à ${
 Langue : parle toujours en français, y compris pour une phrase d'attente. La transcription de ce qu'on te dit sort parfois en anglais, en espagnol ou en russe par erreur : c'est du français mal compris. Réponds toujours en français, jamais en anglais, même si la phrase entendue est en anglais, en italien ou en portugais ; si tu n'as pas compris, demande simplement de répéter.`}
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
-La maison : ${s.home || 'pas encore précisé — tu peux demander les prénoms et les retenir.'}
-
-Ce que tu sais déjà (tes souvenirs) :
-${m.facts}
+Ta mémoire (ce que tu as retenu de vos discussions ; la famille peut la corriger) :
+${souv || '(presque rien pour l\'instant : tu apprendras les prénoms et les habitudes au fil des discussions, sans faire d\'interrogatoire)'}
+Sers-t'en avec tact, comme un ami qui se souvient : naturellement quand c'est utile (« sans sucre, comme d'habitude ? »), jamais pour réciter ce que tu sais ni pour montrer que tu te souviens. Ne parle d'un sujet personnel ou de santé que si la personne l'aborde. Si un souvenir semble dépassé, fie-toi à ce qu'on te dit maintenant.
 
 Derniers échanges (pour la continuité, n'y fais allusion que si c'est utile) :
-${m.recent || '(aucun)'}
+${recents || '(aucun)'}
 
 Nous sommes ${fmtDate()}.${bat}${nv}`;
   }
@@ -1253,7 +1272,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         this.log(`Voix du direct : ${T.sec.toFixed(1)} s reçues${this.audio.trous ? `, ${this.audio.trous} trou(s) (voix arrivée en retard)` : ''}, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} photo(s) prise(s) à la demande${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
       }
       this._liveTurn = null; this._outPeak = 0; this.audio.trous = 0;
-      if (user || wilson) this.memory.addExchange(user, wilson);
+      if (user || wilson) this.memory.addExchange(user, wilson, this.famille._parle());
       if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
       if (user) this._parleDepuis = true;
       // Il a reparlé APRÈS le résultat de l'outil (tour suivant) : la relance « réponds » ne vaut plus pour cet outil.
@@ -1263,6 +1282,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         this._derniereReponse = { texte: wilson, at: performance.now() }; this._parleDepuis = false;
         this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson); this._enregistreFaux(wilson);
         this.famille.dit(wilson);                                                // message de la famille bien transmis (7 sexies, M3)
+        this.questions.dit(wilson, this.convId);                                 // question de Claude posée à Timothée (7 septies, D)
         // Journal du 30/10/26, 22h39 : « To hear your thoughts on something specific, just let me know. » → il le redit en français.
         if (enAnglais(wilson) && this.brain.open && performance.now() - (this._anglaisAt || -1e9) > 15000) {
           this._anglaisAt = performance.now(); this.log('Wilson a répondu en anglais : je lui demande de le redire en français');
@@ -1480,6 +1500,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       if (MAISON_TOOL_NAMES.includes(c.name)) { this._maisonCmd(c); continue; } // réponse envoyée quand Home Assistant a agi
       if (OUTILS_NAMES.includes(c.name)) { this._outil(c); continue; }        // écran, minuteur, rappel, météo, courses
       if (FAMILLE_TOOL_NAMES.includes(c.name)) { this._familleOutil(c); continue; }   // messages, visages, garde (7 sexies)
+      if (c.name === 'repondre_question') { this._questionOutil(c); continue; }       // réponse de Timothée à Claude (7 septies)
       let out = { result: 'ok' }, silent = true;
       switch (c.name) {
         case 'exprimer_emotion': {
@@ -1488,8 +1509,8 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
           if (g) this.face.play(g); if (a.geste === 'clin_oeil') this.face.doWink(1);
           break;
         }
-        case 'memoriser': this.memory.add(a.fait); this.log('Retenu : ' + a.fait, true); this.face.play('nod'); out = { result: 'mémorisé' }; break;
-        case 'oublier': { const g = this.memory.forget(a.sujet || ''); out = { result: g.length ? 'Oublié : ' + g.join(' ; ') : 'Aucun souvenir ne correspond.' }; silent = false; this.log('Oublier « ' + a.sujet + ' » : ' + g.length, true); break; }
+        case 'memoriser': this.memoire.ajouter(a.fait, { cat: a.categorie, qui: a.qui || this.famille._parle(), origine: 'demandé' }); this.log('Retenu (demandé) : ' + a.fait, true); this.face.play('nod'); out = { result: 'mémorisé' }; break;
+        case 'oublier': { const g = this.memoire.oublier(a.sujet || ''); out = { result: g.length ? 'Oublié : ' + g.join(' ; ') : 'Aucun souvenir ne correspond.' }; silent = false; this.log('Oublier « ' + a.sujet + ' » : ' + g.length + (g.length ? ' (' + g.join(' ; ') + ')' : ''), true); break; }
         case 'date_et_heure': out = { result: fmtDate() }; silent = false; break;
         case 'terminer_conversation': { this.endAfterSpeech = true; const id = this.convId; setTimeout(() => { if (id === this.convId && this.endAfterSpeech && !this.audio.playing) this.endConversation('au revoir'); }, 4000); break; }
         case 'chercher': this._search(c, a.question || ''); continue;      // réponse envoyée à la fin de la recherche
@@ -1804,7 +1825,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   }
 
   // ---------- CRM à la voix (PLAN 2 quater) ----------
-  _extraTools() { return [...OUTILS, ...FAMILLE_TOOLS, ...(this.crm.on ? CRM_TOOLS : []), ...(this.maison.on ? MAISON_TOOLS : [])]; }
+  _extraTools() { return [...OUTILS, ...FAMILLE_TOOLS, QUESTION_TOOL, ...(this.crm.on ? CRM_TOOLS : []), ...(this.maison.on ? MAISON_TOOLS : [])]; }
 
   // Ce que Timothée dit, horodaté, avec le numéro du tour : le verrou n'accepte qu'un « oui » d'un tour APRÈS la relecture (C2).
   _noteHeard(text, whole = false) {
@@ -1952,6 +1973,30 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     try { const a = await C.agenda(demain, signal); agenda = a && a.ok !== false ? String(a.texte || '').slice(0, 1500) : '(agenda indisponible)'; } catch (e) { if (e.name === 'AbortError') throw e; agenda = '(agenda indisponible)'; }
     this.log(`Objectif des clients actifs : objectif ${obj || 'pas encore donné'}, rendez-vous de ${demain} joints`, true);
     return `OBJECTIF CLIENTS ACTIFS. Objectif du mois : ${obj ? obj + ' clients actifs' : 'pas encore donné (demande-le-lui à la fin)'}.\nBilan du CRM (chiffre officiel des clients actifs du mois, ne le recalcule pas) :\n${bilan}\nRendez-vous du prochain jour ouvré (${demain}, ${pad(j.getDate())}/${pad(j.getMonth() + 1)}) :\n${agenda}`;
+  }
+
+  // Réponse de Timothée à une question de Claude (7 septies, D) : rangée à côté de la question dans la feuille.
+  async _questionOutil(call) {
+    const a = call.args || {}, conv = this.convId;
+    let info;
+    try { info = await this.questions.repondre(a.id, a.reponse, 'outil'); } catch (e) { info = 'Pas transmise pour l\'instant : remercie-le quand même.'; this.log('Question de Claude : ' + e.message); }
+    if (conv !== this.convId) return;
+    this.brain.respond([{ id: call.id, name: call.name, response: { result: info } }]);
+  }
+
+  // Après une discussion (7 septies, S2) : la passe de mémoire relit l'échange, en arrière-plan.
+  async _passeMemoire(t0, t1, questions = []) {
+    const echanges = this.memory.depuis(t0, t1);
+    if (!echanges.length && !questions.length) return;
+    const prev = this._passe || Promise.resolve();
+    this._passe = prev.then(async () => {
+      try {
+        const ou = this.car ? 'en voiture, sur le téléphone de Timothée' : deviceName() === 'téléphone' ? 'sur le téléphone de Timothée' : 'sur la tablette du salon';
+        const r = await this.memoire.passe({ echanges, questions, ou });
+        if (r) for (const x of r.reponses) await this.questions.repondre(x.id, x.reponse, 'retrouvée en relisant la discussion');
+      } catch (e) { this.log('Mémoire : relecture de la discussion impossible (' + (e.message || e) + ')'); }
+    });
+    return this._passe;
   }
 
   // La famille (PLAN 7 sexies) : messages, visages, garde. Apprendre un visage prend jusqu'à 20 s : compté comme une

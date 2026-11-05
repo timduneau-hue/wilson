@@ -81,7 +81,7 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte autour, avec ces champs
 ${chercher}${search ? '' : ` "regarder": true SEULEMENT si on te demande de regarder ou de décrire quelque chose (ce que tu vois, une couleur, lire, un objet montré, une tenue…) et qu'aucune photo n'est jointe ; alors "reponse" = une très courte phrase d'attente (« Je regarde… »). Sinon false,\n`}${crm && !search ? ` "crm": {"outil": "aucun", sauf si la phrase porte sur le CRM de Timothée (ses clients, rendez-vous, tâches, devis, chiffres, articles), s'il faut appeler un client ou noter quelque chose : "client" (fiche d'un client : remplis "client" avec le nom dit), "agenda" ("jour" : aujourd'hui, demain, jeudi…), "bilan" (son chiffre d'affaires global), "produit" ("produit" et "question" qui_achete ou infos), "question" (TOUTE autre question sur ses données : chiffre passé, total, liste, détail, « qui », « combien », « quand », devis à relancer… ; "demande" = la question complète avec le client et la période ; un analyste cherche dans tout le CRM, "reponse" = « Je cherche l'information… »), "itineraire" ("client" : aller chez lui, un bouton GPS s'affiche), "appeler" ("client", "contact"), "noter" ("type" tache, compte_rendu, rdv ou note, "client", "texte" = ses mots mis au propre, "date", "heure", "echange" visite ou appel : RIEN n'est écrit, tu recevras la phrase à lui relire), "confirmer" (SEULEMENT s'il vient de répondre oui à ta relecture)} ; quand "outil" n'est pas "aucun", "reponse" = une très courte phrase d'attente (« Je regarde dans le CRM… »), ou vide pour noter et confirmer. Ne devine jamais un nom, un chiffre ou une date du CRM,\n` : ''}${maison && !search ? ` "maison": "vide, sauf si on te demande d'agir sur la maison ou son état (allumer, éteindre, lumières, prises, télé, son, « est-ce que … est allumé ») : alors la demande complète en français pour Home Assistant (« allume la grande lumière du salon ») ; "reponse" = vide (Home Assistant répondra)",\n` : ''} "emotion": "une émotion parmi ${EMOTIONS.join(', ')}",
  "reponse": "${reponse}",
  "geste": "${GESTES.join(', ')}",
- "memoriser": ["informations durables à retenir, phrases courtes et autonomes avec les prénoms"],
+ "memoriser": ["SEULEMENT si on te demande clairement de retenir quelque chose (« retiens que… ») : phrase courte et autonome avec les prénoms ; sinon liste vide (tu relis la discussion après coup)"],
  "oublier": "sujet des souvenirs à effacer si on te le demande, sinon vide",
  "fin": true si on te dit au revoir, bonne nuit ou « merci, c'est tout »,
  "entendu": "${search ? '' : 'transcription fidèle de ce qui a été dit (vide si rien d\'intelligible)'}"}
@@ -256,6 +256,33 @@ export class EcoBrain {
           return /\boui\b/i.test(t);
         }
         last = res;
+        if (res.status === 400 && /think/i.test(res.msg || '')) continue;
+        break;
+      }
+    }
+    throw new Error((last && last.msg) || 'pas de réponse');
+  }
+
+  // Petite requête texte → JSON, en arrière-plan (passe de mémoire après une discussion, PLAN 7 septies) : modèles « réfléchis »,
+  // réflexion basse, sans flux ni relance. → { json, model } ; rejette si aucun modèle ne répond.
+  async texteJson({ key, system, text, schema, signal, maxTokens = 2048 }) {
+    const order = ECO_MODELS.reflechi, now = Date.now(), refus = this._refusTexte = this._refusTexte || {};   // quota épuisé : 1 h sans ce modèle
+    const libre = (m) => !(this.refused[m] > now) && !(refus[m] > now);
+    const models = [...order.filter(libre), ...order.filter((m) => !libre(m))].slice(0, 3);
+    let last = null;
+    for (const model of models) {
+      for (const think of [true, false]) {
+        const body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text }] }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: maxTokens, responseMimeType: 'application/json', responseSchema: schema,
+            ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 512 } : { thinkingLevel: 'low' } } : {}) } };
+        this.sent.push(performance.now());
+        const res = await this._one(API + model + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, signal);
+        if (res.ok) {
+          const t = ((((res.json.candidates || [])[0] || {}).content || {}).parts || []).filter((x) => x.text && !x.thought).map((x) => x.text).join('');
+          try { return { json: JSON.parse(t), model }; } catch (_) { last = { msg: `réponse illisible (${model})` }; break; }
+        }
+        last = res;
+        if (res.status === 429) refus[model] = Date.now() + 3600000;
         if (res.status === 400 && /think/i.test(res.msg || '')) continue;
         break;
       }
