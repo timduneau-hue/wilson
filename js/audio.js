@@ -16,6 +16,7 @@ export class AudioIO {
     this.sources = []; this.nextTime = 0; this.outLevel = 0; this.outRound = 0;
     this.gainDb = 0; this.aec = false; this.playedSec = 0;
     this.micDevice = null; this.micInfo = ''; this.btIn = false;
+    this.natif = false; this._natifAt = 0; this._natifKo = false; this.natifRelances = 0;
   }
   on(ev, fn) { this.listeners[ev].push(fn); }
   off(ev, fn) { this.listeners[ev] = this.listeners[ev].filter((f) => f !== fn); }
@@ -39,7 +40,7 @@ export class AudioIO {
     await this.ctx.audioWorklet.addModule(new URL('./worklets/capture.js', import.meta.url));
     const node = this.node = new AudioWorkletNode(this.ctx, 'wilson-capture');
     node.port.onmessage = (e) => this._onCapture(e.data);
-    this.src = this.ctx.createMediaStreamSource(this.stream); this.src.connect(node);
+    if (this.stream) { this.src = this.ctx.createMediaStreamSource(this.stream); this.src.connect(node); }   // (micro de l'appli : pas de flux)
     // Le nœud de capture doit être relié à la sortie pour être cadencé (gain nul : rien n'est audible).
     const mute = this.ctx.createGain(); mute.gain.value = 0; node.connect(mute); mute.connect(this.ctx.destination);
     // Chaîne de sortie : voix de Wilson → analyseur (lèvres) → haut-parleur.
@@ -75,7 +76,58 @@ export class AudioIO {
     } catch (_) {}
     this.btIn = bt; this.micDevice = dev;
   }
+  // ---------- Le micro de l'appli Android (appli 3) ----------
+  // Journal du 05/11/26, 18h24 (« le son ne marche toujours pas dans la voiture ») : dans l'appli, la page ne voit pas le nom
+  // des micros (« ? ») et prenait celui de la voiture → canal « appel » du Bluetooth → voix muette dans la voiture. Quand
+  // l'appli sait écouter elle-même, c'est elle qui tient le micro du téléphone : la page n'ouvre plus aucun micro, son son
+  // reste une « musique » qu'Android Auto passe dans les haut-parleurs. Le son arrive par window.__wilsonMicro (40 ms,
+  // 16 kHz) ; s'il n'arrive plus pendant 2,5 s, le micro de l'appli est relancé.
+  static appli() { const A = typeof window !== 'undefined' && window.WilsonAndroid; return A && typeof A.microDemarre === 'function' ? A : null; }
+  _openNatif(aec) {
+    const A = AudioIO.appli();
+    if (!A || this._natifKo) return false;
+    let r = '';
+    try { r = String(A.microDemarre(!!aec)); } catch (e) { r = 'erreur : ' + (e.message || e); }
+    if (!/^ok/.test(r)) {
+      this._natifKo = true; this.natif = false;
+      this._emit('info', `micro de l'appli impossible (${r.replace(/^erreur\s*:?\s*/, '')}) : micro de la page`);
+      return false;
+    }
+    this.natif = true; this.micDevice = null; this._natifAt = performance.now();
+    try { this.btIn = !!A.bluetoothVoiture(); } catch (_) {}
+    this.micInfo = `micro de l'appli (${r.replace(/^ok\s*:?\s*/, '')})${this.btIn ? ', voiture reliée : son sur le canal musique' : ''}`;
+    window.__wilsonMicro = (b64) => this._onNatif(b64);
+    if (!this._natifVeille) {
+      this._natifVeille = setInterval(() => this._veilleNatif(), 1000);
+      window.addEventListener('pagehide', () => { try { A.microArrete(); } catch (_) {} });
+    }
+    return true;
+  }
+  _onNatif(b64) {
+    this._natifAt = performance.now();
+    if (!this.ctx || !this.out || !this.natif) return;
+    if (this.natifRelances) { this._emit('info', `micro de l'appli revenu (relancé ${this.natifRelances} fois)`); this.natifRelances = 0; }
+    let bin; try { bin = atob(b64); } catch (_) { return; }
+    const n = bin.length >> 1;
+    for (let o = 0; o < n; o += 320) {                         // blocs de 20 ms, comme le micro de la page
+      const m = Math.min(320, n - o), f = new Float32Array(m);
+      for (let i = 0; i < m; i++) { const k = (o + i) * 2; let v = bin.charCodeAt(k) | (bin.charCodeAt(k + 1) << 8); if (v >= 0x8000) v -= 0x10000; f[i] = v / 32768; }
+      this._onCapture(f, TARGET);
+    }
+  }
+  _veilleNatif() {
+    if (!this.natif) return;
+    const A = AudioIO.appli(), gap = performance.now() - this._natifAt;
+    try { const bt = !!(A && A.bluetoothVoiture()); this.btIn = bt; } catch (_) {}
+    if (gap < 2500) return;
+    if (!this._zero) { this._zero = true; this._micUpdate('micro de l\'appli muet'); }
+    this.natifRelances++;
+    if (this.natifRelances === 1 || this.natifRelances % 30 === 0) this._emit('info', `micro de l'appli muet depuis ${Math.round(gap / 1000)} s : je le relance (${this.natifRelances} fois)`);
+    try { A.microArrete(); A.microDemarre(!!this.aec); } catch (_) {}
+    this._natifAt = performance.now();
+  }
   async _openMic(aec) {
+    if (this._openNatif(aec)) return null;
     await this._chooseMic();
     const base = { echoCancellation: aec, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
     let st = null;
@@ -97,6 +149,11 @@ export class AudioIO {
   // La voiture se connecte (ou se déconnecte) pendant que Wilson tourne : si le micro en cours n'est pas le bon, il est rouvert.
   async _onDevices() {
     if (!this.ctx || !this.node) return;
+    if (this.natif) {                                          // l'appli garde toujours le micro du téléphone
+      const A = AudioIO.appli(); let bt = false; try { bt = !!A.bluetoothVoiture(); } catch (_) {}
+      if (bt !== this.btIn) this._emit('info', `appareils audio changés : ${bt ? 'voiture reliée (Bluetooth)' : 'plus de voiture'} — le micro de l'appli reste celui du téléphone`);
+      this.btIn = bt; return;
+    }
     let ins = [];
     try { ins = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput'); } catch (_) {}
     const bt = ins.some((d) => AudioIO.isBluetooth(d.label)), t = this.stream && this.stream.getAudioTracks()[0];
@@ -116,7 +173,7 @@ export class AudioIO {
     if (this.src) { try { this.src.disconnect(); } catch (_) {} }
     if (this.stream) this.stream.getTracks().forEach((tr) => tr.stop());
     this.stream = await this._openMic(aec); this.aec = aec; this._watchTrack();
-    this.src = this.ctx.createMediaStreamSource(this.stream); this.src.connect(this.node);
+    this.src = this.stream ? this.ctx.createMediaStreamSource(this.stream) : null; if (this.src) this.src.connect(this.node);
     return true;
   }
   // Piste du micro : coupée par le système (appel…), ou arrêtée (Bluetooth qui change) → rouverte, sinon Wilson resterait sourd.
@@ -136,8 +193,9 @@ export class AudioIO {
       if (this.src) { try { this.src.disconnect(); } catch (_) {} }
       const old = this.stream; this.stream = null;
       if (old) old.getTracks().forEach((tr) => { if (tr.readyState !== 'ended') tr.stop(); });
+      if (this.natif) { try { AudioIO.appli().microArrete(); } catch (_) {} }
       this.stream = await this._openMic(this.aec); this._watchTrack();
-      this.src = this.ctx.createMediaStreamSource(this.stream); this.src.connect(this.node);
+      this.src = this.stream ? this.ctx.createMediaStreamSource(this.stream) : null; if (this.src) this.src.connect(this.node);
       this._emit('info', 'micro rouvert');
     } catch (e) {
       this._emit('info', 'micro impossible à rouvrir : ' + e.message);
@@ -230,29 +288,34 @@ export class AudioIO {
   describe() {
     const c = this.ctx; if (!c) return 'pas démarré';
     const lat = Math.round(((c.baseLatency || 0) + (c.outputLatency || 0)) * 1000);
-    return `${c.state}, ${c.sampleRate} Hz, latence de sortie ${lat} ms, annulation d'écho ${this.aec ? 'oui (Android : son en mode appel)' : 'non (haut-parleur normal)'}, voix du direct jouée : ${Math.round(this.playedSec)} s${this.micInfo ? ', ' + this.micInfo : ''}${this.holding ? ', lecteur multimédia en route' : this.holdErr ? ', lecteur multimédia refusé (' + this.holdErr.slice(0, 60) + ')' : ''}${this.takenN ? `, micro pris par le téléphone ${this.takenN} fois${this.micTaken ? ' (EN CE MOMENT)' : ''}` : ''}`;
+    return `${c.state}, ${c.sampleRate} Hz, latence de sortie ${lat} ms, annulation d'écho ${this.aec ? (this.natif ? 'oui (anti-écho de l\'appli)' : 'oui (Android : son en mode appel)') : 'non (haut-parleur normal)'}, voix du direct jouée : ${Math.round(this.playedSec)} s${this.micInfo ? ', ' + this.micInfo : ''}${this.holding ? ', lecteur multimédia en route' : this.holdErr ? ', lecteur multimédia refusé (' + this.holdErr.slice(0, 60) + ')' : ''}${this.takenN ? `, micro pris par le téléphone ${this.takenN} fois${this.micTaken ? ' (EN CE MOMENT)' : ''}` : ''}`;
   }
 
   get running() { return this.ctx && this.ctx.state === 'running'; }
   async resume() { if (this.ctx && this.ctx.state !== 'running') await this.ctx.resume(); }
 
   // ----- capture -----
-  _onCapture(f) {
+  _onCapture(f, rate) {
+    const sr = rate || this.ctx.sampleRate;
     // Silence numérique (que des zéros) pendant 1,2 s : un vrai micro a toujours un peu de souffle → le téléphone l'a pris.
     let pk = 0; for (let i = 0; i < f.length; i++) { const a = f[i] < 0 ? -f[i] : f[i]; if (a > pk) pk = a; }
-    const dur = (f.length / this.ctx.sampleRate) * 1000;
+    const dur = (f.length / sr) * 1000;
     if (pk < 1e-6) { this._zeroMs += dur; this._liveMs = 0; if (!this._zero && this._zeroMs >= 1200) { this._zero = true; this._micUpdate('silence numérique'); } }
     else { this._zeroMs = 0; if (this._zero && (this._liveMs += dur) >= 200) { this._zero = false; this._micUpdate('son rendu'); } }
     // Rééchantillonnage vers 16 kHz : moyenne sur une fenêtre de largeur `ratio` (filtre anti-repliement simple).
-    const r = this.ratio, half = r / 2, out = new Float32Array(Math.ceil(f.length / r) + 2);
-    let n = 0, pos = this._frac;
-    while (pos < f.length) {
-      const a = Math.max(0, Math.floor(pos - half + 0.5)), b = Math.min(f.length - 1, Math.floor(pos + half - 0.5));
-      let s = 0; for (let i = a; i <= b; i++) s += f[i];
-      out[n++] = s / Math.max(1, b - a + 1); pos += r;
+    // (Le micro de l'appli arrive déjà à 16 kHz.)
+    let pcm = f;
+    if (sr !== TARGET) {
+      const r = this.ratio, half = r / 2, out = new Float32Array(Math.ceil(f.length / r) + 2);
+      let n = 0, pos = this._frac;
+      while (pos < f.length) {
+        const a = Math.max(0, Math.floor(pos - half + 0.5)), b = Math.min(f.length - 1, Math.floor(pos + half - 0.5));
+        let s = 0; for (let i = a; i <= b; i++) s += f[i];
+        out[n++] = s / Math.max(1, b - a + 1); pos += r;
+      }
+      this._frac = pos - f.length;
+      pcm = out.subarray(0, n);
     }
-    this._frac = pos - f.length;
-    const pcm = out.subarray(0, n);
     // Niveau et détection de voix (seuil qui s'adapte au bruit de fond de la pièce).
     let s = 0; for (let i = 0; i < pcm.length; i++) s += pcm[i] * pcm[i];
     const rms = Math.sqrt(s / Math.max(1, pcm.length)); const db = 20 * Math.log10(rms + 1e-9);
