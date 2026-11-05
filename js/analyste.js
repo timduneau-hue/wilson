@@ -59,7 +59,13 @@ Méthode :
 3. Quand tu as de quoi répondre : {"action": "repondre", "reponse": "…"}.
 
 Règles :
-- Ne devine jamais un chiffre, une date ou un nom : tout doit venir d'un résultat.
+${reglesCRM({ voiture })}`;
+}
+
+// Les règles du CRM (dates, exercice, dernières commandes, briefings, objectif clients actifs…) : les mêmes pour l'analyste
+// Gemini et pour Claude sur le PC de la maison (PLAN 10), qui les reçoit avec chaque question sur le CRM.
+export function reglesCRM({ voiture = false } = {}) {
+  return `- Ne devine jamais un chiffre, une date ou un nom : tout doit venir d'un résultat.
 - Les noms de clients sont souvent mal entendus (il dicte en voiture) : cherche avec « ressemble » ou « contient » sur un mot distinctif, et vérifie que le client trouvé est le bon ; plusieurs clients possibles : dis-le dans la réponse.
 - Préfère les calculs (somme, nombre, max…) aux longues listes ; mets une limite.
 - « Le mois dernier », « cette année », « depuis trois mois » : calcule les dates à partir d'aujourd'hui. L'exercice va de septembre à août. Le chiffre d'affaires = somme de « montant » des commandes.
@@ -182,6 +188,9 @@ export class Analyste {
       this.log(`Analyste : ${model} → ${String(msg).slice(0, 100)} (${Math.round((Date.now() - t1) / 1000)} s)`);
       if (r.status === 401 || r.status === 403) { err.auth = true; throw err; }
       if (r.status === 429 || /quota|exhausted|rate.?limit/i.test(msg)) { this.refused[model] = Date.now() + 3600000; this._saveRefus(); throw err; }
+      // Journal du 05/11/26, 19h22:54 : « models/gemini-2.5-flash is no longer available to new users » à chaque question (une
+      // requête et une seconde perdues à chaque fois) : un modèle fermé n'est plus essayé pendant 30 jours.
+      if (r.status === 404 || /no longer available|not found|not supported/i.test(msg)) { this.refused[model] = Date.now() + 30 * 86400000; this._saveRefus(); throw err; }
       if (r.status === 400 && schema && /schema|mime|json|enum|propert/i.test(msg)) continue;      // schéma refusé : même modèle, sans schéma
       if (r.status === 503 || /high demand|overloaded|unavailable/i.test(msg)) { this.lent[model] = Date.now() + LENT_MS; this._saveLent(); }
       throw err;                                                                                       // modèle indisponible : suivant

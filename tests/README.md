@@ -8,12 +8,13 @@ pip install playwright && playwright install chromium   # une fois
 ./make_fixtures.sh                                       # fausses vidéos de caméra (.y4m) à partir des photos
 python3 make_voix.py                                     # voix de synthèse pour l'oreille du mode voiture (espeak-ng + mbrola-fr1/fr4)
 cd .. && python3 -m http.server 8765 --bind 127.0.0.1 &  # servir l'appli (dossier racine du dépôt)
-cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py e2e_attention.py e2e_sync.py e2e_vision_health.py e2e_crm.py e2e_car.py e2e_journal_2510.py e2e_route.py e2e_question.py e2e_maison.py e2e_adresse.py e2e_outils.py e2e_regard_sur.py e2e_bluetooth.py e2e_doublon.py e2e_voiture_0411.py e2e_oreille_0411.py e2e_crm_0411.py e2e_sourd_0411.py e2e_famille.py e2e_memoire.py e2e_journal_0511.py e2e_journal_0511b.py e2e_journal_0511c.py e2e_journal_0511d.py e2e_android.py e2e_android_micro.py; do python3 $t; done
+cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py e2e_attention.py e2e_sync.py e2e_vision_health.py e2e_crm.py e2e_car.py e2e_journal_2510.py e2e_route.py e2e_question.py e2e_maison.py e2e_adresse.py e2e_outils.py e2e_regard_sur.py e2e_bluetooth.py e2e_doublon.py e2e_voiture_0411.py e2e_oreille_0411.py e2e_crm_0411.py e2e_sourd_0411.py e2e_famille.py e2e_memoire.py e2e_journal_0511.py e2e_journal_0511b.py e2e_journal_0511c.py e2e_journal_0511d.py e2e_android.py e2e_android_micro.py e2e_claude.py; do python3 $t; done
 node voiture_unit.mjs                                    # règles du protocole voiture sur les phrases du journal
 python3 e2e_famille_modeles.py                           # visages et sons avec les vrais modèles (lent)
 node apps_script_unit.js                                 # script Apps Script du journal, avec une fausse feuille
 node oreille_unit.mjs                                    # oreille du mode voiture sur les voix de synthèse
 node maison_unit.mjs                                     # module maison (faux Home Assistant)
+node relais_unit.mjs                                     # relais Claude du PC et CRM en lecture seule (PLAN 10)
 ```
 
 | Fichier | Ce qui est vérifié |
@@ -30,7 +31,9 @@ node maison_unit.mjs                                     # module maison (faux H
 | `e2e_attention.py` | Regard (R1, R3) : visage sans regard → rien ; 3 s sans regard → veille, micro coupé ; regardé → reprise instantanée ; fermeture après 12 s ; portrait |
 | `e2e_live_search.py` | Mode direct : outil « chercher » (Flash-Lite + Google Search), délai maximal 9 s, relance si Gemini reste muet, recherche annulée |
 | `e2e_remote.py` | Journal à distance : envoi des lignes, délais, bilan, phrases masquables, erreurs JS, coupure réseau, QR code, envoi au rechargement |
-| `apps_script_unit.js` | `apps-script/journal.gs` sur une fausse feuille : plus récent en haut, délais, état, purge, page QR |
+| `apps_script_unit.js` | `apps-script/journal.gs` sur une fausse feuille : plus récent en haut, délais, état, purge, page QR ; `claude.gs` : file d'attente des questions pour Claude (secret du PC, attente longue, annulation, PC absent) |
+| `relais_unit.mjs` | Relais Claude du PC (`pc/relais.mjs`) : droits de Claude (recherche et lecture de pages seulement), réponse « à dire » / « détail », erreurs rendues à Wilson, journal ; CRM en lecture seule (`pc/crm-mcp.mjs`) : 6 lectures, aucun outil d'écriture, protocole MCP |
+| `e2e_claude.py` | Questions difficiles par Claude (PLAN 10) : `question_difficile`, `crm_question` par Claude, PC absent ou question pas prise → secours dit une fois, « Je cherche. » sans question, batterie réelle, lumière contraire refusée, chien de garde après un outil, pas de relance pendant une réponse (journal du 05/11/26 au soir) |
 | `e2e_speed.py` | Rapidité (PLAN 6 bis) : envoi anticipé (confirmé / annulé), recherche en deux temps, relance si Google traîne, garde-fou de débit, schéma refusé, ancien réglage de réflexion |
 | `e2e_gaze.py` | Écoute au regard : regardé + parole → réponse ; visage tourné → rien n'est envoyé |
 | `vision_run.py` | Détection du regard seule sur chaque fausse vidéo (`python3 vision_run.py pos neg_turned …`) |

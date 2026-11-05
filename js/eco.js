@@ -200,7 +200,9 @@ export class EcoBrain {
         if (res.status === 400 && /think/i.test(msg)) { last = err; ti++; continue; }                                                // réglage de réflexion refusé
         if (res.status === 400 && !search && !this.noSchema && /schema|mime|json|enum|propert/i.test(msg)) { this.noSchema = true; this._save(); last = err; continue; }   // JSON imposé refusé
         if (res.status === 400 && web && !this.noSearch && /tool|search|grounding/i.test(msg)) { this.noSearch = true; this._save(); last = err; continue; }         // recherche refusée
-        if (res.status === 404 || /not found|not supported/i.test(msg)) { last = err; break; }
+        if (res.status === 404 || /no longer available|not found|not supported/i.test(msg)) {                                     // modèle fermé : plus essayé pendant 30 jours (journal du 05/11/26)
+          last = err; this.refused[model] = Date.now() + 30 * 86400000; try { localStorage.setItem('wilson.eco.refus', JSON.stringify(this.refused)); } catch (_) {} break;
+        }
         if (res.status >= 500 || !res.status) { last = err; break; }
         throw err;
       }

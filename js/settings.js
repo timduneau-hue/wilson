@@ -27,6 +27,7 @@ export const DEFAULTS = {
   crm: false, voitureAuto: true, oreilleSens: 'normal', prenomMaison: false,   // prenomMaison : accord de Timothée du 01/11/26, à la maison seulement au regard      // CRM à la voix et mode voiture (PLAN 2 quater)
   haUrl: '', haToken: '',                                    // la maison par Home Assistant (PLAN 7 bis)
   gardeAuto: true, gardePhoto: true, objectifActifs: 0,      // garde de la maison et objectif des clients actifs (PLAN 7 sexies)
+  claudePC: true,                                            // questions difficiles : Claude sur le PC de la maison (PLAN 10)
 };
 export const VOICES = [
   ['Puck', 'enjoué'], ['Achird', 'amical'], ['Charon', 'posé'], ['Fenrir', 'énergique'], ['Umbriel', 'décontracté'],
