@@ -10,8 +10,11 @@ android {
         applicationId 'fr.duneau.wilson'
         minSdk 26
         targetSdk 34
-        versionCode 3
-        versionName '3'
+        // A13 : le numéro de l'appli est celui de sa construction par GitHub (Releases « android-N ») : l'appli compare
+        // le sien à la dernière publiée pour se mettre à jour toute seule.
+        def numero = (System.getenv('GITHUB_RUN_NUMBER') ?: '3') as Integer
+        versionCode numero
+        versionName "${numero}"
     }
 
     // Toujours la même clé (PLAN 9, A8) : une nouvelle version s'installe par-dessus l'ancienne. La clé est créée une seule

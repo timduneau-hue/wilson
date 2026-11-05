@@ -37,7 +37,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.33.1';
+const VERSION = '1.34.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -231,7 +231,7 @@ class App {
       'Garde de la maison': this.famille.decrire(),
       'Réactions muettes': this.reactions.decrire(),
       'CRM': this.crm.on ? `relié — ${this.crm.state || 'pas encore interrogé'}${this.crm.cache.size ? `, ${this.crm.cache.size} fiche(s) gardée(s)` : ''}${this.crm.pending ? ', une écriture attend sa confirmation' : ''}${this.crm.queue.length ? `, ${this.crm.queue.length} écriture(s) confirmée(s) en attente du réseau` : ''}` : (this.settings.crm ? 'activé, mais pas de script sur cet appareil' : 'non relié'),
-      'Appli Android': appli() ? `oui (appli ${pont('version')}), retour après le GPS : ${pont('peutRevenir') ? 'oui' : 'NON (autorisation « par-dessus les autres applis » manquante)'}, ${pont('premierPlan') === false ? 'derrière une autre appli' : 'à l\'écran'}, micro : ${this.audio && this.audio.natif ? 'celui de l\'appli (téléphone)' : 'celui de la page' + (+pont('version') < 3 ? ' (mets l\'appli à jour : même lien)' : '')}` : 'non (navigateur)',
+      'Appli Android': appli() ? `oui (appli ${pont('version')}), retour après le GPS : ${pont('peutRevenir') ? 'oui' : 'NON (autorisation « par-dessus les autres applis » manquante)'}, ${pont('premierPlan') === false ? 'derrière une autre appli' : 'à l\'écran'}, micro : ${this.audio && this.audio.natif ? 'celui de l\'appli (téléphone)' : 'celui de la page' + (+pont('version') < 3 ? ' (mets l\'appli à jour : même lien)' : '')}, mise à jour de l'appli : ${pont('majEtat') || 'à installer une dernière fois à la main (même lien), ensuite automatique'}` : 'non (navigateur)',
       'Protocole voiture': this._voitureBt ? `actif — caméra ${this.vision ? 'ALLUMÉE' : 'éteinte'}, verrou de vérité` : 'non (pas en voiture)',
       'Mode voiture': `${!VOITURE && !this.car ? 'supprimé' : this.car ? `oui (${this.car.why})` : 'non'}${VOITURE && this.settings.voitureAuto && deviceName() === 'téléphone' ? `, automatique en roulant${this._geoErr ? ' (GPS : ' + this._geoErr + ')' : this.speed != null ? `, vitesse ${Math.round(this.speed * 3.6)} km/h` : ''}` : ''}`,
       'Oreille (voiture)': this.oreille.ready ? `apprise, ${this.oreille.templates.length} empreintes, limite ${this.oreille.limite.toFixed(1)} (${this.oreille.sens})${this.oreille.last.length ? ' — dernières phrases : ' + this.oreille.last.slice(-8).map((x) => x.s + (x.oui ? '✓' : '')).join(' ') : ''}` : 'pas apprise',
@@ -2455,6 +2455,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   // La maison (PLAN 7 bis) : la demande part à Home Assistant, sa réponse revient à Gemini qui la dit.
   async _maisonTool(call, demande) {
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
+    ctl.maison = true;                                                                // pas de bip pour une lampe
     this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
     let res;
     try { res = await this.maison.dire(demande, ctl.signal); }
@@ -2565,6 +2566,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
 
   async _maisonCmd(call) {
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now(), a = call.args || {};
+    ctl.maison = true;                                                                // pas de bip pour une lampe
     // Journal du 05/11/26, 20h18:43-20h18:52 : « Éteins toutes les lumières » → Gemini a d'abord ALLUMÉ les trois, puis envoyé
     // « allumer » et « éteindre » ensemble pour les mêmes lumières. Une commande contraire à sa dernière demande est refusée.
     const voulu = call.name === 'maison_commande' && ['allumer', 'eteindre'].includes(a.action) ? this._intentionMaison() : null;
@@ -3213,11 +3215,24 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       || this._outilsEnCours > 0 || !!this._apresOutil || vvAttend);
     // (journal du 05/11/26, 11h03:19-11h04:20 : « Je cherche : petit son… » écrit 20 fois : le compteur repartait de zéro
     // chaque fois que le bruit de la route passait pour de la voix ; il n'est remis à zéro que quand il ne cherche plus)
-    if (cherche && vb && !this.audio.playing && !this.voice.speaking && now - (this._heardAt || 0) > 1200) {
+    // Question de Timothée du 06/11/26, 00h11 (« pourquoi je n'ai pas le bip-bip pendant qu'il recherche, comme sur le
+    // téléphone ? ») : à la maison aussi, pendant une vraie recherche (Claude, analyste, CRM, Internet) — pas pour une lampe —,
+    // même s'il a détourné les yeux et que la discussion s'est mise en veille, jusqu'à la réponse.
+    const rechMaison = !vb && this.settings.bipMaison !== false && (this.state === 'conversation' || this.state === 'veille')
+      && ((this._analyses && this._analyses.size > 0) || (this.state === 'conversation' && this._searches && [...this._searches.values()].some((c) => !c.maison)));
+    if (((cherche && vb) || rechMaison) && !this.audio.playing && !this.voice.speaking && now - (this._heardAt || 0) > 1200) {
       if (!this._chercheDepuis) this._chercheDepuis = now;
-      if (now - this._chercheDepuis > (vvAttend ? 0 : 1000) && now - (this._ticAt || 0) > 2500) { this._ticAt = now; try { this.audio.tone('reflexion'); } catch (_) {} if (!this._ticN++) this.log('Je cherche : petit son de réflexion (voiture)'); }
-    } else if (!cherche) { this._chercheDepuis = 0; this._ticN = 0; }
+      if (now - this._chercheDepuis > (vvAttend ? 0 : 1000) && now - (this._ticAt || 0) > 2500) { this._ticAt = now; try { this.audio.tone('reflexion'); } catch (_) {} if (!this._ticN++) this.log(`Je cherche : petit son de réflexion (${vb ? 'voiture' : 'maison'})`); }
+    } else if (!cherche && !rechMaison) { this._chercheDepuis = 0; this._ticN = 0; }
     else this._chercheDepuis = 0;
+    // A13 (demande du 06/11/26, 00h11) : nouvelle version de l'appli Android téléchargée → installée seulement quand Wilson est
+    // en veille et pas en voiture (jamais pendant une discussion ni sur la route) ; l'appli se rouvre toute seule ensuite.
+    if (appli() && now - (this._majAt || 0) > 60000) {
+      this._majAt = now;
+      if (pont('majPrete') && (this.state === 'veille' || this.state === 'dodo') && !this._voitureBt && !this.car && !this.phone && !(this._analyses && this._analyses.size) && !this._aDire) {
+        this.log(`Appli : ${pont('majInstaller')}`);
+      }
+    }
     // Veille → dodo quand la pièce est vide (ou la nuit).
     if (v && v.hasPerson) this.presenceAt = now;
     if (this.state === 'veille' && !this.car) {

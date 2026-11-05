@@ -47,10 +47,15 @@ public class MainActivity extends Activity {
     final MicroNatif micro = new MicroNatif(this);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private boolean devant = false;
+    MajAppli maj;                                                                       // A13 : l'appli se met à jour toute seule
+    private static java.lang.ref.WeakReference<MainActivity> courante = new java.lang.ref.WeakReference<>(null);
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        courante = new java.lang.ref.WeakReference<>(this);
+        Pont.VERSION = String.valueOf(MajAppli.versionInstallee(this));
+        maj = new MajAppli(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);          // A5
         vue = new VueToujoursVisible(this);
         vue.setBackgroundColor(0xFF000000);
@@ -299,6 +304,9 @@ public class MainActivity extends Activity {
         ui.post(() -> { if (vue != null) vue.evaluateJavascript(js, null); });
     }
 
+    // Une ligne du journal depuis un récepteur (installation d'une mise à jour) : seulement si l'appli est ouverte.
+    static void journalStatique(String m) { MainActivity x = courante.get(); if (x != null) x.journal(m); }
+
     // Une ligne dans le journal de Wilson (la page l'envoie avec les autres).
     void journal(String m) {
         ui.post(() -> {
@@ -332,6 +340,10 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         devant = true;
+        if (maj != null) maj.verifier(false);                                           // A13 : au plus toutes les 6 h
+        android.content.SharedPreferences p = getSharedPreferences("wilson", MODE_PRIVATE);
+        int avant = p.getInt("maj_avant", 0), ici = MajAppli.versionInstallee(this);
+        if (avant > 0 && ici > avant) { p.edit().remove("maj_avant").apply(); ui.postDelayed(() -> journal("appli mise à jour toute seule : " + avant + " → " + ici), 8000); }
         pleinEcran();
         demarrerEcoute();
     }
