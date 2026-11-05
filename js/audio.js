@@ -5,7 +5,9 @@ const TARGET = 16000;
 export class AudioIO {
   constructor() {
     this.ctx = null; this.stream = null;
-    this.ring = new Int16Array(TARGET * 6); this.ringPos = 0; this.ringFilled = 0;   // 6 s de tampon
+    // 14 s de tampon (6 s avant le 05/11/26) : un « Wilson » qui attend sa vérification (une autre est en cours, réseau
+    // mobile lent) est encore là quand vient son tour (journal du 05/11/26, 09h31-09h40 : il fallait l'appeler 3 fois).
+    this.ring = new Int16Array(TARGET * 14); this.ringPos = 0; this.ringFilled = 0;
     this.level = 0; this.db = -100; this.floor = -60; this.speaking = false; this.lastVoicedAt = 0;
     this._onCnt = 0; this._offCnt = 0;
     this.listeners = { frame: [], speechstart: [], speechend: [], drained: [], mic: [], info: [] };

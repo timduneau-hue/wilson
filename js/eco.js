@@ -212,30 +212,58 @@ export class EcoBrain {
   // À la maison (E3) : on fait transcrire la phrase (ce que les modèles font bien, même de loin) ; c'est l'appli qui cherche
   // le prénom dans le texte (journal du 30/10/26, 10h11 : « Gemini, est-ce qu'on appelle Wilson ? » répondait non à de vrais
   // appels). → { appel, demande, texte }.
-  async appelDeLoin({ key, audio, signal, rate = 16000 }) {
-    const order = ECO_MODELS.rapide, now = Date.now();
+  // hedgeMs (05/11/26, journal 09h31-09h40 en voiture : vérifications de 3 à 13 s, « trop lente » 5 fois en 2 min) : sans
+  // réponse du premier modèle après ce délai, le suivant est interrogé en même temps ; la première réponse gagne, l'autre
+  // est abandonnée. Le résultat dit quel modèle a répondu (model) et en combien de temps (ms).
+  async appelDeLoin({ key, audio, signal, rate = 16000, hedgeMs = 0 }) {
+    const order = ECO_MODELS.rapide, now = Date.now(), t0 = performance.now();
     const models = [...order.filter((m) => !(this.refused[m] > now)), ...order.filter((m) => this.refused[m] > now)].slice(0, 3);
     // Journal du 30/10/26, 11h34-11h48 : la consigne « un mot qui ressemble est presque toujours Wilson » lui faisait
     // entendre « Wilson » dans le bruit (6 « Oui ? » pour rien) et dans la télé (« … tu peux l'éteindre ? Hélas, pas de
     // voix de fond… » → lumière éteinte). Il dit maintenant s'il en est sûr et si c'est la télé.
     const question = "Transcris mot pour mot, en français, ce que dit la voix la plus proche dans cet enregistrement d'un salon (parfois de loin, télé ou radio possibles en fond). L'assistant de la maison s'appelle Wilson ; de loin on entend parfois « où il sonne », « vilson », « wil son » : écris alors « Wilson ». Mais n'écris « Wilson » que si une personne le prononce vraiment : un bruit, un souffle, un mot sans rapport ou un silence ne sont pas « Wilson » (dans le doute, écris ce que tu entends tel quel). Réponds en JSON : {\"texte\": \"…\", \"nom_sur\": true si tu es sûr qu'une personne de la pièce a dit « Wilson » (ou une déformation évidente), sinon false, \"tele\": true si cette voix vient de la télé ou de la radio (présentateur, film, publicité, chanson, plusieurs voix qui ne parlent pas à un assistant), sinon false}. Si personne ne parle : texte vide.";
     const schema = { type: 'OBJECT', properties: { texte: { type: 'STRING' }, nom_sur: { type: 'BOOLEAN' }, tele: { type: 'BOOLEAN' } }, required: ['texte', 'nom_sur', 'tele'] };
-    let last = null;
-    for (const model of models) {
+    const wav = wavBase64(audio, rate);
+    // Un modèle : { ok, r } si réponse, sinon { ok: false, res } (dernière erreur de ce modèle).
+    const unModele = async (model, sig) => {
+      let res = null;
       for (const think of [true, false]) {
-        const body = { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'audio/wav', data: wavBase64(audio, rate) } }, { text: question }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 200, responseMimeType: 'application/json', responseSchema: schema, ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' } } : {}) } };
+        const body = { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'audio/wav', data: wav } }, { text: question }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 300, responseMimeType: 'application/json', responseSchema: schema, ...(think ? { thinkingConfig: /2\.5/.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' } } : {}) } };
         this.sent.push(performance.now());
-        const res = await this._one(API + model + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, signal);
+        res = await this._one(API + model + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, sig);
         if (res.ok) {
           const t = ((((res.json.candidates || [])[0] || {}).content || {}).parts || []).filter((x) => x.text && !x.thought).map((x) => x.text).join(' ');
           const o = lireAppel(t);
-          return jugerAppel(prenomDans(String(o.texte || '').trim()), o);
+          return { ok: true, r: { ...jugerAppel(prenomDans(String(o.texte || '').trim()), o), model, ms: Math.round(performance.now() - t0) } };
         }
-        last = res;
         if (res.status === 400 && /think/i.test(res.msg || '')) continue;
         break;
       }
+      return { ok: false, res };
+    };
+    // Chaque essai a son propre arrêt, relié à celui de l'appelant.
+    const lance = (model) => {
+      const c = new AbortController(), stop = () => c.abort();
+      if (signal) { if (signal.aborted) c.abort(); else signal.addEventListener('abort', stop, { once: true }); }
+      const p = unModele(model, c.signal).catch((e) => { if (signal && signal.aborted) throw e; return { ok: false, res: { msg: e.message } }; })
+        .finally(() => { if (signal) signal.removeEventListener('abort', stop); });
+      return { c, p };
+    };
+    let last = null, i = 0;
+    while (i < models.length) {
+      const a = lance(models[i++]);
+      let g = hedgeMs > 0 && i < models.length ? await Promise.race([a.p, new Promise((ok) => setTimeout(() => ok(null), hedgeMs))]) : await a.p;
+      if (g === null) {                                                   // le premier traîne : le suivant en même temps
+        const b = lance(models[i++]);
+        g = await new Promise((ok, ko) => {
+          let n = 0; const fails = [];
+          for (const x of [a, b]) x.p.then((v) => { if (v.ok) ok(v); else if (fails.push(v), ++n === 2) ok(fails[fails.length - 1]); }, ko);
+        });
+        a.c.abort(); b.c.abort();                                         // le perdant est abandonné
+      }
+      if (g.ok) return g.r;
+      last = g.res;
     }
     throw new Error((last && last.msg) || 'pas de réponse');
   }
@@ -498,6 +526,10 @@ export function jugerAppel(r, o = {}) {
 export function prenomDans(texte) {
   const t = String(texte || '').trim();
   if (!PRENOM.test(t)) return { appel: false, demande: '', texte: t };
-  const demande = t.replace(new RegExp(PRENOM.source, 'gi'), ' ').replace(/^[\s,.!?;:-]*(hé|eh|oh|dis|allez)?[\s,.!?;:-]*/i, '').replace(/\s*,\s*([.!?]?)\s*$/, '$1').replace(/^(euh|bah|ben|bon)\s*[, ]\s*/i, '').replace(/\s+([.,!?])/g, '$1').replace(/\s+/g, ' ').trim();
+  // Le son vérifié peut couvrir plusieurs phrases (tout ce qui a été dit pendant la vérification précédente, 05/11/26) :
+  // la demande commence à la phrase où on l'appelle ; ce qui précède (radio, autre phrase) n'est pas pour lui.
+  const ph = t.match(/[^.!?…]+[.!?…]*/g) || [t], k = ph.findIndex((p) => PRENOM.test(p));
+  const dès = k > 0 ? ph.slice(k).join('').trim() : t;
+  const demande = dès.replace(new RegExp(PRENOM.source, 'gi'), ' ').replace(/^[\s,.!?;:-]*(hé|eh|oh|dis|allez)?[\s,.!?;:-]*/i, '').replace(/\s*,\s*([.!?]?)\s*$/, '$1').replace(/^(euh|bah|ben|bon)\s*[, ]\s*/i, '').replace(/\s+([.,!?])/g, '$1').replace(/\s+/g, ' ').trim();
   return { appel: true, demande: /[a-zà-ÿ]{2,}/i.test(demande) ? demande : '', texte: t };
 }

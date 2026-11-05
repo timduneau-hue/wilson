@@ -12,6 +12,9 @@ const API = 'https://generativelanguage.googleapis.com/v1beta/models/';
 // Modèles gratuits, du plus réfléchi au plus disponible (les quotas gratuits sont par modèle).
 export const ANALYSTE_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 export const ANALYSE_MAX_MS = 10 * 60000;
+// Une requête à Gemini sans réponse au bout de 60 s : abandonnée, modèle suivant (journal du 05/11/26, 09h40 : une seule
+// étape, aucune recherche, et la réponse est arrivée au bout de 187 s ; rien au journal sur ce qui traînait).
+export const REQUETE_MAX_MS = 60000;   // les briefings (modèle qui réfléchit, gros résultats) prennent jusqu'à ~30 s
 const MAX_ETAPES = 8;
 const TABLES = ['commandes', 'devis', 'devis_a_relancer', 'clients', 'taches', 'comptes_rendus', 'visites', 'veille'];
 const OPS = ['=', '!=', '>', '>=', '<', '<=', 'contient', 'ne_contient_pas', 'commence_par', 'entre', 'parmi', 'vide', 'non_vide', 'ressemble'];
@@ -58,7 +61,7 @@ Règles :
 - La réponse sera dite à voix haute : français oral, ${voiture ? 'une ou deux phrases très courtes (il conduit)' : 'une à trois phrases courtes'}, l'essentiel d'abord, montants arrondis à l'euro (« 2 860 € »), dates dites naturellement (« le 14 septembre »), tutoiement, pas de liste, pas de symbole ni de mise en forme.
 - « Dernières commandes », « dernières ventes », « ce qu'il a acheté » : il veut le CONTENU. Cherche les lignes de commandes du client triées par date (les 2 ou 3 dernières commandes), et réponds d'abord par les articles (désignation simplifiée, quantité), puis la date et le montant de chaque commande. Ne te contente jamais de la date et du total (remarque de Timothée du 04/11/26).
 - EXCEPTION, les briefings (remarque de Timothée du 04/11/26 : « une analyse poussée des ventes, des devis et des échanges, pas un résumé de quelques secondes ; tu es mon coach commercial ») : si on te demande un briefing, de préparer un rendez-vous ou une analyse complète d'un client, cherche tout (commandes de l'exercice et du précédent, regroupées par famille ou article ; dernières commandes ; devis en cours et à relancer ; derniers comptes rendus et échanges ; tâches ouvertes ; veille concurrence) puis réponds en 6 à 10 phrases orales enchaînées, sans liste : où en est le chiffre (et la tendance), ce qu'il achète, les devis à relancer, ce qui s'est dit dernièrement, ce qu'il faut proposer et la question à poser au client. C'est la seule réponse longue permise.
-- OBJECTIF CLIENTS ACTIFS (accord de Timothée du 04/11/26) : le nombre de clients actifs du mois est celui du bilan du CRM joint à la question (chiffre officiel : ne le recalcule pas). Dis d'abord où il en est (« Tu as 41 clients actifs sur 60 : il t'en manque 19. »). Puis cherche, parmi les clients des rendez-vous du prochain jour ouvré joints, ceux qui n'ont encore rien commandé ce mois-ci ; et les clients habituels (au moins une commande dans les 3 derniers mois) qui n'ont rien commandé ce mois-ci, dans les mêmes villes que ces rendez-vous. Cite-en 3 au plus, les plus gros acheteurs d'abord, avec leur ville. Sans objectif : donne le nombre et termine en lui demandant son objectif. 2 à 4 phrases.
+- OBJECTIF CLIENTS ACTIFS (accord de Timothée du 04/11/26) : le nombre de clients actifs du mois est celui du bilan du CRM joint à la question (chiffre officiel : ne le recalcule pas). Dis d'abord où il en est (« Tu as 41 clients actifs sur 60 : il t'en manque 19. »). Puis cherche, parmi les clients des rendez-vous du prochain jour ouvré joints, ceux qui n'ont encore rien commandé ce mois-ci ; et les clients habituels (au moins une commande dans les 3 derniers mois) qui n'ont rien commandé ce mois-ci, dans les mêmes villes que ces rendez-vous. Cite-en 3 au plus, les plus gros acheteurs d'abord, avec leur ville. L'objectif est TOUJOURS au moins le nombre de clients actifs du même mois l'an dernier (N-1) (règle de Timothée du 05/11/26) : s'il n'est pas dans le bilan, compte-le (clients distincts ayant au moins une commande ce mois-là l'an dernier) ; prends le plus grand entre ce chiffre et l'objectif donné, et dis-le si c'est N-1 qui fixe l'objectif. 2 à 4 phrases.
 - Si les données ne permettent pas de répondre, dis-le simplement et donne ce que tu as trouvé de plus proche.`;
 }
 
@@ -71,7 +74,7 @@ const netErr = (e) => !navigator.onLine || (e && (e.name === 'TypeError' || e.ne
 export class Analyste {
   // ask(payload, signal) : question au CRM (par le script de Timothée) ; log(m) : journal.
   constructor({ ask, log = () => {} } = {}) {
-    this.ask = ask; this.log = log; this.modelUsed = null; this._schema = null;
+    this.ask = ask; this.log = log; this.modelUsed = null; this._schema = null; this.requeteMaxMs = REQUETE_MAX_MS;
     try { this.refused = JSON.parse(localStorage.getItem('wilson.analyste.refus') || '{}') || {}; } catch (_) { this.refused = {}; }
   }
 
@@ -100,17 +103,22 @@ export class Analyste {
       for (let schema = true; ; schema = false) {
         const body = { systemInstruction: { parts: [{ text: system }] }, contents,
           generationConfig: { maxOutputTokens: 8192, responseMimeType: 'application/json', ...(schema ? { responseSchema: ANALYSTE_SCHEMA } : {}) } };
-        let r, j = null;
+        let r, j = null, trop = false;
+        const t1 = Date.now();
         for (;;) {                                          // réseau coupé : on attend qu'il revienne (C8), jusqu'au délai
-          try { r = await fetch(API + model + ':generateContent', { method: 'POST', signal, headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); break; }
+          // délai maximal par requête, relié à l'arrêt de l'appelant
+          const c = new AbortController(), stop = () => c.abort(), minut = setTimeout(() => { trop = true; c.abort(); }, this.requeteMaxMs);
+          if (signal) { if (signal.aborted) c.abort(); else signal.addEventListener('abort', stop, { once: true }); }
+          try { r = await fetch(API + model + ':generateContent', { method: 'POST', signal: c.signal, headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); try { j = await r.json(); } catch (_) {} break; }
           catch (e) {
+            if (trop && !(signal && signal.aborted)) break;                   // trop long : modèle suivant (plus bas)
             if (e.name === 'AbortError' || !netErr(e)) throw e;
             if (Date.now() > until) throw e;
             this.log('Analyste : pas de réseau, j\'attends');
             await sleep(5000, signal);
-          }
+          } finally { clearTimeout(minut); if (signal) signal.removeEventListener('abort', stop); }
         }
-        try { j = await r.json(); } catch (_) {}
+        if (trop) { last = new Error(`${model} sans réponse en ${Math.round(this.requeteMaxMs / 1000)} s`); this.log(`Analyste : ${model} sans réponse en ${Math.round((Date.now() - t1) / 1000)} s : modèle suivant`); break; }
         if (r.ok) {
           const parts = ((((j && j.candidates) || [])[0] || {}).content || {}).parts || [];
           const txt = parts.filter((p) => p.text && !p.thought).map((p) => p.text).join('');
@@ -120,10 +128,11 @@ export class Analyste {
             if (this.refused[model]) { delete this.refused[model]; this._saveRefus(); }
             this.modelUsed = model; return { out, model, txt };
           }
-          last = new Error('réponse illisible de Gemini'); break;
+          last = new Error('réponse illisible de Gemini'); this.log(`Analyste : ${model} → réponse illisible : modèle suivant`); break;
         }
         const msg = (j && j.error && j.error.message) || `erreur ${r.status}`;
         last = new Error(msg); last.status = r.status;
+        this.log(`Analyste : ${model} → ${String(msg).slice(0, 100)} (${Math.round((Date.now() - t1) / 1000)} s)`);
         if (r.status === 401 || r.status === 403) { last.auth = true; throw last; }
         if (r.status === 429 || /quota|exhausted|rate.?limit/i.test(msg)) { this.refused[model] = Date.now() + 3600000; this._saveRefus(); break; }
         if (r.status === 400 && schema && /schema|mime|json|enum|propert/i.test(msg)) continue;      // schéma refusé : même modèle, sans schéma

@@ -239,7 +239,8 @@ export class Oreille {
       const s = this._meilleur(this.templates, fenetre(S.tr));
       this.calc = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
       S.best = Math.min(S.best, s);
-      if (s < this.limite) { S.done = true; if (this.onDetect) this.onDetect({ score: s, limite: this.limite }); }
+      // duree : depuis combien de temps la phrase a commencé (250 ms d'avant comprises) : l'appli sait quel son vérifier.
+      if (s < this.limite) { S.done = true; if (this.onDetect) this.onDetect({ score: s, limite: this.limite, duree: S.n / SR }); }
     }
   }
   _end() {

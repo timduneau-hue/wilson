@@ -307,7 +307,7 @@ export class Crm {
       if (!j.ok) return;
       let n = 0;
       for (const r of (j.rdv || []).slice(0, 6)) {
-        if (!this.app.car || !this.on) break;
+        if (!(this.app.car || this.app._voitureBt) || !this.on) break;     // téléphone relié à la voiture aussi (05/11/26)
         if (this.cache.has(r.cle) && Date.now() - this.cache.get(r.cle).at < CACHE_MS) continue;
         const c = await this.client({ cle: r.cle });
         if (c.ok && c.e) n++;
