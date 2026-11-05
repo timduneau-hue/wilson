@@ -9,7 +9,7 @@ Appareils simulés comme sur Chrome Android (« Speakerphone », « Headset earp
 3. Pas de voiture : micro par défaut, rien de changé (tablette).
 4. La voiture se connecte pendant que Wilson tourne : micro rouvert sur celui du téléphone ; elle se déconnecte : défaut.
 5. Accord de Timothée du 03/11/26 : téléphone relié à la voiture → pas besoin de le regarder (réponse sans regard, pas de
-   veille au bout de 3 s, oreille « Wilson » active) ; voiture déconnectée → le regard redevient obligatoire ;
+   veille au bout de 3 s ; depuis le 05/11/26, réveil au toucher, ni oreille ni regard) ; voiture déconnectée → le regard redevient obligatoire ;
    tablette avec un micro Bluetooth → rien ne change (R1 entière).
 """
 import asyncio, re, json, os, base64
@@ -138,12 +138,14 @@ async def main():
         b, page, logs = await run(p, True, True, 'téléphone voiture', PHONE_UA, conns)
         await page.wait_for_timeout(600)
         check('Téléphone + voiture : noté au journal (« je réponds sans qu\'on me regarde »)', await page.evaluate('wilson._voitureBt') and any('Voiture : téléphone relié en Bluetooth' in l for l in logs))
-        # Oreille « Wilson » active en veille, sans regard.
-        await page.evaluate("wilson.oreille.templates = [[1], [1], [1]]; wilson.oreille.seuil = 1; window.__fed = 0; wilson.oreille.feed = () => { window.__fed++; }")
-        await page.wait_for_timeout(500)
-        check('… en veille, l\'oreille guette « Wilson » (sans qu\'on le regarde)', await page.evaluate('window.__fed') > 5, str(await page.evaluate('window.__fed')))
-        # Discussion ouverte d'un coup d'œil, puis il regarde la route : pas de veille, et la réponse est jouée.
+        # Remarque de Timothée du 05/11/26, 14h48 (1.29.0) : en voiture, plus d'oreille « Wilson » ni de réveil au regard ;
+        # il le réveille en touchant l'écran.
+        await page.evaluate("wilson.oreille.templates = [[1], [1], [1]]; wilson.oreille.seuil = 1; window.__fed = 0; wilson.oreille.feed = () => { window.__fed++; }; 0")   # (« ; 0 » : sinon Playwright appelle la fonction rendue)
         await page.evaluate("window.__look = true; window.__parle(900)")
+        await page.wait_for_timeout(1500)
+        check('… en veille, ni l\'oreille ni un coup d\'œil ne le réveillent (05/11/26 : réveil au toucher)', await page.evaluate('window.__fed') == 0 and await page.evaluate('wilson.state') == 'veille', str(await page.evaluate('[window.__fed, wilson.state]')))
+        # Discussion ouverte en touchant l'écran, puis il regarde la route : pas de veille, et la réponse est jouée.
+        await page.evaluate("wilson.startConversation('toucher')")
         await page.wait_for_function('wilson.state === "conversation" && wilson.brain.open', timeout=8000)
         await page.evaluate("window.__look = false"); await page.wait_for_timeout(4500)
         check('… il regarde la route plus de 3 s : pas de veille', await page.evaluate('wilson.state === "conversation" && !wilson.paused'))

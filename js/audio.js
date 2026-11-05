@@ -63,14 +63,17 @@ export class AudioIO {
     return by(/speakerphone|haut.?parleur|built.?in|intégr|integr|bottom|internal|interne|phone mic|micro du/i)
       || by(/earpiece|écouteur|ecouteur|receiver/i) || ok.find((d) => !/wired|filaire|usb/i.test(d.label)) || null;
   }
+  // (05/11/26 : btIn n'est plus remis à faux pendant la recherche des micros ; ce trou d'un instant, à chaque réouverture du
+  // micro, faisait croire une fraction de seconde que le téléphone n'était plus dans la voiture.)
   async _chooseMic() {
-    this.micDevice = null; this.btIn = false;
+    let bt = false, dev = null;
     try {
       const ins = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
-      this.btIn = ins.some((d) => AudioIO.isBluetooth(d.label));
+      bt = ins.some((d) => AudioIO.isBluetooth(d.label));
       this._inputs = ins.map((d) => d.label || '(sans nom)').join(', ');
-      if (this.btIn) this.micDevice = AudioIO.pickBuiltIn(ins);
+      if (bt) dev = AudioIO.pickBuiltIn(ins);
     } catch (_) {}
+    this.btIn = bt; this.micDevice = dev;
   }
   async _openMic(aec) {
     await this._chooseMic();

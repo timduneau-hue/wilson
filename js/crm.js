@@ -22,6 +22,20 @@ const CACHE_KEY = 'wilson.crm.cache', QUEUE_KEY = 'wilson.crm.attente', PENDING_
 const JOURNEE_MS = 10 * 60000, BILAN_MS = 15 * 60000;      // journée et bilan récents : réponse immédiate (et sans réseau)
 const LECTURES = { crm_requete: 60000, crm_schema: 30000, crm_client: 45000, crm_journee: 45000, crm_bilan: 45000, crm_produit: 45000, crm_etat: 30000, crm_trouver: 30000 };
 const hm = (t) => { const d = new Date(t); return `${d.getHours()}h${pad(d.getMinutes())}`; };
+// Nom de client dit à voix haute, débarrassé des mots qui ne le désignent pas (journal du 05/11/26, 14h36-14h37 :
+// « entreprise Galet » → le CRM proposait ENTREPRISE CREZE et ENTREPRISE VIOLIN, jamais GALLAIS SARL, deux fois de suite ;
+// Timothée a dû l'épeler). Le mot générique (« entreprise », « société », « établissements », forme juridique, « chez »)
+// pesait plus que le nom lui-même. Rien n'est ôté s'il ne reste rien (un client qui s'appellerait « Entreprise »).
+const GENERIQUES = /(?<=^|[\s(])((?:la |le |les |l')?(?:entreprises?|soci[eé]t[eé]s?|bo[iî]te|[eé]tablissements?|ets|client|cliente)|sarl|s\.a\.r\.l\.?|sas|s\.a\.s\.?|sasu|eurl)(?=\s|$|[.,;:)])\.?/gi;
+export function nomNet(q) {
+  const t = String(q || '').replace(/\s+/g, ' ').trim();
+  // (les articles restent : « Le Goff », « Le Bihan » sont des noms de clients en Bretagne)
+  const n = t.replace(/^(chez|de chez|pour)\s+/i, '').replace(GENERIQUES, ' ').replace(/\s+/g, ' ').trim();
+  return n.replace(/[^\p{L}\p{N}]/gu, '').length >= 2 ? n : t;
+}
+// Le CRM a proposé plusieurs clients : ce texte contient-il ce nom ? (pour savoir qu'un bouton a été choisi dans une liste)
+const dansTexte = (texte, nom) => { const a = plat(texte).replace(/[^a-z0-9]+/g, ' '), b = plat(nom).replace(/[^a-z0-9]+/g, ' ').trim(); return !!b && (' ' + a + ' ').includes(' ' + b + ' '); };
+
 // Pas de réseau, ou réseau trop faible (C8) : la requête n'est pas partie.
 export const netErr = (e) => !navigator.onLine || (e && e.name === 'TypeError') || /Failed to fetch|NetworkError|Load failed|network/i.test(String((e && e.message) || ''));
 
@@ -254,20 +268,25 @@ export class Crm {
 
   async client({ client = '', cle = '' } = {}, signal) {
     if (!cle && this._isLast(client) && this.last) return { ok: true, e: this.last, cached: true };
-    const hit = cle ? this.cache.get(cle) : this._fromCache(client);
+    const net = cle ? client : nomNet(client);
+    if (net !== String(client || '').replace(/\s+/g, ' ').trim()) this.log(`nom cherché : « ${net} » (dit : « ${client} »)`);
+    const hit = cle ? this.cache.get(cle) : this._fromCache(net);
     if (hit && Date.now() - hit.at < CACHE_MS) { this.last = hit; this.log(`fiche gardée : ${hit.societe}`); return { ok: true, e: hit, cached: true }; }
     let r;
-    try { r = await this.ask(cle ? { action: 'crm_client', cle } : { action: 'crm_client', client }, signal); }
+    try { r = await this.ask(cle ? { action: 'crm_client', cle } : { action: 'crm_client', client: net }, signal); }
     catch (e) {
       // pas de réseau vers le CRM : la fiche gardée sur le téléphone, même ancienne, avec son heure (C8 bis)
       if (netErr(e) && hit) { this.last = hit; this.log(`pas de réseau : fiche gardée de ${hm(hit.at)} (${hit.societe})`); return { ok: true, e: hit, cached: true, vieux: hit.at }; }
       throw e;
     }
     if (!r.ok) return r;
-    if (!r.cle) return { ok: true, texte: r.texte, choix: r.choix || [] };            // inconnu ou plusieurs possibles
+    if (!r.cle) {                                                                      // inconnu ou plusieurs possibles
+      if (r.texte || (r.choix && r.choix.length)) this.dernierChoix = { at: Date.now(), dit: client, texte: `${r.texte || ''} ${JSON.stringify(r.choix || [])}` };
+      return { ok: true, texte: r.texte, choix: r.choix || [] };
+    }
     const e = this._keep(r);
     // nom entendu loin du client trouvé (son mauvais, nom écorché) : Wilson cite d'abord le client, pour qu'on le corrige (C10)
-    return { ok: true, e, approx: !cle && ressemblance(client, e) < 0.9 };
+    return { ok: true, e, approx: !cle && ressemblance(net, e) < 0.9 };
   }
   async agenda(jour, signal, { frais = false } = {}) {
     const d = parseJour(jour || "aujourd'hui") || new Date();
@@ -457,7 +476,10 @@ export class Crm {
     }
     if (!e.adresse) return { ok: false, dire: `La fiche de ${e.societe} n'a pas d'adresse dans le CRM. Dis-le simplement.` };
     const q = encodeURIComponent(e.adresse);
-    const target = { societe: e.societe, contact: e.contact, adresse: e.adresse,
+    // Choisi dans une liste de clients possibles il y a moins de 5 min (journal du 05/11/26, 14h36 : CREZE pris dans la liste
+    // proposée pour « entreprise Galet ») : si le bon client est retrouvé ensuite, le bouton le suivra (app.js).
+    const D = this.dernierChoix, douteux = !!(D && Date.now() - D.at < 5 * 60000 && dansTexte(D.texte, e.societe));
+    const target = { societe: e.societe, cle: e.cle, contact: e.contact, adresse: e.adresse, douteux,
       maps: `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`, waze: `https://waze.com/ul?q=${q}&navigate=yes` };
     return { ok: true, target, dire: `Le bouton pour aller chez ${e.societe} (${e.adresse}) est affiché : dis-lui d'appuyer dessus pour lancer le GPS.` };
   }

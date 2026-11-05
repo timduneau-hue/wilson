@@ -300,7 +300,7 @@ export class SettingsUI {
     if (msg) { el.hidden = false; el.innerHTML = msg; return; }
     el.hidden = false;
     el.innerHTML = o.ready ? `Oreille prête ✓ (${o.templates.length} « Wilson » appris${o.info && o.info.le ? ` le ${new Date(o.info.le).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })}` : ''}).`
-      : 'Oreille pas encore apprise : en voiture, il faudra toucher l\'écran pour parler.';
+      : 'Oreille pas encore apprise (elle ne sert qu\'à la maison, case ci-dessus ; en voiture, on touche l\'écran).';
   }
   // Une phrase captée au micro (début et fin détectés) : Int16 16 kHz, ou null après 12 s de silence.
   _capturer(job) {
