@@ -13,10 +13,15 @@ function fakeSheet(name, rows = 1000) {
     insertRowsBefore: (pos, n) => { data.splice(pos - 1, 0, ...Array.from({ length: n }, () => [])); sh.maxRows += n; },
     insertRowsAfter: (pos, n) => { data.splice(pos, 0, ...Array.from({ length: n }, () => [])); sh.maxRows += n; },
     deleteRows: (pos, n) => { data.splice(pos - 1, n); sh.maxRows -= n; },
+    deleteRow: (pos) => { data.splice(pos - 1, 1); sh.maxRows -= 1; },
+    appendRow: (row) => { data[sh.getLastRow()] = row.slice(); if (data.length > sh.maxRows) sh.maxRows = data.length; return sh; },
+    setFrozenRows: (n) => { sh.frozen = n; },
     getRange: (r, c, nr = 1, nc = 1) => {
       const rg = {
         setValues: (vals) => { if (vals.length !== nr || vals.some((x) => x.length !== nc)) throw new Error(`dimensions ${vals.length}x${vals[0].length} ≠ ${nr}x${nc}`);
           vals.forEach((row, i) => { data[r - 1 + i] = data[r - 1 + i] || []; row.forEach((v, j) => { data[r - 1 + i][c - 1 + j] = v; }); }); return rg; },
+        getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => { const v = (data[r - 1 + i] || [])[c - 1 + j]; return v == null ? '' : v; })),
+        setValue: (v) => { data[r - 1] = data[r - 1] || []; data[r - 1][c - 1] = v; return rg; },
         clearContent: () => { for (let i = 0; i < nr; i++) if (data[r - 1 + i]) for (let j = 0; j < nc; j++) data[r - 1 + i][c - 1 + j] = ''; return rg; },
         setFontWeight: () => rg, setBackground: () => rg,
         setNumberFormat: (f) => { sh.formats[c] = f; return rg; },
@@ -43,7 +48,7 @@ let tavily = () => ({ getResponseCode: () => 200, getContentText: () => JSON.str
   results: [{ title: 'Météo Angers', url: 'https://meteo.example/angers', content: 'Samedi : éclaircies, minimales 9 °C, maximales 17 °C. '.repeat(20) }] }) });
 const ctx = {
   console, JSON, Date, Math, String, Object, isFinite,
-  SpreadsheetApp: { openById: (id) => { opened = id; return { getSheetByName: (n) => sheets[n] || null }; } },
+  SpreadsheetApp: { openById: (id) => { opened = id; return { getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => { if (sheets[n]) throw new Error('existe déjà'); return (sheets[n] = fakeSheet(n)); } }; } },
   LockService: { getScriptLock: () => ({ waitLock: () => { locked++; }, releaseLock: () => { locked--; } }) },
   ContentService: { createTextOutput: (t) => ({ text: t, getContent() { return t; }, setMimeType(m) { this.mime = m; return this; } }), MimeType: { JSON: 'json' } },
   UrlFetchApp: { fetch: (url, o) => { fetched.push({ url, o }); return tavily(url, o); } },
@@ -194,5 +199,45 @@ logged.length = 0; ctx.essaiAgenda();
 check('Fonction essaiAgenda', logged.length === 1 && /Famille/.test(logged[0]));
 logged.length = 0; ctx.essaiFamille();
 check('Fonction essaiFamille', logged.length === 1 && /Alerte d'essai/.test(logged[0]));
+// La mémoire de Wilson (onglet « Mémoire ») et les questions de Claude (onglet « Questions ») — demande du 05/11/26
+delete sheets['Mémoire']; delete sheets['Questions'];
+fa = JF({ action: 'mem_lire' });
+const MEM = () => sheets['Mémoire'].data;
+check('Mémoire : onglet créé avec ses en-têtes', fa.ok && fa.souvenirs.length === 0 && MEM()[0].join('|') === 'Id|Catégorie|Souvenir|Qui|Date|Origine' && sheets['Mémoire'].frozen === 1, JSON.stringify(MEM()[0]));
+fa = JF({ action: 'mem_ecrire', ajouter: [{ id: 'm1', cat: 'goûts', texte: 'Camille n\'aime pas la coriandre.', qui: 'Camille', t: Date.now(), origine: 'discussion' },
+  { id: 'm2', cat: 'famille', texte: 'Louis est le fils de Timothée et Camille.', qui: 'Louis', origine: 'ancien' }] });
+check('Mémoire : deux souvenirs ajoutés, relus', fa.ok && fa.ajoutes === 2 && fa.souvenirs.length === 2 && fa.souvenirs[0].texte === 'Camille n\'aime pas la coriandre.' && fa.souvenirs[0].t > 0 && MEM()[1][4] instanceof Date, JSON.stringify(fa));
+fa = JF({ action: 'mem_ecrire', ajouter: [{ id: 'm1', texte: 'Camille n\'aime pas la coriandre.' }, { id: 'm3', texte: 'camille n\'aime pas la CORIANDRE' }] });
+check('Mémoire : rien en double (même id, ou même phrase)', fa.ok && fa.ajoutes === 0 && fa.souvenirs.length === 2, JSON.stringify(fa));
+fa = JF({ action: 'mem_ecrire', oublier: ['m1'], ajouter: [{ id: 'm4', cat: 'goûts', texte: 'Camille adore la coriandre finalement.', qui: 'Camille' }] });
+check('Mémoire : corriger = oublier l\'ancien + ajouter le nouveau', fa.ok && fa.oublies === 1 && fa.ajoutes === 1 && fa.souvenirs.map((x) => x.id).join() === 'm2,m4', JSON.stringify(fa.souvenirs.map((x) => x.id)));
+MEM().push(['', 'maison', 'Les piles sont dans le tiroir de l\'entrée.', '', '', '']);   // ligne écrite à la main par Timothée
+fa = JF({ action: 'mem_lire' });
+check('Mémoire : une ligne écrite à la main reçoit un id', fa.souvenirs.length === 3 && /^m/.test(fa.souvenirs[2].id) && MEM()[3][0] === fa.souvenirs[2].id, JSON.stringify(fa.souvenirs[2]));
+check('Mémoire : phrase vide ou sans id refusée', JF({ action: 'mem_ecrire', ajouter: [{ id: 'm9', texte: '  ' }, { texte: 'sans id' }] }).ajoutes === 0);
+check('Mémoire : verrou rendu', locked === 0);
+vm.runInContext('MEM_MAX = 4;', ctx);
+fa = JF({ action: 'mem_ecrire', ajouter: [{ id: 'a1', texte: 'Un.' }, { id: 'a2', texte: 'Deux.' }] });
+check('Mémoire : pleine (400 au plus) → refusé, dit combien', fa.ajoutes === 1 && fa.refuses === 1, JSON.stringify(fa));
+vm.runInContext('MEM_MAX = 400;', ctx);
+// Questions
+fa = JF({ action: 'q_lire' });
+const QS = () => sheets['Questions'].data;
+check('Questions : onglet créé avec ses en-têtes', fa.ok && fa.questions.length === 0 && QS()[0].join('|') === 'Id|Date|Question|Pourquoi|Réponse|Répondu le');
+QS().push(['q1', new Date(), 'Quand tu dis « éteins tout », la télé aussi ?', 'Journal du 04/11 : la télé est restée allumée.', '', '']);
+QS().push(['', new Date(), 'Préfères-tu un bip au réveil ?', '', '', '']);
+QS().push(['q0', new Date(), 'Vieille question', '', 'Oui', new Date()]);
+fa = JF({ action: 'q_lire' });
+check('Questions : seulement celles sans réponse, une ligne sans id en reçoit un', fa.questions.length === 2 && fa.questions[0].id === 'q1' && /^q/.test(fa.questions[1].id) && QS()[2][0] === fa.questions[1].id && fa.questions[0].pourquoi.length > 5, JSON.stringify(fa));
+fa = JF({ action: 'q_repondre', id: 'q1', reponse: 'Oui, la télé aussi.', t: Date.now() });
+check('Questions : réponse écrite à côté de la question, avec la date', fa.ok && QS()[1][4] === 'Oui, la télé aussi.' && QS()[1][5] instanceof Date && /éteins tout/.test(fa.question), JSON.stringify(QS()[1]));
+check('Questions : répondue → n\'est plus lue', JF({ action: 'q_lire' }).questions.length === 1);
+check('Questions : réponse vide ou question inconnue refusée', JF({ action: 'q_repondre', id: 'q1', reponse: ' ' }).ok === false && JF({ action: 'q_repondre', id: 'zz', reponse: 'x' }).ok === false && locked === 0);
+for (let i = 0; i < 5; i++) QS().push(['n' + i, new Date(), 'Question ' + i, '', '', '']);
+check('Questions : 3 au plus à la fois', JF({ action: 'q_lire' }).questions.length === 3);
+r = post({ action: 'mem_lire' });
+check('doPost : mem_… passe par famille.gs', JSON.parse(r.getContent()).ok === true && JSON.parse(r.getContent()).souvenirs.length >= 3);
+r = post({ action: 'q_lire' });
+check('doPost : q_… passe par famille.gs', JSON.parse(r.getContent()).ok === true && Array.isArray(JSON.parse(r.getContent()).questions));
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);

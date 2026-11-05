@@ -392,7 +392,7 @@ qui le fait, automatiquement, chaque nuit :
 | # | Quoi | Comment |
 |---|------|---------|
 | G1 | Remarques | Outil `remarque` : quand Timothée dit « c'est un bug », « tu devrais… », « ne fais plus ça », Wilson la met au propre et l'écrit dans le journal (ligne « REMARQUE DE TIMOTHÉE : … », gardée aussi sur la tablette). Il dit que c'est noté pour sa prochaine mise à jour. |
-| G2 | Maintenance de la semaine | Tâche planifiée Claude, **une fois par semaine, le lundi vers 2h47** (heure de Paris ; chaque nuit jusqu'au 01/11/26, changé à la demande de Timothée) : lit le journal depuis la maintenance précédente (remarques en premier, puis erreurs, silences, relances, échecs d'outils), corrige le code de ce dépôt, ajoute un test pour chaque correction, lance tous les tests, monte la version, note la correction ici, publie. La tablette se met à jour toute seule la nuit, entre 4h00 et 5h00 (règle du 04/11/26). |
+| G2 | Maintenance de la semaine (remplacée le 05/11/26 par l'amélioration de la nuit, 7 septies N) | Tâche planifiée Claude, **une fois par semaine, le lundi vers 2h47** (heure de Paris ; chaque nuit jusqu'au 01/11/26, changé à la demande de Timothée) : lit le journal depuis la maintenance précédente (remarques en premier, puis erreurs, silences, relances, échecs d'outils), corrige le code de ce dépôt, ajoute un test pour chaque correction, lance tous les tests, monte la version, note la correction ici, publie. La tablette se met à jour toute seule la nuit, entre 4h00 et 5h00 (règle du 04/11/26). |
 | G3 | Ce qui a changé | `version.json` porte `date` et `nouveautes` (phrase à la 2e personne pour Wilson). À la 1re discussion après la mise à jour, Wilson le dit en une phrase ; ensuite seulement si on le lui demande. |
 
 Garde-fous de la maintenance de nuit : rien publié si un test échoue ; pas de nouvelle grosse fonction, pas de changement
@@ -760,9 +760,65 @@ Remarques : « client actif » = le chiffre du bilan du CRM (à confirmer : comm
 (vision comme audio) envoie des statistiques d'usage anonymes à `odml.pa.googleapis.com` (déjà le cas avant 1.27.0, pas de
 réglage pour le couper : à voir avec Timothée si R9 l'exige).
 
+## 7 septies. La mémoire de Wilson, la nuit, les questions (demande de Timothée du 05/11/26, 01h58)
+
+Demande : « je veux que Wilson soit intelligent : il enregistre comme toi tu le fais avec nos conversations les informations
+utiles, mais pas tout et n'importe quoi, et qu'il le garde en mémoire. Le reste [sections Souvenirs, Qui vit ici] on peut
+les supprimer » ; « à 2h du matin le journal de Wilson est analysé pour repérer les bugs, les améliorations possibles, et
+ensuite toi tu réfléchis pour améliorer le système et mets à jour Wilson automatiquement » ; « si tu as des questions, tu les
+transmets à Wilson qui nous en fera part la prochaine fois qu'il nous parlera […] il faudra que ce soit moi qui réponde, pas
+Camille (détection de visage) ; la réponse obtenue te sera utile pour la prochaine mise à jour ». Le « dossier partagé » :
+« on oublie » (rien n'est supprimé de ce côté). Version **1.28.0**.
+
+**S. Ses souvenirs (mémoire intelligente)** — `js/memoire.js`, actions `mem_…` de `apps-script/famille.gs`
+
+| # | Règle | Comment |
+|---|-------|---------|
+| S1 | Seulement l'utile et le durable. | Retenu : les personnes et leurs liens (prénoms, famille, amis, âges dits), les goûts et habitudes dits clairement, les dates qui reviennent (anniversaires, fêtes), où sont rangées les choses, la maison (pièces, appareils), les projets et décisions de la famille, la façon dont la famille veut que Wilson se comporte. Jamais : bavardage, humeur du moment, demande ponctuelle (météo, recherche, minuteur, lumière), ce que Wilson a dit lui-même ou deviné, la télé ou quelqu'un au téléphone, les clients et le travail (c'est le CRM), ce qui est déjà dans l'agenda ou les messages, les remarques sur son fonctionnement (déjà notées), codes, mots de passe, numéros de carte ou de compte, adresses e-mail. Santé : seulement ce qui sert au quotidien et dit clairement (allergie, régime) ; argent et sujets intimes : seulement si on lui dit « retiens… ». |
+| S2 | Une passe de mémoire après chaque discussion. | 15 s après la fin d'une discussion où la famille a vraiment parlé (pas pour un « merci ») → Gemini (texte, gratuit, modèles « réfléchis » `ECO_MODELS.reflechi`, réflexion basse, JSON imposé ; `EcoBrain.texteJson`) relit l'échange (avec qui parlait : téléphone de Timothée ou visage sûr) avec la mémoire actuelle et rend des opérations : ajouter, remplacer (correction, nouvelle version d'un fait), oublier. Pas de doublon : une information déjà là ne s'ajoute pas. Les dates relatives (« demain ») deviennent des dates. « Retiens que… » et « oublie… » restent immédiats (outils `memoriser`, `oublier`). |
+| S3 | Une seule mémoire, visible. | Rangée par le script de Timothée dans l'onglet **« Mémoire »** de la feuille « Wilson — journal » (une ligne par souvenir : catégorie, souvenir, qui l'a dit, date, origine) : la même sur la tablette et le téléphone, et Timothée peut la lire ou effacer une ligne. Copie sur chaque appareil (si le réseau manque) ; sans script à jour, sur l'appareil seulement. |
+| S4 | Utilisée avec tact. | Les souvenirs vont dans la consigne de Gemini, rangés par catégorie ; il s'en sert quand c'est utile, sans les réciter. |
+| S5 | Fini. | Sections « Souvenirs » et « Qui vit ici » des réglages supprimées ; les anciens souvenirs et « Qui vit ici » sont repris une fois dans la nouvelle mémoire, sur chaque appareil (sans doublon). |
+
+**N. La nuit : Claude analyse et améliore** — tâche planifiée « Wilson — amélioration de la nuit »
+
+| # | Règle | Comment |
+|---|-------|---------|
+| N1 | Chaque nuit à 1h33 (heure de Paris). | Tâche planifiée « Wilson — amélioration de la nuit » (l'ancienne « maintenance de la semaine », même tâche, consigne réécrite le 05/11/26 ; 1h33 plutôt que 2h00 pile : les tâches lancées à l'heure pile partent en retard). Publication avant 3h50, sinon la nuit suivante : la tablette se met à jour entre 4h00 et 5h00. |
+| N2 | Quoi. | Journal depuis la nuit précédente (remarques de Timothée d'abord, erreurs, relances, incompréhensions, ce qui marche mal) et réponses de Timothée aux questions → corriger les bugs, faire les améliorations sûres et utiles, tests, version, publication ; un paragraphe « Nuit du jj/mm/aa » dans ce plan. |
+| N3 | Garde-fous. | Règles R1-R10 et règles en vigueur ; rien de gros ni de discutable sans réponse de Timothée (une question d'abord, D) ; jamais de clé, adresse ou donnée dans le dépôt ; ni script déployé, ni Home Assistant, ni CRM, ni autorisation la nuit ; un test pour chaque changement ; jamais de publication avec un test rouge. Rien de nouveau : rien de publié. |
+
+**D. Les questions de Claude (par Wilson, à Timothée seulement)** — `js/questions.js`, actions `q_…`
+
+| # | Règle | Comment |
+|---|-------|---------|
+| D1 | Rangées dans la feuille. | Claude écrit ses questions la nuit dans l'onglet **« Questions »** (Id, date, question, pourquoi, réponse, répondu le) ; 3 en attente au plus. |
+| D2 | Posées à Timothée seulement. | Tablette : seulement si son visage est reconnu **sûr** (V3) ; téléphone : c'est le sien. Jamais à Camille ni aux enfants. Une seule question par discussion, quand sa demande est réglée, en disant qu'elle vient de Claude ; au plus une fois toutes les 3 h par question. |
+| D3 | Réponse notée telle quelle. | Outil `repondre_question` (direct) → la feuille (colonne « Réponse ») et une ligne « RÉPONSE DE TIMOTHÉE à la question de Claude [id] … » dans le journal. Mode économique, ou outil pas appelé : la passe de mémoire (S2) retrouve sa réponse dans l'échange (Timothée seulement). « Plus tard » : la question reste et revient au plus tôt 3 h après. Claude la lit la nuit suivante, s'en sert et cite l'Id dans le paragraphe « Nuit du … ». |
+
+**Fait le 05/11/26 (1.28.0)**, la nuit même de la demande :
+- `js/memoire.js` (nouveau) : mémoire partagée (copie sur l'appareil + onglet « Mémoire » par le script, changements en attente
+  envoyés dès que le script répond, relue toutes les 20 min), passe de mémoire après chaque discussion (consigne
+  `CONSIGNE_PASSE` : quoi retenir, et surtout quoi ne pas retenir ; 4 ajouts au plus ; une reformulation remplace l'ancienne
+  version ; la même phrase n'est jamais ajoutée deux fois), reprise une fois des anciens « Souvenirs » et « Qui vit ici »,
+  prénoms connus (pour « Louis, viens manger » : pas pour Wilson). Journal : « Mémoire (modèle) : retenu « … » ».
+- `js/memory.js` : ne garde plus que le petit journal des 60 derniers échanges (avec l'heure exacte et qui parlait).
+- `js/questions.js` (nouveau) : questions de Claude lues dans l'onglet « Questions » (toutes les 30 min), mises dans la consigne
+  seulement si c'est Timothée qui parle, une par discussion ; « posée » quand Wilson l'a vraiment dite ; outil
+  `repondre_question`.
+- `js/app.js` : consigne « Ta mémoire » (par catégories, avec tact) à la place de « La maison » et « Ce que tu sais déjà » ;
+  `memoriser` seulement sur demande claire (avec catégorie) ; passe de mémoire à la fin des discussions ; bilan « Mémoire » et
+  « Questions de Claude ». `js/settings.js`, `index.html` : rubriques « Souvenirs » et « Qui vit ici » (et la question de
+  l'accueil) supprimées, une ligne dit où est la mémoire ; « Mes appareils » inchangé.
+- `apps-script/famille.gs` : actions `mem_lire`, `mem_ecrire` (onglet « Mémoire » créé s'il manque, 400 souvenirs au plus,
+  rien en double, une ligne écrite à la main reçoit un id), `q_lire` (3 sans réponse au plus), `q_repondre` ; `journal.gs` :
+  ces actions passent par `famille_`. **À déployer (version 8 du script)** : sans cela, la mémoire reste sur chaque appareil
+  et les questions n'arrivent pas.
+- Tests : `tests/e2e_memoire.py` (46 vérifications), `tests/apps_script_unit.js` (+16), `e2e.py` et `e2e_eco.py` adaptés.
+
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 04/11/26 : **version 1.27.1** en ligne (agenda Famille partagé avec Camille, alertes aussi à Camille, mise à jour seulement la nuit entre 4h00 et 5h00) ; 1.27.0 (la famille : visages reconnus sur la tablette, messages remis à la bonne personne quand elle le regarde, garde de la maison avec alertes par e-mail, objectif des clients actifs, réactions muettes — section 7 sexies ; le script doit être mis à jour par Timothée) ; 1.26.6 (plus jamais de réveil sans « oui » de Gemini : fini les réveils sur des bruits ; il prévient quand il ne peut pas vérifier) ; 1.26.5 (en voiture, il prévient quand il ne t'entend plus ; écran : texte seulement sur demande, photos et météo 5 s, « réaffiche » ; dernières commandes = articles ; recherches CRM gardées et protégées des blocages) ; 1.26.4 (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 05/11/26 : **version 1.28.0** publiée (mémoire intelligente partagée dans l'onglet « Mémoire », passe de mémoire après chaque discussion, questions de Claude posées à Timothée seulement, amélioration automatique chaque nuit à 1h33 — section 7 septies ; script à déployer en version 8) ; 1.27.1 (agenda Famille partagé avec Camille, alertes aussi à Camille, mise à jour seulement la nuit entre 4h00 et 5h00) ; 1.27.0 (la famille : visages reconnus sur la tablette, messages remis à la bonne personne quand elle le regarde, garde de la maison avec alertes par e-mail, objectif des clients actifs, réactions muettes — section 7 sexies ; le script doit être mis à jour par Timothée) ; 1.26.6 (plus jamais de réveil sans « oui » de Gemini : fini les réveils sur des bruits ; il prévient quand il ne peut pas vérifier) ; 1.26.5 (en voiture, il prévient quand il ne t'entend plus ; écran : texte seulement sur demande, photos et météo 5 s, « réaffiche » ; dernières commandes = articles ; recherches CRM gardées et protégées des blocages) ; 1.26.4 (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
   la tablette (Galaxy Tab S5e du salon) se met à jour toute seule **une fois par nuit, entre 4h00 et 5h00** (`version.json` ; demande de Timothée du 04/11/26 : « une fois par jour ça va, et pendant la nuit ») : une version publiée en journée n'arrive que la nuit suivante.

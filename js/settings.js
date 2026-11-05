@@ -89,7 +89,7 @@ export class SettingsUI {
       const r = await app.maison.verifier();
       st.className = 'status ' + (r.ok ? 'ok' : 'err'); st.textContent = r.msg; app.log('Vérification maison : ' + r.msg);
     };
-    bind('s-home', 'home'); bind('s-city', 'city'); bind('s-night1', 'nightStart', Number); bind('s-night2', 'nightEnd', Number);
+    bind('s-city', 'city'); bind('s-night1', 'nightStart', Number); bind('s-night2', 'nightEnd', Number);
     bind('s-cam', 'camera', Boolean, 'checked'); bind('s-mirror', 'mirror', Boolean, 'checked'); bind('s-subs', 'subtitles', Boolean, 'checked');
 
     // CRM et voiture (PLAN 2 quater)
@@ -201,19 +201,6 @@ export class SettingsUI {
       app.log(`Regard calibré : ${Math.round(v.calib.yaw)}°, ${Math.round(v.calib.pitch)}°, yeux ${Math.round(v.calib.down * 100)} %`);
       app.badge('Regard calibré ✓', 3000);
     };
-    $('m-export').onclick = () => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([app.memory.export()], { type: 'application/json' }));
-      a.download = `wilson-souvenirs-${new Date().toISOString().slice(0, 10)}.json`; a.click();
-    };
-    $('m-import').onchange = async (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      try { app.memory.import(await f.text()); this.renderMemory(); app.log('Souvenirs importés'); } catch (err) { alert('Fichier illisible'); }
-    };
-    $('m-clear').onclick = () => { if (confirm('Effacer tous les souvenirs et le journal de Wilson ?')) { app.memory.clear(); this.renderMemory(); } };
-    $('mem-list').addEventListener('click', (e) => {
-      const b = e.target.closest('[data-i]'); if (!b) return; app.memory.remove(+b.dataset.i); this.renderMemory();
-    });
 
     // Premier lancement
     $('w-go').onclick = async () => {
@@ -225,7 +212,7 @@ export class SettingsUI {
       btn.disabled = false; btn.textContent = 'Réveiller Wilson';
       st.className = 'status ' + (r.ok ? 'ok' : r.ok === false ? 'err' : ''); st.innerHTML = keyMessage(r);
       if (r.ok === false) return;
-      this.s.apiKey = k; this.s.home = $('w-home').value.trim(); saveSettings(this.s);
+      this.s.apiKey = k; saveSettings(this.s);
       setTimeout(() => { $('welcome').hidden = true; }, r.ok ? 600 : 2500);
       app.start(true);
     };
@@ -237,7 +224,7 @@ export class SettingsUI {
     $('s-key').value = s.apiKey; $('s-model').value = s.model; $('s-voice').value = s.voice; $('s-face').value = s.face;
     $('s-brain').value = s.brainMode; $('s-ecospeed').value = s.ecoSpeed; this.fillVoices();
     $('s-listen').value = s.listenMode; $('s-timeout').value = String(s.convTimeout);
-    $('s-barge').value = s.bargeIn; $('s-home').value = s.home; $('s-city').value = s.city;
+    $('s-barge').value = s.bargeIn; $('s-city').value = s.city;
     $('s-night1').value = String(s.nightStart); $('s-night2').value = String(s.nightEnd);
     $('s-cam').checked = s.camera; $('s-mirror').checked = s.mirror; $('s-subs').checked = s.subtitles;
     $('s-logurl').value = s.logUrl || ''; $('s-logcontent').checked = s.logContent !== false;
@@ -270,12 +257,10 @@ export class SettingsUI {
       vs.map((v) => `<option value="${esc(v.name)}">${esc(v.name)}${v.localService ? '' : ' (en ligne)'}</option>`).join('');
     sel.value = vs.some((v) => v.name === this.s.ecoVoice) ? this.s.ecoVoice : '';
   }
+  // La mémoire (7 septies) : plus de liste ici ; elle est dans l'onglet « Mémoire » de la feuille du journal.
   renderMemory() {
-    const f = this.app.memory.facts;
-    $('mem-n').textContent = `(${f.length})`;
-    $('mem-list').innerHTML = f.length
-      ? f.map((x, i) => `<li><span>${esc(x.text)} <em>· ${x.date}</em></span><button data-i="${i}" aria-label="Oublier">×</button></li>`).join('')
-      : '<li class="empty">Wilson ne sait encore rien. Dis-lui : « Wilson, retiens que… »</li>';
+    const m = this.app.memoire, n = m.items.length, script = this.app.remote.on;
+    $('s-memoire').textContent = `Wilson retient tout seul ce qui est utile de vos discussions (prénoms, goûts, dates, habitudes…) : ${n ? `${n} souvenir${n > 1 ? 's' : ''}` : 'rien pour l\'instant'}. ${script ? 'Ils sont rangés dans l\'onglet « Mémoire » de ta feuille « Wilson — journal » : tu peux y corriger ou effacer une ligne.' : 'Sans script, ils restent sur cet appareil.'} « Wilson, oublie que… » marche aussi.`;
   }
   // Visages appris (prénoms seulement) et bouton « Oublier ».
   renderVisages() {
@@ -386,7 +371,7 @@ export class SettingsUI {
     if (this._ear) { this._ear.abort = true; if (this._ear.stop) this._ear.stop(); }
     if (this.app._earTest) this.testerOreille();
     if (this._scan) this._scan.abort(); $('settings').hidden = true; this.app.settingsOpen = false; clearInterval(this._gz); $('gaze-test').hidden = true; $('t-calib').hidden = true; $('t-gaze').textContent = 'Tester le regard'; }
-  showWelcome() { $('w-home').value = this.s.home; $('w-key').value = this.s.apiKey || ''; $('welcome').hidden = false; }
+  showWelcome() { $('w-key').value = this.s.apiKey || ''; $('welcome').hidden = false; }
 }
 
 // QR code (bibliothèque qrcode-generator, MIT) dessiné sur un canevas blanc avec sa marge.

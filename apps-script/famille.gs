@@ -1,6 +1,6 @@
 // Wilson — la famille et la garde (PLAN.md, section 7 sexies, M et G). À ajouter au script « Wilson journal » comme fichier
 // (dans l'éditeur Apps Script : + → Script → nommer « famille »), avec la ligne correspondante dans doPost de journal.gs :
-//      if (/^(msg_|garde_|alerte|agenda_)/.test(String(d.action))) return json_(famille_(d));
+//      if (/^(msg_|garde_|alerte|agenda_|mem_|q_)/.test(String(d.action))) return json_(famille_(d));
 // Puis Déployer → Gérer les déploiements → modifier → Nouvelle version.
 //  - messages de la famille (msg_…) : déposés par un appareil (téléphone), remis par un autre (tablette du salon). Un message
 //    par propriété du script (une propriété ne peut pas dépasser 9 ko) ; effacés 14 jours après ;
@@ -9,7 +9,11 @@
 //  - alerte : e-mail à Timothée (son propre compte, celui qui a déployé le script), avec la photo de la pièce si elle est jointe,
 //    et en copie aux adresses de ALERTES_AUSSI. 20 alertes par jour au plus, une du même genre toutes les 10 minutes au plus ;
 //  - agenda (agenda_…) : l'agenda Google « Famille » de Timothée, partagé avec Camille (lire, ajouter ; annuler seulement ce que
-//    Wilson vient d'ajouter). La 1re fois, lancer « essaiAgenda » dans l'éditeur et accepter l'accès à Google Agenda.
+//    Wilson vient d'ajouter). La 1re fois, lancer « essaiAgenda » dans l'éditeur et accepter l'accès à Google Agenda ;
+//  - mémoire (mem_…) : ce que Wilson retient d'utile, dans l'onglet « Mémoire » de la feuille du journal (partagé par tous
+//    les appareils ; Timothée peut y corriger ou effacer une ligne à la main) ;
+//  - questions (q_…) : les questions que Claude pose à Timothée pour la prochaine mise à jour (onglet « Questions », remplies
+//    la nuit par Claude) ; Wilson les lui pose et écrit sa réponse à côté.
 
 var GARDER_MS = 14 * 24 * 3600 * 1000;
 var ALERTES_AUSSI = '';      // autres adresses qui reçoivent les alertes (séparées par des virgules) : à remplir ICI, jamais dans le dépôt
@@ -24,6 +28,10 @@ function famille_(d) {
   if (a === 'garde_ecrire') return gardeEcrire_(d.garde || {});
   if (a === 'alerte') return alerte_(d);
   if (a.indexOf('agenda_') === 0) return agenda_(d);
+  if (a === 'mem_lire') return memLire_();
+  if (a === 'mem_ecrire') return memEcrire_(d);
+  if (a === 'q_lire') return qLire_();
+  if (a === 'q_repondre') return qRepondre_(d);
   return { ok: false, erreur: 'action inconnue : ' + a };
 }
 
@@ -149,6 +157,91 @@ function agenda_(d) {
 function essaiAgenda() {
   var r = agenda_({ action: 'agenda_lire', jours: 7 });
   Logger.log('Agenda « ' + AGENDA_NOM + ' » : ' + r.evenements.length + ' événement(s) dans les 7 jours');
+}
+
+// ---------- La mémoire de Wilson et les questions de Claude (demande de Timothée du 05/11/26) ----------
+var MEM_COLS = ['Id', 'Catégorie', 'Souvenir', 'Qui', 'Date', 'Origine'];
+var Q_COLS = ['Id', 'Date', 'Question', 'Pourquoi', 'Réponse', 'Répondu le'];
+var MEM_MAX = 400;   // au-delà, Wilson n'ajoute plus rien (il doit d'abord oublier ce qui ne sert plus)
+
+function onglet_(nom, cols) {
+  var ss = SpreadsheetApp.openById(FEUILLE), sh = ss.getSheetByName(nom);
+  if (!sh) {
+    sh = ss.insertSheet(nom);
+    sh.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function lignes_(sh, n) { var last = sh.getLastRow(); return last < 2 ? [] : sh.getRange(2, 1, last - 1, n).getValues(); }
+function memNorm_(x) { return String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
+function nouvelId_(p, i) { return p + (Date.now() + (i || 0)).toString(36); }
+
+function memLire_() {
+  var sh = onglet_('Mémoire', MEM_COLS), l = [];
+  lignes_(sh, 6).forEach(function (r, i) {
+    var texte = String(r[2] || '').trim(); if (!texte) return;
+    var id = String(r[0] || '').trim();
+    if (!id) { id = nouvelId_('m', i); sh.getRange(i + 2, 1).setValue(id); }   // ligne ajoutée à la main par Timothée
+    l.push({ id: id, cat: String(r[1] || '').trim(), texte: texte.slice(0, 300), qui: String(r[3] || '').trim(), t: r[4] instanceof Date ? r[4].getTime() : 0, origine: String(r[5] || '').trim() });
+  });
+  return { ok: true, souvenirs: l };
+}
+
+function memEcrire_(d) {
+  var ajoutes = 0, oublies = 0, refuses = 0;
+  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    var sh = onglet_('Mémoire', MEM_COLS), rows = lignes_(sh, 6), oublier = (d.oublier || []).map(String);
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (oublier.indexOf(String(rows[i][0])) < 0) continue;
+      sh.deleteRow(i + 2); rows.splice(i, 1); oublies++;
+    }
+    var ids = {}, textes = {};
+    rows.forEach(function (r) { ids[String(r[0])] = 1; textes[memNorm_(r[2])] = 1; });
+    (d.ajouter || []).slice(0, 30).forEach(function (m) {
+      var texte = String(m.texte || '').replace(/\s+/g, ' ').trim().slice(0, 300), id = String(m.id || '').replace(/[^\w-]/g, '').slice(0, 30), n = memNorm_(texte);
+      if (!texte || !id || ids[id] || textes[n]) return;          // déjà là (renvoi après une coupure, ou même phrase)
+      if (rows.length + ajoutes >= MEM_MAX) { refuses++; return; }
+      ids[id] = 1; textes[n] = 1;
+      sh.appendRow([id, String(m.cat || 'autre').slice(0, 20), texte, String(m.qui || '').slice(0, 40), new Date(+m.t || Date.now()), String(m.origine || '').slice(0, 30)]);
+      ajoutes++;
+    });
+    if (ajoutes) sh.getRange(2, 5, Math.max(1, sh.getLastRow() - 1), 1).setNumberFormat('dd/mm/yy');
+  } finally { lock.releaseLock(); }
+  var r = memLire_(); r.ajoutes = ajoutes; r.oublies = oublies; if (refuses) r.refuses = refuses;
+  return r;
+}
+
+// Questions encore sans réponse (3 au plus). Une ligne écrite sans Id (par Claude ou à la main) en reçoit un.
+function qLire_() {
+  var sh = onglet_('Questions', Q_COLS), l = [];
+  lignes_(sh, 6).forEach(function (r, i) {
+    var q = String(r[2] || '').trim(); if (!q) return;
+    var id = String(r[0] || '').trim();
+    if (!id) { id = nouvelId_('q', i); sh.getRange(i + 2, 1).setValue(id); }
+    if (String(r[4] || '').trim()) return;
+    l.push({ id: id, question: q.slice(0, 400), pourquoi: String(r[3] || '').trim().slice(0, 300), t: r[1] instanceof Date ? r[1].getTime() : 0 });
+  });
+  return { ok: true, questions: l.slice(0, 3) };
+}
+
+function qRepondre_(d) {
+  var rep = String(d.reponse || '').trim().slice(0, 1000);
+  if (!rep || !d.id) return { ok: false, erreur: 'réponse vide' };
+  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    var sh = onglet_('Questions', Q_COLS), rows = lignes_(sh, 6);
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][0]).trim() !== String(d.id)) continue;
+      var deja = String(rows[i][4] || '').trim();
+      sh.getRange(i + 2, 5).setNumberFormat('@');
+      sh.getRange(i + 2, 5, 1, 2).setValues([[deja ? deja + ' / ' + rep : rep, new Date(+d.t || Date.now())]]);
+      sh.getRange(i + 2, 6).setNumberFormat('dd/mm/yy hh"h"mm');
+      return { ok: true, question: String(rows[i][2]) };
+    }
+    return { ok: false, erreur: 'question introuvable' };
+  } finally { lock.releaseLock(); }
 }
 
 function echappe_(x) { return String(x).replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }); }

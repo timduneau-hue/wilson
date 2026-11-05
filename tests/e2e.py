@@ -104,7 +104,7 @@ async def main():
             send(conn, {'serverContent': {'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]}}})
         send(conn, {'serverContent': {'outputTranscription': {'text': "C'est noté, Moustache ! Joli nom."}}})
         await page.wait_for_timeout(300)
-        r = await page.evaluate('new Promise((res) => { let mx = 0; const t0 = performance.now(); const iv = setInterval(() => { mx = Math.max(mx, wilson.face.talk); if (performance.now() - t0 > 600) { clearInterval(iv); res({playing: wilson.audio.playing, emo: wilson.face.emotion, facts: wilson.memory.facts.map(f=>f.text), talk: mx, sub: document.getElementById("subtitle").textContent}); } }, 30); })')
+        r = await page.evaluate('new Promise((res) => { let mx = 0; const t0 = performance.now(); const iv = setInterval(() => { mx = Math.max(mx, wilson.face.talk); if (performance.now() - t0 > 600) { clearInterval(iv); res({playing: wilson.audio.playing, emo: wilson.face.emotion, facts: wilson.memoire.items.map(f=>f.texte), talk: mx, sub: document.getElementById("subtitle").textContent}); } }, 30); })')
         check('Wilson parle (audio joué)', r['playing'], '')
         check('Bouche animée par la voix', r['talk'] > 0.05, f"ouverture {r['talk']:.2f}")
         check('Émotion « joie » appliquée', r['emo'] == 'joie')
@@ -139,7 +139,7 @@ async def main():
         await page.wait_for_timeout(300)
         tr = {x['id']: x for x in conn['tool_responses']}
         check('date_et_heure répond (format jj/mm/aa, 20h44)', re.search(r'\d\d/\d\d/\d\d, \d+h\d\d', tr.get('t3', {}).get('response', {}).get('result', '')) is not None, tr.get('t3', {}).get('response', {}).get('result'))
-        facts = await page.evaluate('wilson.memory.facts.length')
+        facts = await page.evaluate('wilson.memoire.items.length')
         check('oublier efface le souvenir', facts == 0 and 'Oublié' in tr.get('t4', {}).get('response', {}).get('result', ''), tr.get('t4', {}).get('response', {}).get('result'))
 
         # --- Reconnexion (goAway) avec reprise de session ---
