@@ -274,6 +274,8 @@ cq = C({ action: 'claude_rendre', secret: SECRET, id: 'q1', ok: true, dire: 'La 
 check('Claude : réponse déposée', cq.ok && cq.etat === 'faite');
 cq = C({ action: 'claude_resultat', id: 'q1', attente: 15 });
 check('Claude : Wilson reçoit la réponse', cq.ok && cq.etat === 'faite' && /120 kg/.test(cq.dire) && cq.duree === 42 && cq.detail === 'Détail…');
+const HC = sheets['Claude'] ? sheets['Claude'].data : [];
+check('Claude : historique dans l\'onglet « Claude » (date, appareil, type, question, réponse, détail, durée)', HC[0] && HC[0][3] === 'Question' && HC[1] && HC[1][0] instanceof Date && HC[1][1] === 'téléphone' && HC[1][2] === 'Internet (voiture)' && /paumelle X/.test(HC[1][3]) && /120 kg/.test(HC[1][4]) && HC[1][5] === 'Détail…' && HC[1][6] === '42' && HC[1][8] === 'réponse', JSON.stringify(HC.slice(0, 2)));
 cq = C({ action: 'claude_rendre', secret: 'autre-secret-tout-aussi-long-0123456789', id: 'q1', dire: 'piratage' });
 check('Claude : réponse sans le bon secret refusée', cq.ok === false && /piratage/.test(cache.claude_q_q1) === false);
 C({ action: 'claude_demander', id: 'q2', question: 'Question annulée', type: 'crm', contexte: 'Dernier client : AD2M', regles: 'Règles du CRM' });
@@ -287,6 +289,7 @@ check('Claude : Wilson attend au plus 15 s par appel', cq.ok && cq.etat === 'en_
 C({ action: 'claude_rendre', secret: SECRET, id: 'q3', ok: false, erreur: 'Claude n\'a pas pu se connecter' });
 cq = C({ action: 'claude_resultat', id: 'q3' });
 check('Claude : erreur du relais transmise à Wilson', cq.ok && cq.etat === 'erreur' && /connecter/.test(cq.erreur));
+check('Claude : l\'erreur aussi dans l\'historique, en haut', sheets['Claude'].data[1][8] === 'erreur' && /connecter/.test(sheets['Claude'].data[1][4]) && sheets['Claude'].data[2][8] === 'réponse');
 cq = C({ action: 'claude_prendre', secret: SECRET, max: 0, occupe: 2 });
 check('Claude : relais occupé → signe de vie seulement', cq.ok && cq.question === null && C({ action: 'claude_etat' }).pc.occupe === 2);
 fauxTemps += 61000;

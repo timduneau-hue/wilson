@@ -1006,6 +1006,11 @@ Claude du PC). Journal de la soirée relu (tablette 19h37-22h54, téléphone en 
 - **Lumières allumées sur « éteins »** (20h18:43-20h18:52 : les trois allumées, puis « allumer » et « éteindre » ensemble) :
   commande contraire à sa dernière demande refusée ; « ok — … : éteint » après « allumer » devient un échec dit tel quel.
 - **Maison injoignable 21h43-22h54** : le PC de la maison s'était mis en veille ; l'installateur du relais l'empêche (sur secteur).
+- **1.33.1 (06/11/26, 00h05)** — Timothée : « j'ai déjà dit que lorsque Wilson recherche une info après une question, qu'il
+  arrête de me demander si je veux autre chose » : règle dans les deux consignes (maison et voiture) : jamais de « autre chose ? »
+  en fin de réponse (plus de « propose d'en dire plus » en voiture), « Je cherche. » seulement pendant une recherche. Et « où
+  voir les requêtes Claude ? » : onglet **« Claude »** de la feuille « Wilson — journal » (une ligne par question : date,
+  appareil, type, question, réponse dite, détail et sources, durée), rempli par le script en version 10.
 
 ## 9. L'application Android (accord de Timothée du 05/11/26, 16h58)
 
@@ -1047,6 +1052,7 @@ Gemini qui comble les trous) et l'analyste gratuit du CRM (modèles Gemini 2.5 f
 | K5 | **L'attente.** Il dit « Je cherche. » puis se tait. | Remarque de Timothée du 05/11/26, 19h23 : « pendant que tu recherches une info, le petit bip-bip, pas la peine de me redemander si je veux autre chose, j'attends ». Recherche en arrière-plan (comme l'analyste, C11 bis) : bip-bip en voiture, tête qui réfléchit, aucune question posée ; la réponse est dite dès qu'elle arrive, même si la discussion s'est fermée (il se réveille pour la dire). 4 min au plus. Vaut aussi pour l'analyste. |
 | K6 | **PC éteint ou planté.** Il le dit en une phrase et fait au mieux sans lui. | Le relais se signale à chaque appel (toutes les 25 s au plus). Pas vu depuis 60 s → « l'ordinateur de la maison ne répond pas » et : Internet → Tavily, CRM → l'analyste Gemini. Question pas prise en 30 s ou pas de réponse en 4 min → il le dit (pas de réponse inventée). Le journal le note. |
 | K7 | **Sécurité.** | La file est réservée au PC par un secret tiré au sort à l'installation (gardé dans les propriétés du script au premier passage ; « oublierPC » dans l'éditeur pour en changer). L'adresse du script n'est jamais dans le dépôt : l'installateur la reçoit en paramètre. |
+| K7 bis | **Où voir les questions.** | Onglet « Claude » de la feuille « Wilson — journal » (le plus récent en haut : question, réponse dite, détail et sources, durée) ; journal de Wilson (« Claude (PC) : … », « Relais Claude : … ») ; sur le PC, `%USERPROFILE%\WilsonRelais\relais.log`. Elles n'apparaissent pas dans les discussions de l'appli Claude : `claude -p` ne garde pas de session. |
 | K8 | **Coût : rien de plus.** | `claude -p` avec l'abonnement Claude de Timothée (Claude Code lui-même, usage prévu par Anthropic ; aucune clé API). Sonnet, 30 étapes au plus. Le relais écrit dans le journal de Wilson (« relais PC ») : question reçue, durée, réussite ou erreur. |
 | K9 | **Le PC.** | Installation par une seule ligne PowerShell (`pc/installer.ps1`) : Node.js si absent, Claude Code, connexion à son compte Claude (une fois, dans le navigateur), relais dans `%USERPROFILE%\WilsonRelais`, démarrage tout seul à l'ouverture de session (tâche planifiée, fenêtre cachée), mise en veille désactivée sur secteur (sinon ni Claude ni Home Assistant ne répondent : journal du 05/11/26, 21h44-22h54, « Maison : toujours injoignable depuis 70 min »). |
 
