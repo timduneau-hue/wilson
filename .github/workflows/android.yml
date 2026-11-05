@@ -34,8 +34,9 @@ jobs:
           WILSON_CLE: ${{ secrets.WILSON_CLE }}
         run: |
           if [ -z "$WILSON_CLE" ]; then
-            echo "Il manque le secret WILSON_CLE (dépôt → Settings → Secrets and variables → Actions → New repository secret)." | tee build.log
-            exit 1
+            echo "Il manque le secret WILSON_CLE (dépôt → Settings → Secrets and variables → Actions → New repository secret) : construction d'essai seulement."
+            echo "SANS_CLE=1" >> "$GITHUB_ENV"
+            exit 0
           fi
           if [ ! -f android/wilson.keystore ]; then
             keytool -genkeypair -keystore android/wilson.keystore -storetype PKCS12 -storepass "$WILSON_CLE" -keypass "$WILSON_CLE" \
@@ -53,11 +54,17 @@ jobs:
           WILSON_CLE: ${{ secrets.WILSON_CLE }}
         run: |
           set -o pipefail
-          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee ../build.log
-          cp app/build/outputs/apk/release/app-release.apk ../wilson.apk
-          ls -la ../wilson.apk
+          if [ "$SANS_CLE" = "1" ]; then
+            gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build.log
+            ls -la app/build/outputs/apk/debug/
+          else
+            gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee ../build.log
+            cp app/build/outputs/apk/release/app-release.apk ../wilson.apk
+            ls -la ../wilson.apk
+          fi
 
       - name: Publier dans les Releases
+        if: env.SANS_CLE != '1'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-${{ github.run_number }}
@@ -66,15 +73,8 @@ jobs:
           files: wilson.apk
           make_latest: true
 
-      # Le journal de construction, lisible par Claude (branche « journal-android »), même en cas d'échec.
-      - name: Journal de construction
-        if: always()
-        shell: bash
+      - name: Secret manquant
+        if: env.SANS_CLE == '1'
         run: |
-          [ -f build.log ] || echo "pas de journal (échec avant la construction)" > build.log
-          mkdir -p /tmp/j && cp build.log /tmp/j/build.log
-          echo "${{ job.status }} · run ${{ github.run_number }} · ${{ github.sha }}" > /tmp/j/STATUT
-          cd /tmp/j && git init -q && git checkout -q -b journal-android
-          git config user.name "wilson-ci" && git config user.email "wilson-ci@users.noreply.github.com"
-          git add . && git commit -q -m "journal ${{ github.run_number }}"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" journal-android
+          echo "::error::Construction d'essai réussie, mais rien n'est publié : il manque le secret WILSON_CLE."
+          exit 1
