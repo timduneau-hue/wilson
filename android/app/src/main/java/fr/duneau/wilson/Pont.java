@@ -16,7 +16,7 @@ import android.webkit.JavascriptInterface;
  * Chaque méthode est appelée par app.js ; aucune ne lève d'erreur vers la page (elle renvoie un texte ou false).
  */
 public class Pont {
-    public static final String VERSION = "1";
+    public static final String VERSION = "2";
     private final MainActivity a;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -42,7 +42,7 @@ public class Pont {
         ui.post(() -> {
             try {
                 a.startActivity(choix);
-                a.revenirDans(2500);
+                a.revenirDans(1200);                  // 05/11/26, 18h11 : « le mieux serait qu'il ne s'affiche pas du tout » (2,5 s avant)
             } catch (ActivityNotFoundException e) {
                 a.journal("Pas d'appli de GPS sur le téléphone");
             } catch (Exception e) {
@@ -51,6 +51,17 @@ public class Pont {
         });
         return res[0] + (a.peutRevenir() ? "" : " (retour automatique impossible : autorisation « par-dessus les autres applis » manquante)");
     }
+
+    /** Le son de Wilson dans la voiture : demandé à Android pendant une discussion (true), rendu après (false). */
+    @JavascriptInterface
+    public String sonVoiture(boolean actif) {
+        ui.post(() -> a.focusSon(actif));
+        return a.etatSon();
+    }
+
+    /** L'état du son (journal). */
+    @JavascriptInterface
+    public String etatSon() { return a.etatSon(); }
 
     /** Wilson peut-il revenir tout seul devant (autorisation « Afficher par-dessus les autres applis ») ? */
     @JavascriptInterface

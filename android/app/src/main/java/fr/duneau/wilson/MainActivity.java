@@ -6,6 +6,10 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -167,6 +171,56 @@ public class MainActivity extends Activity {
     }
 
     boolean estDevant() { return devant; }
+
+    // ---------- le son dans la voiture (appli 2) ----------
+    // Journal du 05/11/26, 18h09 (« il y a encore un problème du son ») : dans Chrome, c'est Chrome qui demandait à Android
+    // le son pour sa page, et Android Auto passait alors la voix de Wilson dans les haut-parleurs. La vue web de l'appli ne le
+    // demande pas : l'appli le demande elle-même pendant chaque discussion, et le rend après.
+    private AudioFocusRequest focus;
+
+    void focusSon(boolean actif) {
+        AudioManager am = getSystemService(AudioManager.class);
+        if (am == null) return;
+        if (actif) {
+            if (am.getMode() == AudioManager.MODE_IN_COMMUNICATION) am.setMode(AudioManager.MODE_NORMAL);   // jamais le canal « appel »
+            if (focus != null) return;
+            focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    .setAudioAttributes(new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build())
+                    .setOnAudioFocusChangeListener(c -> { })
+                    .build();
+            int r = am.requestAudioFocus(focus);
+            journal("son de la voiture demandé à Android : " + (r == AudioManager.AUDIOFOCUS_REQUEST_GRANTED ? "accordé" : r == AudioManager.AUDIOFOCUS_REQUEST_DELAYED ? "différé" : "REFUSÉ") + " — " + etatSon());
+        } else if (focus != null) {
+            am.abandonAudioFocusRequest(focus);
+            focus = null;
+        }
+    }
+
+    // L'état du son, pour le journal : mode, sorties, appareil de communication.
+    String etatSon() {
+        AudioManager am = getSystemService(AudioManager.class);
+        if (am == null) return "?";
+        StringBuilder b = new StringBuilder();
+        int m = am.getMode();
+        b.append("mode ").append(m == AudioManager.MODE_NORMAL ? "normal" : m == AudioManager.MODE_IN_COMMUNICATION ? "communication" : m == AudioManager.MODE_IN_CALL ? "appel" : String.valueOf(m));
+        b.append(", sorties :");
+        for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            int t = d.getType();
+            String n = t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ? "Bluetooth musique" : t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ? "Bluetooth appel"
+                    : t == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ? "haut-parleur" : t == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE ? "écouteur"
+                    : t == AudioDeviceInfo.TYPE_USB_DEVICE || t == AudioDeviceInfo.TYPE_USB_ACCESSORY ? "USB" : null;
+            if (n != null) b.append(' ').append(n).append(';');
+        }
+        if (Build.VERSION.SDK_INT >= 31) {
+            AudioDeviceInfo c = am.getCommunicationDevice();
+            if (c != null) b.append(" communication sur ").append(c.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ? "Bluetooth" : c.getType() == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE ? "écouteur" : String.valueOf(c.getType()));
+        }
+        b.append(am.isMusicActive() ? ", son en cours" : ", silence");
+        return b.toString();
+    }
 
     // Une ligne dans le journal de Wilson (la page l'envoie avec les autres).
     void journal(String m) {

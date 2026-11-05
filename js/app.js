@@ -36,7 +36,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.31.0';
+const VERSION = '1.31.1';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -287,7 +287,12 @@ class App {
       this.vision = new Vision(); this.vision.mirror = !this.settings.mirror; this.vision.calib = { yaw: 0, pitch: 0, down: 0, ...(this.settings.gazeCalib || {}) };
       this.vision.onPresence = (p) => this._presence(p);
       this.vision.onInfo = (m) => this.log(m);
-      await this.vision.start(); this.log('Caméra prête');
+      const v = this.vision;
+      await v.start();
+      // Journal du 05/11/26, 18h08:53 (appli) : la voiture a été reconnue pendant que la caméra s'ouvrait ; la caméra arrêtée
+      // entre-temps se rallumait quand même (« Caméra prête », puis la vision tournait en voiture).
+      if (this.vision !== v || this._voitureBt) { try { v.stop(); } catch (_) {} if (this.vision === v) { this.vision = null; this.qui.attacher(null); } this.log('Caméra refermée aussitôt : en voiture'); return; }
+      this.log('Caméra prête');
       this.qui.attacher(this.vision);
     } catch (e) { this.vision = null; this.log('Caméra indisponible : ' + e.message); }
   }
@@ -541,7 +546,8 @@ class App {
   get _voitureBt() {
     if (deviceName() !== 'téléphone' || !this.audio) return false;
     const now = performance.now();
-    if (appli() && now - (this._btAppliAt || 0) > 2000) { this._btAppliAt = now; this._btAppli = !!pont('bluetoothVoiture'); }   // A4, toutes les 2 s
+    if (appli() && (this._btAppliAt == null || now - this._btAppliAt > 2000)) { this._btAppliAt = now;   // (dès le 1er appel : performance.now() part de 0 au chargement)
+      this._btAppli = !!pont('bluetoothVoiture'); }   // A4, toutes les 2 s
     if (this.audio.btIn || this._btAppli) { this._btVuAt = now; return true; }
     return !!this._btVuAt && now - this._btVuAt < (this._voitureGraceMs ?? VOITURE_QUITTE_MS);   // 05/11/26 : pas de bascule sur un trou du Bluetooth
   }
@@ -3074,6 +3080,9 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (veutLecteur) this._holdUntil = now + 8000;
     const garde = vb && now < (this._holdUntil || 0);
     if (garde !== !!this._holdOn || (garde && !this.audio.holding && now - (this._holdTry || 0) > 5000)) {
+      // Appli Android (appli 2, journal du 05/11/26, 18h09 : « encore un problème du son ») : la vue web ne demande pas le son
+      // à Android comme Chrome ; l'appli le demande elle-même, sinon Android Auto ne passe pas sa voix dans les haut-parleurs.
+      if (appli() && garde !== !!this._holdOn) { const e = pont('sonVoiture', garde); if (garde) this.log(`Appli : son de la voiture demandé (${e || 'appli 1 : pas possible, mets l\'appli à jour'})`); }
       this._holdOn = garde; this._holdTry = now;
       this.audio.mediaHold(garde, (a) => { this.log(`Bouton ${a} (volant ou écran de la voiture) : je me tais`); if (this.state === 'conversation') this.endConversation('volant'); });
     }

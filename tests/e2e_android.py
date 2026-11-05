@@ -18,7 +18,7 @@ def check(name, ok, detail=''):
 STUB = """(() => {
   window.__bt = false;
   window.__nav = [];
-  window.WilsonAndroid = { version: () => '1', naviguer: (a, n) => { window.__nav.push([a, n]); return 'ok : Google Maps'; }, peutRevenir: () => true, demanderRetour: () => {}, revenir: () => {}, premierPlan: () => true, bluetoothVoiture: () => true };
+  window.WilsonAndroid = { version: () => '1', naviguer: (a, n) => { window.__nav.push([a, n]); return 'ok : Google Maps'; }, peutRevenir: () => true, demanderRetour: () => {}, revenir: () => {}, premierPlan: () => true, bluetoothVoiture: () => true, sonVoiture: (on) => { (window.__son = window.__son || []).push(on); return 'mode normal, sorties : Bluetooth musique;, silence'; }, etatSon: () => 'mode normal' };
   const md = navigator.mediaDevices, gum0 = md.getUserMedia.bind(md);
   md.enumerateDevices = async () => [
     { deviceId: 'id-speaker', kind: 'audioinput', label: 'Speakerphone', groupId: 'g1' },
@@ -130,6 +130,8 @@ async def main():
         await page.wait_for_function("wilson.state === 'conversation' && wilson.brain.open", timeout=10000)
         await attendre(lambda: conns and conns[-1]['texts'], 4)
         c = conns[-1]
+        await attendre(lambda: has('Appli : son de la voiture demandé'), 4)
+        check('Discussion en voiture : l\'appli demande le son de la voiture à Android (appli 2)', has('Appli : son de la voiture demandé (mode normal') and (await page.evaluate('window.__son || []'))[:1] == [True], str(await page.evaluate('window.__son || []')))
         check('Consigne : « Le guidage part directement dans la voiture » (pas de bouton à toucher)', 'Le guidage part directement dans la voiture' in sysp(c) and 'appuyer sur « Y aller »' not in sysp(c))
         send(c, inputTranscription={'text': 'Vas-y, guide-moi vers Miroiterie 35.'})
         await page.wait_for_timeout(300)
@@ -152,6 +154,12 @@ async def main():
         nav = await page.evaluate('window.__nav')
         check('Bouton « Y aller » dans l\'appli : guidage par le pont, la discussion n\'est pas fermée', nav[-1] == ['GALLAIS SARL CHAVAGNE', 'GALLAIS SARL'] and await page.evaluate("wilson.state") == 'conversation', str(nav))
 
+        await page.evaluate("wilson.endConversation('test')")
+        await page.evaluate("wilson._holdUntil = performance.now() - 1")
+        ok = await attendre(lambda: False, 1.5)
+        son = await page.evaluate('window.__son || []')
+        check('… et le rend après la discussion', son[-1:] == [False], str(son))
+        check('Caméra jamais allumée en voiture (pas de « Caméra prête »)', not has('Caméra prête'))
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, str(errs)[:400])
         await b.close()
