@@ -16,7 +16,10 @@ export const ANALYSE_MAX_MS = 10 * 60000;
 // étape, aucune recherche, et la réponse est arrivée au bout de 187 s ; rien au journal sur ce qui traînait).
 export const REQUETE_MAX_MS = 60000;   // les briefings (modèle qui réfléchit, gros résultats) prennent jusqu'à ~30 s
 export const RELAIS_MS = 20000;        // sans réponse au bout de 20 s : le modèle suivant est interrogé en même temps (05/11/26)
-const LENT_MS = 15 * 60000;            // modèle lent ou surchargé : essayé en dernier pendant 15 min
+// Journal du 05/11/26 : gemini-3.8-flash muet à 11h03 puis de nouveau à 14h44 (l'appli avait redémarré entre-temps et
+// l'avait oublié : 20 s perdues). Modèle lent ou surchargé : en dernier pendant 2 h, et retenu même après un redémarrage,
+// comme le dernier modèle qui a répondu (essayé en premier).
+const LENT_MS = 2 * 3600000;
 const MAX_ETAPES = 8;
 const TABLES = ['commandes', 'devis', 'devis_a_relancer', 'clients', 'taches', 'comptes_rendus', 'visites', 'veille'];
 const OPS = ['=', '!=', '>', '>=', '<', '<=', 'contient', 'ne_contient_pas', 'commence_par', 'entre', 'parmi', 'vide', 'non_vide', 'ressemble'];
@@ -78,6 +81,10 @@ export class Analyste {
   constructor({ ask, log = () => {} } = {}) {
     this.ask = ask; this.log = log; this.modelUsed = null; this._schema = null; this.requeteMaxMs = REQUETE_MAX_MS; this.relaisMs = RELAIS_MS; this.lent = {};
     try { this.refused = JSON.parse(localStorage.getItem('wilson.analyste.refus') || '{}') || {}; } catch (_) { this.refused = {}; }
+    try {
+      const o = JSON.parse(localStorage.getItem('wilson.analyste.lent') || 'null');
+      if (o) { this.lent = o.lent || {}; if (ANALYSTE_MODELS.includes(o.modele)) this.modelUsed = o.modele; }
+    } catch (_) { this.lent = {}; }
   }
 
   // Description des tableaux (gardée la journée).
@@ -117,7 +124,7 @@ export class Analyste {
         clearTimeout(relais);
         relais = setTimeout(() => {
           if (fini || i >= models.length || enCours >= 2) return;
-          this.lent[model] = Date.now() + LENT_MS;                     // lent : en dernier la prochaine fois (sauf s'il répond quand même)
+          this.lent[model] = Date.now() + LENT_MS; this._saveLent();   // lent : en dernier la prochaine fois (sauf s'il répond quand même)
           this.log(`Analyste : ${model} sans réponse en ${Math.round(this.relaisMs / 1000)} s : ${models[i]} interrogé en même temps`);
           lancer();
         }, this.relaisMs);
@@ -153,7 +160,7 @@ export class Analyste {
         } finally { clearTimeout(minut); if (signal) signal.removeEventListener('abort', stop); }
       }
       if (trop) {
-        this.lent[model] = Date.now() + LENT_MS;
+        this.lent[model] = Date.now() + LENT_MS; this._saveLent();
         this.log(`Analyste : ${model} sans réponse en ${Math.round((Date.now() - t1) / 1000)} s : modèle suivant`);
         throw new Error(`${model} sans réponse en ${Math.round(this.requeteMaxMs / 1000)} s`);
       }
@@ -165,7 +172,7 @@ export class Analyste {
         if (out && out.action) {
           if (this.refused[model]) { delete this.refused[model]; this._saveRefus(); }
           delete this.lent[model];
-          this.modelUsed = model; return { out, model, txt };
+          this.modelUsed = model; this._saveLent(); return { out, model, txt };
         }
         this.log(`Analyste : ${model} → réponse illisible : modèle suivant`);
         throw new Error('réponse illisible de Gemini');
@@ -176,11 +183,12 @@ export class Analyste {
       if (r.status === 401 || r.status === 403) { err.auth = true; throw err; }
       if (r.status === 429 || /quota|exhausted|rate.?limit/i.test(msg)) { this.refused[model] = Date.now() + 3600000; this._saveRefus(); throw err; }
       if (r.status === 400 && schema && /schema|mime|json|enum|propert/i.test(msg)) continue;      // schéma refusé : même modèle, sans schéma
-      if (r.status === 503 || /high demand|overloaded|unavailable/i.test(msg)) this.lent[model] = Date.now() + LENT_MS;
+      if (r.status === 503 || /high demand|overloaded|unavailable/i.test(msg)) { this.lent[model] = Date.now() + LENT_MS; this._saveLent(); }
       throw err;                                                                                       // modèle indisponible : suivant
     }
   }
   _saveRefus() { try { localStorage.setItem('wilson.analyste.refus', JSON.stringify(this.refused)); } catch (_) {} }
+  _saveLent() { try { localStorage.setItem('wilson.analyste.lent', JSON.stringify({ lent: this.lent, modele: this.modelUsed })); } catch (_) {} }
 
   // La question → { reponse, etapes, recherches, model, ms }. onEtape(n, pourquoi) à chaque étape.
   async repondre({ key, question, contexte = '', voiture = false, signal, onEtape }) {
