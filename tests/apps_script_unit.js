@@ -37,8 +37,12 @@ sheets['Journal'].data[0] = ['Date', 'Version', 'Message'];
 sheets['Délais'].data[0] = ['Date', 'Envoi'];
 sheets['État'].data[0] = ['Clé', 'Valeur'];
 let opened = null, locked = 0; const cache = {}; let dormi = 0; const fetched = [], logged = [], props = {}, mails = [], evs = [];
-const evt = (o) => ({ ...o, getId: () => o.id, getTitle: () => o.titre, getStartTime: () => o.d1, getEndTime: () => o.d2, isAllDayEvent: () => !!o.entier, getLocation: () => o.lieu || '', deleteEvent: () => { evs.splice(evs.indexOf(o), 1); } });
+const evt = (o) => ({ ...o, getMyStatus: () => o.statut || 'OWNER', getId: () => o.id, getTitle: () => o.titre, getStartTime: () => o.d1, getEndTime: () => o.d2, isAllDayEvent: () => !!o.entier, getLocation: () => o.lieu || '', deleteEvent: () => { evs.splice(evs.indexOf(o), 1); } });
+const evsPerso = [];
+const perso = { getId: () => 'timothee@exemple.fr', getName: () => 'Timothée', getEvents: (a, b) => evsPerso.filter((e) => e.d1 < b && e.d2 > a).map(evt) };
+const anniv = { getId: () => 'anniv@group.calendar.google.com', getName: () => 'Anniversaire', getEvents: () => [evt({ id: 'a1', titre: 'Anniversaire Léa', d1: new Date(2026, 10, 12, 10), d2: new Date(2026, 10, 12, 11) })] };
 const cal = {
+  getId: () => 'famille@group.calendar.google.com', getName: () => 'Famille',
   getEvents: (a, b) => evs.filter((e) => e.d1 < b && e.d2 > a).map(evt),
   createEvent: (titre, d1, d2, o) => { const e = { id: 'e' + evs.length, titre, d1, d2, lieu: o.location, note: o.description }; evs.push(e); return evt(e); },
   createAllDayEvent: (titre, d1, d2, o) => { if (!(d2 instanceof Date)) { o = d2; d2 = new Date(d1.getTime() + 86400000); } const e = { id: 'e' + evs.length, titre, d1, d2, entier: true, lieu: o.location }; evs.push(e); return evt(e); },
@@ -60,7 +64,7 @@ const ctx = {
     getProperties: () => ({ ...props }), deleteProperty: (k) => { delete props[k]; } }) },
   Session: { getEffectiveUser: () => ({ getEmail: () => 'moi@exemple.fr' }) },
   MailApp: { sendEmail: (o) => mails.push(o) },
-  CalendarApp: { getCalendarsByName: (n) => (n === 'Famille' ? [cal] : []) },
+  CalendarApp: { getCalendarsByName: (n) => (n === 'Famille' ? [cal] : []), getAllOwnedCalendars: () => [perso, cal, anniv], GuestStatus: { NO: 'NO', YES: 'YES', OWNER: 'OWNER' } },
   Utilities: { sleep: (ms) => { dormi += ms; fauxTemps += ms; }, formatDate: (d, tz, f) => (f === 'yyyy-MM-dd' ? '2026-11-04' : f === "HH'h'mm" ? '14h12' : '23/10/26 15h30:00'), base64Decode: (b) => Buffer.from(b, 'base64'), newBlob: (bytes, type, name) => ({ bytes, type, name }) },
   ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' }), getOAuthToken: () => 'JETON-DE-TIMOTHEE' },
   DriveApp: { getRootFolder: () => ({ getName: () => 'Mon Drive' }) },
@@ -196,6 +200,24 @@ fa = JF({ action: 'agenda_ajouter', titre: 'Week-end chez mamie', journee: true,
 check('Agenda : week-end en jours entiers (samedi et dimanche)', fa.ok && evs[1].entier && evs[1].d1.getDate() === 14 && evs[1].d2.getDate() === 16, JSON.stringify(evs[1]));
 fa = JF({ action: 'agenda_lire', du: '2026-11-12', jours: 7 });
 check('Agenda : lecture de la semaine', fa.ok && fa.evenements.length === 2 && fa.evenements[0].titre === 'Médecin Louis');
+// Déjà quelque chose de prévu (demande du 06/11/26) : rien n'est ajouté, Wilson prévient ; ajouté seulement avec quand_meme.
+fa = JF({ action: 'agenda_ajouter', titre: 'Coiffeur', debut: t1 + 1800000 });
+check('Agenda : créneau déjà pris dans l\'agenda Famille → pas ajouté, conflit rendu', fa.ok && fa.conflit === true && fa.conflits.length === 1 && fa.conflits[0].titre === 'Médecin Louis' && fa.conflits[0].agenda === 'Famille' && evs.length === 2, JSON.stringify(fa));
+fa = JF({ action: 'agenda_ajouter', titre: 'Coiffeur', debut: t1 + 1800000, quand_meme: true });
+check('Agenda : ajouté quand même après son accord', fa.ok && !fa.conflit && evs.length === 3 && evs[2].titre === 'Coiffeur', JSON.stringify(fa));
+evs.pop();
+evsPerso.push({ id: 'p1', titre: 'Dentiste', d1: new Date(2026, 10, 13, 17, 0), d2: new Date(2026, 10, 13, 18, 0) }, { id: 'p2', titre: 'Réunion refusée', statut: 'NO', d1: new Date(2026, 10, 13, 9, 0), d2: new Date(2026, 10, 13, 10, 0) });
+fa = JF({ action: 'agenda_ajouter', titre: 'Apéro chez Paul', debut: new Date(2026, 10, 13, 16, 30).getTime(), fin: new Date(2026, 10, 13, 17, 30).getTime() });
+check('Agenda : conflit trouvé aussi dans son agenda à lui (avec le nom de l\'agenda)', fa.conflit && fa.conflits.length === 1 && fa.conflits[0].titre === 'Dentiste' && fa.conflits[0].agenda === 'Timothée' && evs.length === 2, JSON.stringify(fa));
+evsPerso.push({ id: 'p3', titre: 'Anniversaire Paul', entier: true, d1: new Date(2026, 10, 13), d2: new Date(2026, 10, 14) });
+fa = JF({ action: 'agenda_ajouter', titre: 'Garage', debut: new Date(2026, 10, 13, 9, 0).getTime() });
+check('Agenda : un événement qu\'il a refusé, ou « toute la journée » dans son agenda à lui, ne compte pas', fa.ok && !fa.conflit && evs.length === 3, JSON.stringify(fa));
+evs.pop();
+fa = JF({ action: 'agenda_ajouter', titre: 'Anniversaire Léa', journee: true, debut: '2026-11-15' });
+check('Agenda : jour entier déjà occupé (le week-end chez mamie) → conflit', fa.conflit && fa.conflits.some((e) => e.titre === 'Week-end chez mamie' && e.journee) && evs.length === 2, JSON.stringify(fa));
+fa = JF({ action: 'agenda_ajouter', titre: 'Cinéma', debut: new Date(2026, 10, 12, 20, 30).getTime() });
+check('Agenda : créneau libre → ajouté directement', fa.ok && !fa.conflit && evs.length === 3, JSON.stringify(fa));
+evs.pop();
 fa = JF({ action: 'agenda_annuler', id: evs[1].id });
 check('Agenda : annuler un événement', fa.ok && evs.length === 1);
 check('Agenda : titre manquant refusé', JF({ action: 'agenda_ajouter', debut: t1 }).ok === false);
@@ -266,6 +288,7 @@ cq = C({ action: 'claude_resultat', id: 'q1', attente: 0 });
 check('Claude : résultat → encore en attente', cq.ok && cq.etat === 'attente' && cq.dire === '');
 cq = C({ action: 'claude_prendre', secret: SECRET, attente: 25 });
 check('Claude : le relais prend la question (texte, type, voiture)', cq.ok && cq.question && cq.question.id === 'q1' && cq.question.type === 'internet' && cq.question.voiture === true && JSON.parse(cache.claude_file).length === 0);
+check('Claude : sans « crm » de Wilson, pas de CRM pour Claude (seulement Timothée, 06/11/26)', cq.question.crm === false);
 cq = C({ action: 'claude_resultat', id: 'q1', attente: 0 });
 check('Claude : résultat → en cours', cq.ok && cq.etat === 'en_cours' && cq.pris !== null);
 dormi = 0; cq = C({ action: 'claude_prendre', secret: SECRET, attente: 25 });
@@ -283,7 +306,7 @@ C({ action: 'claude_demander', id: 'q3', question: 'Question suivante', type: 'c
 cq = C({ action: 'claude_annuler', id: 'q2' });
 check('Claude : annulation d\'une question pas encore prise', cq.ok && cq.etat === 'annulee');
 cq = C({ action: 'claude_prendre', secret: SECRET, attente: 5 });
-check('Claude : la question annulée est sautée, la suivante est prise', cq.ok && cq.question && cq.question.id === 'q3' && cq.question.type === 'crm');
+check('Claude : la question annulée est sautée, la suivante est prise', cq.ok && cq.question && cq.question.id === 'q3' && cq.question.type === 'crm' && cq.question.crm === true);
 dormi = 0; cq = C({ action: 'claude_resultat', id: 'q3', attente: 15, etat: 'en_cours' });
 check('Claude : Wilson attend au plus 15 s par appel', cq.ok && cq.etat === 'en_cours' && dormi >= 14000 && dormi <= 16000, dormi + ' ms');
 C({ action: 'claude_rendre', secret: SECRET, id: 'q3', ok: false, erreur: 'Claude n\'a pas pu se connecter' });

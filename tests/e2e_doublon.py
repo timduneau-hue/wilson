@@ -167,14 +167,14 @@ async def main():
         errs = [l for l in logs if 'PAGEERROR' in l]
         await b.close()
 
-        # ---- 2. Tablette (maison) : pas de son de réflexion ----
+        # ---- 2. Tablette (maison) : le son de réflexion aussi (avant le 06/11/26 : seulement le visage) ----
         conns = []
         b, page, logs = await run(p, TAB_UA, False, 'gemini-3.1-flash-live-preview', conns)
         await page.evaluate("wilson.startConversation('toucher')")
         await page.wait_for_function('wilson.state === "conversation" && wilson.brain.open', timeout=8000)
         await page.evaluate("window.__look = true; window.__tones = []; const t0 = wilson.audio.tone.bind(wilson.audio); wilson.audio.tone = (k) => { window.__tones.push(k); t0(k); }; wilson._searches = new Map([['s1', { abort() {} }]])")
         await page.wait_for_timeout(4000)
-        check('Tablette : pas de son de réflexion (le visage réfléchit)', 'reflexion' not in await page.evaluate('window.__tones'))
+        check('Tablette : petit son de réflexion pendant une recherche aussi (demande du 06/11/26, 00h11)', 'reflexion' in await page.evaluate('window.__tones'))
         errs += [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
         await b.close()

@@ -138,6 +138,16 @@ function agenda_(d) {
   if (a === 'agenda_ajouter') {
     var titre = String(d.titre || '').trim().slice(0, 120);
     if (!titre || !d.debut) return { ok: false, erreur: 'titre ou date manquant' };
+    // Demande de Timothée du 06/11/26, 00h39 : « s'il y a déjà quelque chose de prévu, j'espère qu'on est alerté par Wilson ».
+    // Avant d'ajouter : ce qui occupe déjà ce créneau dans l'agenda Famille ET dans ses propres agendas (perso, pro) ; s'il y a
+    // quelque chose, rien n'est ajouté et Wilson le dit, puis ajoute seulement s'il confirme (quand_meme).
+    if (!d.quand_meme) {
+      var c1, c2;
+      if (d.journee) { c1 = jour_(d.debut); var jf = d.fin ? jour_(d.fin) : c1; c2 = new Date(jf.getFullYear(), jf.getMonth(), jf.getDate() + 1); }
+      else { c1 = new Date(+d.debut); c2 = d.fin ? new Date(+d.fin) : new Date(c1.getTime() + 3600000); if (!(c2 > c1)) c2 = new Date(c1.getTime() + 3600000); }
+      var deja = agendaConflits_(c1, c2);
+      if (deja.length) return { ok: true, conflit: true, conflits: deja };
+    }
     var opts = { description: String(d.note || '').slice(0, 500), location: String(d.lieu || '').slice(0, 200) }, e;
     if (d.journee) {
       var j1 = jour_(d.debut), j2 = d.fin ? jour_(d.fin) : null;
@@ -157,6 +167,25 @@ function agenda_(d) {
   }
   return { ok: false, erreur: 'action inconnue : ' + a };
 }
+// Ce qui est déjà prévu sur [debut, fin[ : agenda Famille + agendas de Timothée (ceux qu'il possède : le sien, BOSCHAT
+// LAVEIX…), sans les événements qu'il a refusés. Les agendas d'anniversaires et de jours fériés, et les événements « toute la
+// journée » de ses autres agendas (anniversaires, rappels) ne comptent pas : ceux de l'agenda Famille, si (un week-end).
+function agendaConflits_(debut, fin) {
+  var fam = agendaFamille_(), cals = [fam], vus = {}, l = [];
+  try { CalendarApp.getAllOwnedCalendars().forEach(function (c) { cals.push(c); }); } catch (e) {}
+  cals.forEach(function (c) {
+    var id = c.getId(); if (vus[id]) return; vus[id] = 1;
+    var autre = id !== fam.getId();
+    if (autre && /anniv|birthday|f[ée]ri|holiday/i.test(c.getName())) return;
+    c.getEvents(debut, fin).forEach(function (ev) {
+      if (autre && ev.isAllDayEvent()) return;
+      try { if (ev.getMyStatus && ev.getMyStatus() === CalendarApp.GuestStatus.NO) return; } catch (e) {}
+      l.push({ titre: ev.getTitle(), debut: +ev.getStartTime(), fin: +ev.getEndTime(), journee: ev.isAllDayEvent(), agenda: c.getName() });
+    });
+  });
+  return l.sort(function (x, y) { return x.debut - y.debut; }).slice(0, 6);
+}
+
 // À lancer une fois dans l'éditeur (essaiAgenda → Exécuter) : demande l'accès à Google Agenda et lit la semaine.
 function essaiAgenda() {
   var r = agenda_({ action: 'agenda_lire', jours: 7 });

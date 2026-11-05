@@ -61,7 +61,7 @@ function claudeDemander_(d) {
   if (deja) return { ok: true, accepte: deja.etat !== 'annulee', id: id, etat: deja.etat, pc: pc };   // renvoi après une coupure : rien en double
   if (!pc.vivant) return { ok: true, accepte: false, id: id, pc: pc };
   var q = {
-    id: id, question: question, type: d.type === 'crm' ? 'crm' : 'internet', voiture: !!d.voiture,
+    id: id, question: question, type: d.type === 'crm' ? 'crm' : 'internet', voiture: !!d.voiture, crm: d.type === 'crm' || d.crm === true,   // CRM : seulement pour Timothée (06/11/26)
     contexte: String(d.contexte || '').slice(0, 8000), regles: String(d.regles || '').slice(0, 8000),
     appareil: String(d.appareil || '').slice(0, 40), t: Date.now(), etat: 'attente',
   };

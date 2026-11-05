@@ -28,6 +28,12 @@ check('Claude : impression seule, JSON, Sonnet, effort élevé', a[0] === '-p' &
 check('Claude : outils limités à la recherche et à la lecture de pages', val('--tools') === 'WebSearch,WebFetch' && !/Bash|Write|Edit|PowerShell/.test(val('--tools')));
 check('Claude : seul le CRM en lecture seule en plus, le reste refusé', val('--allowedTools') === 'WebSearch,WebFetch,mcp__crm' && val('--permission-mode') === 'dontAsk' && a.includes('--strict-mcp-config') && a.includes('--no-session-persistence'));
 
+// Pas Timothée (Camille à la tablette, un visage inconnu) : Claude n'a que la recherche, pas le CRM (règle du 06/11/26).
+const a2 = argumentsClaude({ mcp: 'C:\\W\\mcp.json', consigne: 'C:\\W\\consigne.md', crm: false });
+check('Claude sans le CRM : ni outil CRM ni configuration MCP', a2[a2.indexOf('--allowedTools') + 1] === 'WebSearch,WebFetch' && !a2.includes('--mcp-config') && a2.includes('--strict-mcp-config') && !a2.some((x) => /mcp\.json|mcp__crm/.test(x)));
+const d2 = demande({ type: 'internet', crm: false, question: 'Compare deux perceuses' }, new Date(2026, 10, 6, 8, 5));
+check('Demande sans le CRM : Claude sait que ce n\'est pas Timothée', /pas Timothée qui demande/.test(d2) && !/pas Timothée/.test(demande({ type: 'internet', crm: true, question: 'x' })));
+
 // ---------- Le relais avec un faux script et un faux Claude ----------
 const envoyes = [];
 let fileQ = [{ id: 'q1', type: 'internet', question: 'Compare deux paumelles', voiture: true }];
@@ -46,7 +52,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 2 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 3 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -60,7 +66,7 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 2');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 3');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
 
 // ---------- Le CRM en lecture seule ----------

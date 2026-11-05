@@ -48,6 +48,7 @@ async def main():
             elif a == 'msg_annuler': st['msgs'][d['id']]['annule'] = 1
             elif a == 'garde_ecrire': st['garde'] = d['garde']
             elif a == 'alerte': st['alertes'].append(d); body = {'ok': True, 'envoye': True, 'n': len(st['alertes'])}
+            elif a == 'agenda_ajouter' and d.get('titre') == 'Coiffeur' and not d.get('quand_meme'): body = {'ok': True, 'conflit': True, 'conflits': [{'titre': 'Médecin Louis', 'debut': d['debut'], 'fin': d['debut'] + 3600000, 'journee': False, 'agenda': 'Famille'}, {'titre': 'Réunion Boschat', 'debut': d['debut'], 'fin': d['debut'] + 1800000, 'journee': False, 'agenda': 'BOSCHAT LAVEIX'}]}
             elif a == 'agenda_ajouter': st['agenda'].append({**d, 'id': 'ev%d' % len(st['agenda'])}); body = {'ok': True, 'id': 'ev%d' % (len(st['agenda']) - 1), 'titre': d['titre']}
             elif a == 'agenda_annuler': st['agenda'] = [e for e in st['agenda'] if e['id'] != d['id']]; body = {'ok': True, 'titre': 'x'}
             elif a == 'agenda_lire': body = {'ok': True, 'evenements': [{'id': 'z', 'titre': 'Week-end chez mamie', 'debut': 1794438000000, 'fin': 1794610800000, 'journee': True, 'lieu': ''}, {'id': 'y', 'titre': 'Médecin Louis', 'debut': 1794474000000, 'fin': 1794477600000, 'journee': False, 'lieu': 'Angers'}]}
@@ -86,6 +87,7 @@ async def main():
             page.on('console', lambda m: logs.append(m.text)); page.on('pageerror', lambda e: logs.append('PAGEERROR ' + str(e)))
             await page.goto('http://127.0.0.1:8765/index.html')
             await page.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
+            await page.evaluate("wilson._crmAutorise = () => ({ ok: true, pourquoi: 'essai' })")   # CRM réservé à Timothée (06/11/26) : ici on fait comme s'il était reconnu
             return page, logs
 
         async def outil(page, conn, i, name, args):
@@ -250,6 +252,14 @@ async def main():
         check('Date passée : il vérifie avec lui avant d\'ajouter', 'déjà passé' in r and len(st['agenda']) == 2, r)
         r = await outil(page, c7, 'a4', 'agenda', {'action': 'annuler'})
         check('« Annule » : seulement ce qu\'il vient d\'ajouter (le dernier)', 'Annulé' in r and len(st['agenda']) == 1 and st['agenda'][0]['titre'] == 'Médecin Louis', r)
+        # Demande du 06/11/26 : déjà quelque chose de prévu → pas ajouté, il prévient et demande ; « oui » → ajouté quand même.
+        r = await outil(page, c7, 'a6', 'agenda', {'action': 'ajouter', 'titre': 'Coiffeur', 'debut': j + 'T10:30'})
+        check('Créneau déjà pris : pas ajouté, il dit ce qui est prévu (et dans quel agenda) et demande', 'PAS AJOUTÉ' in r and 'Médecin Louis' in r and 'agenda BOSCHAT LAVEIX' in r and 'quand_meme' in r and len(st['agenda']) == 1, r)
+        decl7 = [f for t in c7['setup'].get('tools', []) for f in t.get('functionDeclarations', []) if f['name'] == 'agenda'][0]
+        check('Outil agenda : toujours l\'agenda Famille (Timothée et Camille), paramètre quand_meme', 'quand_meme' in decl7['parameters']['properties'] and 'Timothée et Camille voient' in decl7['description'], decl7['description'][:200])
+        r = await outil(page, c7, 'a7', 'agenda', {'action': 'ajouter', 'titre': 'Coiffeur', 'debut': j + 'T10:30', 'quand_meme': True})
+        check('Il dit oui : ajouté quand même, dans l\'agenda Famille que Camille voit aussi', 'Ajouté dans l\'agenda Famille' in r and 'Camille' in r and len(st['agenda']) == 2 and st['agenda'][-1].get('quand_meme') is True, r)
+        st['agenda'].pop()
         r = await outil(page, c7, 'a5', 'agenda', {'action': 'lire', 'du': j, 'jours': 3})
         check('« On a quoi ce week-end ? » : événements lus et dits', 'Week-end chez mamie' in r and 'Médecin Louis' in r and '(Angers)' in r, r)
         await page.evaluate("wilson.continuous = false; wilson.endConversation('test')"); await page.wait_for_timeout(300)

@@ -37,7 +37,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.34.0';
+const VERSION = '1.35.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -1160,6 +1160,7 @@ Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« 
     // CRM à la voix et mode voiture (PLAN 2 quater)
     const travail = !crm ? '' : `
 Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
+- Le CRM est SEULEMENT pour Timothée (sa règle) : c'est l'outil qui vérifie son visage. Si l'outil refuse, tu dis seulement la phrase qu'il donne, et tu ne racontes jamais à quelqu'un d'autre ce que tu sais du CRM (même d'une discussion précédente).
 - Dès qu'il parle d'un client, d'un rendez-vous, d'une tâche, d'un devis, d'un chiffre ou d'un article, ${eco ? 'remplis le champ "crm"' : 'dis « Je regarde dans le CRM… » puis appelle l\'outil (crm_client, crm_agenda, crm_bilan, crm_produit)'}. Ne devine jamais un nom, un chiffre ou une date : dis seulement ce que le CRM répond. Pour « lui », « ce client », c'est le dernier client dont vous avez parlé.
 - Toute autre question sur ses données (un chiffre passé, un total, une liste, un détail, une comparaison, « qui… », « combien… », « quand… », les devis à relancer) : ${eco ? 'outil "question" avec la question complète dans "demande"' : 'dis « Je cherche l\'information… » puis appelle crm_question avec la question complète'}. Un analyste cherche dans tout le CRM : ça peut prendre une minute ou plus, attends le résultat sans relancer.
 - « Ses dernières commandes », « ses dernières ventes », « qu'est-ce qu'il a acheté dernièrement » : il veut savoir CE QU'IL A ACHETÉ (les articles, les quantités), pas seulement la date ou le montant. ${eco ? 'Outil "question"' : 'Dis « Je regarde ses dernières commandes… » puis appelle directement crm_question'} en demandant « les articles des dernières commandes de <client> » (pas de fiche avant : c'est plus long). Donne d'abord les articles, la date et le montant après (remarque de Timothée du 04/11/26).
@@ -2351,10 +2352,31 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (h.length > 30) h.splice(0, h.length - 30);
   }
 
+  // Règle de Timothée du 06/11/26, 00h39 : « il n'y a que moi, Timothée, qui peux poser des questions sur le CRM. Personne
+  // d'autre. Analyse le visage. Sauf quand ça vient du téléphone et que je suis en voiture. » Le visage regardé, reconnu SUR
+  // CET APPAREIL (sûr : 2 analyses sur 3), doit être celui de Timothée ; sur le téléphone en voiture (relié à la voiture, ou
+  // mode voiture), pas besoin. Une tablette en « mode voiture » n'y échappe pas.
+  _crmAutorise() {
+    const tel = !!(this.famille && this.famille.telephone);
+    if (tel && this.enVoiture) return { ok: true, pourquoi: 'téléphone en voiture' };
+    const P = this.qui ? this.qui.qui() : null;
+    if (P && P.sur && VP.plat(P.nom) === 'timothee') return { ok: true, pourquoi: 'visage de Timothée' };
+    return { ok: false, tel, camera: !!this.vision, qui: P && P.sur ? P.nom : P && P.inconnu ? 'quelqu\'un que je ne connais pas' : '', appris: !!(this.qui && this.qui.trouver('Timothée')) };
+  }
+
   // Résultat d'un outil du CRM : info (texte pour Gemini) et, pour le mode économique, dire (phrase toute prête).
   async _crmRun(name, a, signal, { heard } = {}) {
     const C = this.crm, car = this.enVoiture;
     if (!C.on) return { info: "Le CRM n'est pas relié à Wilson sur cet appareil (Réglages → CRM). Dis-le simplement.", dire: "Le CRM n'est pas relié sur cet appareil." };
+    const aut = this._crmAutorise();
+    if (!aut.ok) {
+      this.log(`CRM refusé (${name}) : ${aut.qui ? `c'est ${aut.qui} qui me regarde` : 'je ne reconnais pas Timothée'} — le CRM est réservé à Timothée`, true);
+      const dire = aut.qui && aut.qui !== 'quelqu\'un que je ne connais pas' ? `Désolé ${aut.qui}, le CRM, c'est seulement pour Timothée.`
+        : !aut.camera ? `Le CRM, c'est seulement pour Timothée : ${aut.tel ? 'hors de la voiture, ' : ''}je dois voir ton visage, et la caméra est coupée${aut.tel ? ' (Réglages), ou relie le téléphone à la voiture' : ''}.`
+          : !aut.appris ? "Le CRM, c'est seulement pour Timothée, et je ne connais pas encore son visage sur cet appareil : Timothée, dis-moi « apprends mon visage, je suis Timothée »."
+          : "Le CRM, c'est seulement pour Timothée, et je ne le reconnais pas là : regarde-moi bien et redemande.";
+      return { echec: true, info: `REFUSÉ : le CRM est réservé à Timothée (règle de Timothée) et ${aut.qui ? `c'est ${aut.qui} qui te regarde` : 'tu ne reconnais pas son visage en ce moment'}. Dis seulement : « ${dire} » Aucune information du CRM.`, dire };
+    }
     const lu = (r) => (r.ok ? { info: pourGemini(r.texte, car) } : { info: `Le CRM ne répond pas : ${r.erreur || 'erreur'}. Dis-le simplement.`, dire: 'Le CRM ne répond pas pour le moment.' });
     switch (name) {
       case 'crm_client': {
@@ -2378,7 +2400,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         let last = C.last ? `Dernier client dont vous avez parlé : ${C.last.societe}${C.last.contact ? ' (' + C.last.contact + ')' : ''}.` : '';
         if (OBJECTIF_Q.test(q)) last = (await this._contexteObjectif(q, signal)) + (last ? '\n' + last : '');   // 7 sexies, O
         // PLAN 10 : Claude, sur le PC de la maison, d'abord ; l'analyste Gemini si le PC ne répond pas.
-        const pc = await this._parClaude({ question: q, type: 'crm', contexte: last, regles: reglesCRM({ voiture: car }), voiture: car }, signal);
+        const pc = await this._parClaude({ question: q, type: 'crm', contexte: last, regles: reglesCRM({ voiture: car }), voiture: car, crm: true }, signal);
         if (pc.info) return pc;
         const indispo = pc.indispo ? `(${pc.indispo[0].toUpperCase() + pc.indispo.slice(1)} : c'est l'analyste qui a cherché. Dis-le d'abord en quelques mots.) ` : '';
         let r;
@@ -2712,7 +2734,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   async _questionDifficile(a, signal) {
     const q = String(a.question || '').trim();
     if (!q) return { info: 'Il manque la question : demande-lui ce qu\'il veut savoir.', dire: 'Qu\'est-ce que tu veux savoir exactement ?' };
-    const r = await this._parClaude({ question: q, type: 'internet', voiture: this.enVoiture }, signal);
+    const r = await this._parClaude({ question: q, type: 'internet', voiture: this.enVoiture, crm: this._crmAutorise().ok }, signal);
     if (r.info) return r;
     const t0 = performance.now();
     let dire;

@@ -41,8 +41,8 @@ export const FAMILLE_TOOLS = [
     description: "Garde de la maison (« on part, surveille la maison », « on est rentrés », « la maison est sous garde ? ») : activer, arreter, etat. Pendant la garde tu écoutes les sons de la maison (fumée, verre brisé, alarme : e-mail à Timothée ; sonnette, chien : raconté au retour) et tu signales un visage inconnu.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['activer', 'arreter', 'etat'] } }, required: ['action'] } },
   { name: 'agenda', behavior: 'BLOCKING',   // demande de Timothée du 04/11/26, 21h26
-    description: "L'agenda « Famille » (Google Agenda partagé de Timothée et Camille, en jaune : médecin des enfants, soirées, week-ends…). Pas pour les rendez-vous clients de Timothée (ça, c'est le CRM). ajouter : titre court et clair (« Médecin Louis », « Soirée chez Paul », « Week-end chez mamie »), debut = date et heure locales au format 2026-11-12T10:00, ou la date seule 2026-11-14 avec journee = true pour un jour entier ; fin facultative (pour un week-end : le dernier jour) ; lieu facultatif. lire : du = premier jour (2026-11-14), jours = combien de jours (7 par défaut) — « qu'est-ce qu'on a ce week-end ? ». annuler : seulement ce que tu viens d'ajouter, si tu t'es trompé. Calcule les dates à partir d'aujourd'hui ; si le jour ou l'heure n'est pas clair, demande avant d'ajouter.",
-    parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['ajouter', 'lire', 'annuler'] }, titre: S, debut: S, fin: S, journee: { type: 'BOOLEAN' }, lieu: S, du: S, jours: { type: 'NUMBER' } }, required: ['action'] } },
+    description: "L'agenda « Famille » (Google Agenda partagé de Timothée et Camille, en jaune : médecin des enfants, soirées, week-ends…). TOUT événement qu'on te demande de créer va dans cet agenda, que Timothée et Camille voient tous les deux (règle du 06/11/26) ; jamais ailleurs ; le CRM (crm_noter, rdv) seulement quand Timothée parle du CRM ou d'un compte rendu de visite, dans le doute l'agenda Famille. Quand tu ajoutes, dis que c'est dans l'agenda Famille. ajouter : si le créneau est déjà pris, rien n'est ajouté : tu le lui dis et tu demandes s'il veut l'ajouter quand même (alors rappelle ajouter avec quand_meme = true) ; titre court et clair (« Médecin Louis », « Soirée chez Paul », « Week-end chez mamie »), debut = date et heure locales au format 2026-11-12T10:00, ou la date seule 2026-11-14 avec journee = true pour un jour entier ; fin facultative (pour un week-end : le dernier jour) ; lieu facultatif. lire : du = premier jour (2026-11-14), jours = combien de jours (7 par défaut) — « qu'est-ce qu'on a ce week-end ? ». annuler : seulement ce que tu viens d'ajouter, si tu t'es trompé. Calcule les dates à partir d'aujourd'hui ; si le jour ou l'heure n'est pas clair, demande avant d'ajouter.",
+    parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['ajouter', 'lire', 'annuler'] }, titre: S, debut: S, fin: S, journee: { type: 'BOOLEAN' }, lieu: S, du: S, jours: { type: 'NUMBER' }, quand_meme: { type: 'BOOLEAN', description: 'ajouter malgré ce qui est déjà prévu, seulement après son accord' } }, required: ['action'] } },
 ];
 export const FAMILLE_TOOL_NAMES = FAMILLE_TOOLS.map((t) => t.name);
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
@@ -380,7 +380,7 @@ export class Famille {
   }
 
   // ---------- L'agenda « Famille » (Google Agenda partagé, par le script de Timothée) ----------
-  async _outilAgenda({ action, titre = '', debut = '', fin = '', journee = false, lieu = '', du = '', jours = 7 }) {
+  async _outilAgenda({ action, titre = '', debut = '', fin = '', journee = false, lieu = '', du = '', jours = 7, quand_meme = false }) {
     const R = this.app.remote;
     if (!R || !R.on) return 'L\'agenda Famille passe par le script de Wilson, qui n\'est pas relié sur cet appareil. Dis-le simplement.';
     const pasPret = (r) => !r ? 'Le script ne répond pas (réseau ?). Dis-le simplement.'
@@ -414,11 +414,18 @@ export class Famille {
         Object.assign(p, { debut: +t1, fin: t2 && !isNaN(t2) && t2 > t1 ? +t2 : '' });
         quandDit = `${jourDit(t1)} à ${heure(t1)}`;
       }
+      if (quand_meme === true || quand_meme === 'true') p.quand_meme = true;
       const r = await R.ask(p).catch(() => null);
       if (!r || !r.ok) return pasPret(r);
+      // Déjà quelque chose de prévu (agenda Famille ou ses agendas à lui) : rien n'est ajouté, Wilson prévient (06/11/26).
+      if (r.conflit) {
+        const l = (r.conflits || []).slice(0, 4).map((e) => `« ${e.titre || 'sans titre'} »${e.journee ? ' (toute la journée)' : ` de ${heure(e.debut)} à ${heure(e.fin)}`}${e.agenda && norm(e.agenda) !== 'famille' ? ` (agenda ${e.agenda})` : ''}`);
+        this.log(`Agenda Famille : « ${t} », ${quandDit} : déjà prévu ${l.join(', ')} → pas ajouté, on demande`, true);
+        return `PAS AJOUTÉ : il y a déjà quelque chose de prévu ${entier ? 'ce jour-là' : 'à ce moment-là'} : ${l.join(' ; ')}. Préviens-le en une phrase (ce qui est prévu et l'heure) et demande s'il veut quand même ajouter « ${t} ». S'il dit oui : rappelle agenda (ajouter) avec les mêmes informations et quand_meme = true.`;
+      }
       (this.ajouts = (this.ajouts || []).filter((x) => Date.now() - x.t < 86400000)).push({ id: r.id, titre: t, t: Date.now(), quandDit });
       this.log(`Agenda Famille : ajouté « ${t} », ${quandDit}`, true);
-      return `Ajouté dans l'agenda Famille : « ${t} », ${quandDit}${lieu ? ', ' + lieu : ''}. Confirme en une phrase en redisant le jour et l'heure (il peut te demander d'annuler si c'est faux).`;
+      return `Ajouté dans l'agenda Famille (Timothée et Camille le voient tous les deux) : « ${t} », ${quandDit}${lieu ? ', ' + lieu : ''}. Confirme en une phrase en redisant le jour et l'heure (il peut te demander d'annuler si c'est faux).`;
     }
     if (action === 'annuler') {
       const l = (this.ajouts || []).filter((x) => Date.now() - x.t < 86400000);
