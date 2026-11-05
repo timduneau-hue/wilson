@@ -23,7 +23,7 @@ function doPost(e) {
       if (d.action === 'reglages_lire') return json_(lireReglages_());
       if (d.action === 'reglages_ecrire') return json_(ecrireReglages_(d));
       if (String(d.action).indexOf('idees_') === 0) return json_(idees_(d));   // « Mes idées » (fichier idees.gs)
-      if (/^(msg_|garde_|alerte)/.test(String(d.action))) return json_(famille_(d));   // messages, garde, alertes (fichier famille.gs)
+      if (/^(msg_|garde_|alerte|agenda_)/.test(String(d.action))) return json_(famille_(d));   // messages, garde, alertes, agenda (fichier famille.gs)
       if (String(d.action).indexOf('crm_') === 0) return json_(crm_(d));
       return json_({ ok: false, erreur: 'action inconnue : ' + d.action });
     } catch (err) { return json_({ ok: false, erreur: 'script : ' + String(err && err.message || err) }); }   // ex. autorisation manquante

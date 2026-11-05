@@ -1,15 +1,19 @@
 // Wilson — la famille et la garde (PLAN.md, section 7 sexies, M et G). À ajouter au script « Wilson journal » comme fichier
 // (dans l'éditeur Apps Script : + → Script → nommer « famille »), avec la ligne correspondante dans doPost de journal.gs :
-//      if (/^(msg_|garde_|alerte)/.test(String(d.action))) return json_(famille_(d));
+//      if (/^(msg_|garde_|alerte|agenda_)/.test(String(d.action))) return json_(famille_(d));
 // Puis Déployer → Gérer les déploiements → modifier → Nouvelle version.
 //  - messages de la famille (msg_…) : déposés par un appareil (téléphone), remis par un autre (tablette du salon). Un message
 //    par propriété du script (une propriété ne peut pas dépasser 9 ko) ; effacés 14 jours après ;
 //  - prénoms des visages appris sur la tablette (prénoms seulement, jamais les empreintes), pour que le téléphone les connaisse ;
 //  - garde de la maison (garde_ecrire) : demandée sur un appareil, appliquée par la tablette ;
-//  - alerte : e-mail à Timothée (son propre compte, celui qui a déployé le script), avec la photo de la pièce si elle est jointe.
-//    20 alertes par jour au plus, une du même genre toutes les 10 minutes au plus.
+//  - alerte : e-mail à Timothée (son propre compte, celui qui a déployé le script), avec la photo de la pièce si elle est jointe,
+//    et en copie aux adresses de ALERTES_AUSSI. 20 alertes par jour au plus, une du même genre toutes les 10 minutes au plus ;
+//  - agenda (agenda_…) : l'agenda Google « Famille » de Timothée, partagé avec Camille (lire, ajouter ; annuler seulement ce que
+//    Wilson vient d'ajouter). La 1re fois, lancer « essaiAgenda » dans l'éditeur et accepter l'accès à Google Agenda.
 
 var GARDER_MS = 14 * 24 * 3600 * 1000;
+var ALERTES_AUSSI = '';      // autres adresses qui reçoivent les alertes (séparées par des virgules) : à remplir ICI, jamais dans le dépôt
+var AGENDA_NOM = 'Famille';  // le nom de l'agenda partagé de la famille
 
 function famille_(d) {
   var a = String(d.action);
@@ -19,6 +23,7 @@ function famille_(d) {
   if (a === 'msg_annuler') return msgChanger_(d.id, function (m) { m.annule = Date.now(); });
   if (a === 'garde_ecrire') return gardeEcrire_(d.garde || {});
   if (a === 'alerte') return alerte_(d);
+  if (a.indexOf('agenda_') === 0) return agenda_(d);
   return { ok: false, erreur: 'action inconnue : ' + a };
 }
 
@@ -93,12 +98,59 @@ function alerte_(d) {
       + (d.photo ? '<p><img src="cid:photo" style="max-width:100%"></p>' : '')
       + '<p style="color:#888">Wilson n\'est pas un système d\'alarme : il prévient seulement de ce qu\'il entend ou voit.</p>';
     var o = { to: moi, subject: sujet, htmlBody: html, body: texte + ' — ' + heure + (d.details ? '\n' + d.details : '') };
+    var aussi = String(ALERTES_AUSSI || '').split(/[,;\s]+/).filter(function (x) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x); });
+    if (aussi.length) o.cc = aussi.join(',');
     if (d.photo) { var b = Utilities.newBlob(Utilities.base64Decode(String(d.photo)), 'image/jpeg', 'wilson-' + heure.replace('h', '-') + '.jpg'); o.inlineImages = { photo: b }; o.attachments = [b]; }
     MailApp.sendEmail(o);
     c.n++; c.der[genre] = now; p.setProperty('alertes', JSON.stringify(c));
     return { ok: true, envoye: true, n: c.n };
   } finally { lock.releaseLock(); }
 }
+// ---------- L'agenda « Famille » (demande de Timothée du 04/11/26) ----------
+function agendaFamille_() {
+  var l = CalendarApp.getCalendarsByName(AGENDA_NOM);
+  if (!l.length) throw new Error('agenda « ' + AGENDA_NOM + ' » introuvable');
+  return l[0];
+}
+function jour_(s) { var p = String(s).slice(0, 10).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+function agenda_(d) {
+  var a = String(d.action), cal = agendaFamille_();
+  if (a === 'agenda_lire') {
+    var du = d.du ? jour_(d.du) : new Date(), jours = Math.max(1, Math.min(+d.jours || 7, 62));
+    if (d.du) du.setHours(0, 0, 0, 0);
+    var au = new Date(du.getTime() + jours * 86400000);
+    return { ok: true, evenements: cal.getEvents(du, au).slice(0, 40).map(function (e) {
+      return { id: e.getId(), titre: e.getTitle(), debut: +e.getStartTime(), fin: +e.getEndTime(), journee: e.isAllDayEvent(), lieu: e.getLocation() || '' };
+    }) };
+  }
+  if (a === 'agenda_ajouter') {
+    var titre = String(d.titre || '').trim().slice(0, 120);
+    if (!titre || !d.debut) return { ok: false, erreur: 'titre ou date manquant' };
+    var opts = { description: String(d.note || '').slice(0, 500), location: String(d.lieu || '').slice(0, 200) }, e;
+    if (d.journee) {
+      var j1 = jour_(d.debut), j2 = d.fin ? jour_(d.fin) : null;
+      e = j2 && j2 > j1 ? cal.createAllDayEvent(titre, j1, new Date(j2.getFullYear(), j2.getMonth(), j2.getDate() + 1), opts) : cal.createAllDayEvent(titre, j1, opts);
+    } else {
+      var t1 = new Date(+d.debut), t2 = d.fin ? new Date(+d.fin) : new Date(t1.getTime() + 3600000);
+      if (isNaN(t1.getTime())) return { ok: false, erreur: 'date illisible' };
+      e = cal.createEvent(titre, t1, t2 > t1 ? t2 : new Date(t1.getTime() + 3600000), opts);
+    }
+    return { ok: true, id: e.getId(), titre: titre };
+  }
+  if (a === 'agenda_annuler') {
+    var ev = cal.getEventById(String(d.id || ''));
+    if (!ev) return { ok: false, erreur: 'événement introuvable' };
+    var t = ev.getTitle(); ev.deleteEvent();
+    return { ok: true, titre: t };
+  }
+  return { ok: false, erreur: 'action inconnue : ' + a };
+}
+// À lancer une fois dans l'éditeur (essaiAgenda → Exécuter) : demande l'accès à Google Agenda et lit la semaine.
+function essaiAgenda() {
+  var r = agenda_({ action: 'agenda_lire', jours: 7 });
+  Logger.log('Agenda « ' + AGENDA_NOM + ' » : ' + r.evenements.length + ' événement(s) dans les 7 jours');
+}
+
 function echappe_(x) { return String(x).replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }); }
 
 // À lancer une fois dans l'éditeur (essaiFamille → Exécuter) : vérifie les autorisations (e-mail) et envoie un e-mail d'essai.

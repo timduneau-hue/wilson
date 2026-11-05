@@ -392,7 +392,7 @@ qui le fait, automatiquement, chaque nuit :
 | # | Quoi | Comment |
 |---|------|---------|
 | G1 | Remarques | Outil `remarque` : quand Timothée dit « c'est un bug », « tu devrais… », « ne fais plus ça », Wilson la met au propre et l'écrit dans le journal (ligne « REMARQUE DE TIMOTHÉE : … », gardée aussi sur la tablette). Il dit que c'est noté pour sa prochaine mise à jour. |
-| G2 | Maintenance de la semaine | Tâche planifiée Claude, **une fois par semaine, le lundi vers 2h47** (heure de Paris ; chaque nuit jusqu'au 01/11/26, changé à la demande de Timothée) : lit le journal depuis la maintenance précédente (remarques en premier, puis erreurs, silences, relances, échecs d'outils), corrige le code de ce dépôt, ajoute un test pour chaque correction, lance tous les tests, monte la version, note la correction ici, publie. La tablette se met à jour toute seule en veille. |
+| G2 | Maintenance de la semaine | Tâche planifiée Claude, **une fois par semaine, le lundi vers 2h47** (heure de Paris ; chaque nuit jusqu'au 01/11/26, changé à la demande de Timothée) : lit le journal depuis la maintenance précédente (remarques en premier, puis erreurs, silences, relances, échecs d'outils), corrige le code de ce dépôt, ajoute un test pour chaque correction, lance tous les tests, monte la version, note la correction ici, publie. La tablette se met à jour toute seule la nuit, entre 4h00 et 5h00 (règle du 04/11/26). |
 | G3 | Ce qui a changé | `version.json` porte `date` et `nouveautes` (phrase à la 2e personne pour Wilson). À la 1re discussion après la mise à jour, Wilson le dit en une phrase ; ensuite seulement si on le lui demande. |
 
 Garde-fous de la maintenance de nuit : rien publié si un test échoue ; pas de nouvelle grosse fonction, pas de changement
@@ -737,20 +737,35 @@ Fait le 04/11/26 (**1.27.0**) :
 - Réglages : rubrique « Famille et garde » (visages appris, Oublier, garde automatique, photo des alertes, alerte d'essai).
 - Tests : `e2e_famille.py` (58), `e2e_famille_modeles.py` (13, vrais modèles), `apps_script_unit.js` (famille.gs).
 
-**À faire par Timothée (1.27.0)** : dans l'éditeur du script « Wilson journal », remplacer `journal.gs` (une ligne de plus
-dans doPost), ajouter le fichier `famille` (contenu de `apps-script/famille.gs`), lancer `essaiFamille` une fois (e-mail
-d'essai), puis Déployer → Gérer les déploiements → modifier → Nouvelle version. Sans ça : messages et garde restent sur chaque
-appareil, pas d'e-mail d'alerte. Puis apprendre les visages de la famille sur la tablette (un par un, seul devant elle).
+Script mis à jour par Claude le 04/11/26, 21h19 (accord de Timothée), depuis le navigateur de son PC : projet lié à la feuille
+« Wilson — journal » (fichiers `Code.gs` = journal.gs, `idees.gs`, `famille.gs`), un seul déploiement actif, passé en
+**version 6** (même adresse) ; `essaiFamille` lancé (e-mail d'essai reçu). Reste à Timothée : apprendre les visages de la
+famille sur la tablette (un par un, seul devant elle).
+
+Demandes de Timothée du 04/11/26, 21h26 (**1.27.1**) :
+- **Mise à jour une fois par nuit** (« une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson actif ») :
+  plus de vérification toutes les 20 min ; `version.json` est lu une fois entre 4h00 et 5h00 (`MAJ_HEURE`), et une nouvelle
+  version installée en journée par le navigateur attend aussi cette heure. « Relancer l'appli » reste immédiat. Test
+  `e2e_update.py`.
+- **Agenda Famille** : agenda Google « Famille » créé par Claude dans le compte de Timothée (jaune « Citron »), partagé avec
+  Camille (sa femme) en modification. Wilson : outil `agenda` (ajouter : titre, début, fin, jour entier, lieu ; lire ;
+  annuler seulement ce qu'il vient d'ajouter, 24 h) par le script (actions `agenda_…` de `famille.gs`, CalendarApp, agenda
+  trouvé par son nom `AGENDA_NOM`) ; heure locale envoyée en millisecondes, jours entiers en AAAA-MM-JJ ; date passée → il
+  vérifie avant d'ajouter ; note « Ajouté par Wilson pour … ». Les rendez-vous clients restent dans le CRM.
+- **Alertes aussi à Camille** : `ALERTES_AUSSI` dans `famille.gs` (copie des e-mails d'alerte) ; l'adresse est écrite
+  seulement dans le script de Timothée, jamais dans le dépôt (vide ici, vérifié par `apps_script_unit.js`).
+- Publication du 04/11/26, 21h19 : « Deploy to GitHub Pages » arrêté au bout de 10 min (« Timeout reached », lenteur de
+  GitHub) ; relancé, il passe. Si ça recommence : `gh run rerun <id>`.
 Remarques : « client actif » = le chiffre du bilan du CRM (à confirmer : commandé ou facturé dans le mois ?) ; MediaPipe
 (vision comme audio) envoie des statistiques d'usage anonymes à `odml.pa.googleapis.com` (déjà le cas avant 1.27.0, pas de
 réglage pour le couper : à voir avec Timothée si R9 l'exige).
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
-État au 04/11/26 : **version 1.27.0** en ligne (la famille : visages reconnus sur la tablette, messages remis à la bonne personne quand elle le regarde, garde de la maison avec alertes par e-mail, objectif des clients actifs, réactions muettes — section 7 sexies ; le script doit être mis à jour par Timothée) ; 1.26.6 (plus jamais de réveil sans « oui » de Gemini : fini les réveils sur des bruits ; il prévient quand il ne peut pas vérifier) ; 1.26.5 (en voiture, il prévient quand il ne t'entend plus ; écran : texte seulement sur demande, photos et météo 5 s, « réaffiche » ; dernières commandes = articles ; recherches CRM gardées et protégées des blocages) ; 1.26.4 (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
+État au 04/11/26 : **version 1.27.1** en ligne (agenda Famille partagé avec Camille, alertes aussi à Camille, mise à jour seulement la nuit entre 4h00 et 5h00) ; 1.27.0 (la famille : visages reconnus sur la tablette, messages remis à la bonne personne quand elle le regarde, garde de la maison avec alertes par e-mail, objectif des clients actifs, réactions muettes — section 7 sexies ; le script doit être mis à jour par Timothée) ; 1.26.6 (plus jamais de réveil sans « oui » de Gemini : fini les réveils sur des bruits ; il prévient quand il ne peut pas vérifier) ; 1.26.5 (en voiture, il prévient quand il ne t'entend plus ; écran : texte seulement sur demande, photos et météo 5 s, « réaffiche » ; dernières commandes = articles ; recherches CRM gardées et protégées des blocages) ; 1.26.4 (en voiture, « Wilson » réveille même si le réseau traîne : vérification limitée à 4 s, second avis et journal de l'oreille remis en route) ; 1.26.3 (outils du CRM jamais abandonnés, faux « enregistré » corrigé, voiture : « Oui ? », relances, son plus stable, journal plus complet) ; 1.26.2 (plus de réponses en double sur Gemini 3.1 Flash Live, son de réflexion en voiture, briefings complets) ; 1.26.1 (en voiture, lecteur multimédia pour qu'Android Auto joue la voix : validé le 04/11/26) ; 1.26.0 (téléphone relié à la voiture : réveil par « Wilson », réponses sans regard ; son en voiture par le micro du téléphone) ; 1.25.3 ; 1.25.2 (maintenance de la semaine : photo seule affichée 5 s ; « l'ordinateur de la maison est sans doute éteint ») ; 1.25.1 (visage Miel ; maintenance automatique une fois par semaine) ; 1.25.0 (il ne répond et n'agit que s'il est sûr qu'on le regarde, R1 du 01/11/26) ; avant : 1.24.0 (mode voiture supprimé à la demande de Timothée) (maintenance de nuit automatique, section 7 quinquies) (la maison par Home Assistant, section 7 bis) ; avant : (CRM à la voix et mode voiture, section 2 quater ; sur la route C8 à C10 ; moteur de questions et itinéraire C11 à C13 — côté CRM, fichier `WebApp_autonome.gs` à recoller par Timothée).
 
 - **Où** : dépôt GitHub `timduneau-hue/wilson` (branche `main`) → publié sur https://timduneau-hue.github.io/wilson/ ;
-  la tablette (Galaxy Tab S5e du salon) se met à jour toute seule (`version.json`, vérifié toutes les 20 min, rechargement en veille).
+  la tablette (Galaxy Tab S5e du salon) se met à jour toute seule **une fois par nuit, entre 4h00 et 5h00** (`version.json` ; demande de Timothée du 04/11/26 : « une fois par jour ça va, et pendant la nuit ») : une version publiée en journée n'arrive que la nuit suivante.
   Pour forcer : appui long sur le visage → « Relancer l'appli ».
 - **Compte Gemini de Timothée** : le **direct fonctionne** avec `gemini-2.5-flash-native-audio-preview-12-2025`
   (constaté dans le journal le 23/10/26 ; `gemini-3.8-live` et `gemini-3.1-flash-live-preview` refusés pour quota).

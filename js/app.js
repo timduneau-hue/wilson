@@ -22,7 +22,10 @@ import { Qui } from './qui.js';
 import { Famille, FAMILLE_TOOLS, FAMILLE_TOOL_NAMES } from './famille.js';
 import { Reactions } from './reactions.js';
 
-const VERSION = '1.27.0';
+const VERSION = '1.27.1';
+// Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
+// actif ». Mise à jour seulement entre 4h00 et 5h00 (après la maintenance du lundi, vers 2h47) ; « Relancer l'appli » reste immédiat.
+const MAJ_HEURE = 4;
 const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
 const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
 const SEG_VU_MIN = 8;             // R1 : une phrase « dite en le regardant » = au moins 8 blocs de 20 ms de voix avec le regard confirmé
@@ -99,11 +102,11 @@ class App {
       const hadController = !!navigator.serviceWorker.controller;
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => { this.swReg = r; }).catch((e) => this.log('SW : ' + e.message));
       // Nouvelle version installée : on recharge (seulement si une ancienne version tournait, et jamais en pleine conversation).
-      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) this._reloadWhenIdle('nouvelle version installée'); });
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) this._reloadWhenIdle('nouvelle version installée', { nuit: true }); });
     }
-    setTimeout(() => this._checkUpdate(), 15000);
+
     this._lireNouveautes();
-    setInterval(() => this._checkUpdate(), 20 * 60000);
+    setInterval(() => { const j = new Date().toDateString(); if (this._fenetreMaj() && this._majDuJour !== j) { this._majDuJour = j; this._checkUpdate(); } }, 5 * 60000);   // une fois par nuit
     setInterval(() => this._tick(), 50);
     // Surveillance de la charge : si la tablette prend du retard, on allège l'animation (jamais de file d'attente qui s'allonge).
     let lastBeat = performance.now(); this.lag = 0; this._t0 = lastBeat;   // on ignore le démarrage (chargement des modèles)
@@ -274,8 +277,10 @@ class App {
       this._reloadWhenIdle(version);
     } catch (_) {}
   }
-  _reloadWhenIdle(why) {
+  _fenetreMaj(d = new Date()) { return d.getHours() === MAJ_HEURE; }
+  _reloadWhenIdle(why, { nuit = false } = {}) {
     const go = () => {
+      if (nuit && !this._fenetreMaj()) return setTimeout(go, 10 * 60000);           // la journée : on attend la nuit
       if (this.state === 'eveil' || this.state === 'conversation' || this.settingsOpen || this.phone || this.netWait) return setTimeout(go, 15000);
       try { sessionStorage.setItem('wilson.reloadedFor', `${why}|${Date.now()}`); } catch (_) {}
       this.log('Mise à jour : rechargement'); this.remote.flush({ beacon: true }); location.reload();
@@ -1024,6 +1029,7 @@ La famille : ${fam}
 - « Dis à X que… », « laisse un message à X » : outil messages (deposer : pour = son prénom, de = qui te parle, texte = le message tel quel, mis au propre). Tu le lui diras toi-même quand il ou elle te regardera. « J'ai des messages ? » : messages (lire). « X a eu mon message ? » : statut.
 - « Apprends mon visage, je suis X » : dis « Regarde-moi bien… » puis outil visages (apprendre) ; « oublie le visage de X » : oublier. Ne prétends jamais reconnaître quelqu'un si ce n'est pas écrit ici.
 - « On part, surveille la maison » : outil garde (activer) ; « on est rentrés » : garde (arreter).
+- L'agenda Famille (Google Agenda partagé de Timothée et Camille) : « mets dans l'agenda le médecin de Louis jeudi à 10h », « on a quoi ce week-end ? » : outil agenda. Les rendez-vous clients de Timothée restent dans le CRM.
 `;
     const voiture = !car ? '' : `
 En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (caméra coupée en voiture).

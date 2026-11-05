@@ -31,7 +31,14 @@ const sheets = { 'Journal': fakeSheet('Journal'), 'Délais': fakeSheet('Délais'
 sheets['Journal'].data[0] = ['Date', 'Version', 'Message'];
 sheets['Délais'].data[0] = ['Date', 'Envoi'];
 sheets['État'].data[0] = ['Clé', 'Valeur'];
-let opened = null, locked = 0; const fetched = [], logged = [], props = {}, mails = [];
+let opened = null, locked = 0; const fetched = [], logged = [], props = {}, mails = [], evs = [];
+const evt = (o) => ({ ...o, getId: () => o.id, getTitle: () => o.titre, getStartTime: () => o.d1, getEndTime: () => o.d2, isAllDayEvent: () => !!o.entier, getLocation: () => o.lieu || '', deleteEvent: () => { evs.splice(evs.indexOf(o), 1); } });
+const cal = {
+  getEvents: (a, b) => evs.filter((e) => e.d1 < b && e.d2 > a).map(evt),
+  createEvent: (titre, d1, d2, o) => { const e = { id: 'e' + evs.length, titre, d1, d2, lieu: o.location, note: o.description }; evs.push(e); return evt(e); },
+  createAllDayEvent: (titre, d1, d2, o) => { if (!(d2 instanceof Date)) { o = d2; d2 = new Date(d1.getTime() + 86400000); } const e = { id: 'e' + evs.length, titre, d1, d2, entier: true, lieu: o.location }; evs.push(e); return evt(e); },
+  getEventById: (id) => { const e = evs.find((x) => x.id === id); return e ? evt(e) : null; },
+};
 let tavily = () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ answer: 'Demain à Angers : éclaircies, 9 à 17 °C.', response_time: 0.8,
   results: [{ title: 'Météo Angers', url: 'https://meteo.example/angers', content: 'Samedi : éclaircies, minimales 9 °C, maximales 17 °C. '.repeat(20) }] }) });
 const ctx = {
@@ -45,6 +52,7 @@ const ctx = {
     getProperties: () => ({ ...props }), deleteProperty: (k) => { delete props[k]; } }) },
   Session: { getEffectiveUser: () => ({ getEmail: () => 'moi@exemple.fr' }) },
   MailApp: { sendEmail: (o) => mails.push(o) },
+  CalendarApp: { getCalendarsByName: (n) => (n === 'Famille' ? [cal] : []) },
   Utilities: { formatDate: (d, tz, f) => (f === 'yyyy-MM-dd' ? '2026-11-04' : f === "HH'h'mm" ? '14h12' : '23/10/26 15h30:00'), base64Decode: (b) => Buffer.from(b, 'base64'), newBlob: (bytes, type, name) => ({ bytes, type, name }) },
   ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' }), getOAuthToken: () => 'JETON-DE-TIMOTHEE' },
   DriveApp: { getRootFolder: () => ({ getName: () => 'Mon Drive' }) },
@@ -166,6 +174,24 @@ for (let i = 0; i < 25; i++) JF({ action: 'alerte', genre: 'g' + i, texte: 'essa
 check('20 alertes par jour au plus', mails.length === 20, String(mails.length));
 check('Texte échappé dans l\'e-mail', JF({ action: 'alerte', genre: 'x', texte: '<b>', essai: true }) && !mails.slice(-1)[0].htmlBody.includes('<b><b>'));
 check('Action inconnue de famille.gs : erreur lisible', /action inconnue/.test(JF({ action: 'msg_truc' }).erreur));
+// Alertes aussi à Camille (adresse mise dans le script de Timothée, jamais dans le dépôt)
+vm.runInContext("ALERTES_AUSSI = 'camille@exemple.fr, pas-une-adresse';", ctx); delete props.alertes;   // nouveau jour : compteur remis à zéro
+JF({ action: 'alerte', genre: 'verre', texte: 'bris de verre', essai: true });
+check('Alerte : copie aux adresses de ALERTES_AUSSI (et seulement aux adresses valides)', mails.slice(-1)[0].cc === 'camille@exemple.fr' && mails.slice(-1)[0].to === 'moi@exemple.fr', JSON.stringify(mails.slice(-1)[0].cc));
+check('Dépôt : ALERTES_AUSSI vide (aucune adresse dans le code publié)', /var ALERTES_AUSSI = '';/.test(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'famille.gs'), 'utf8')));
+// L'agenda « Famille »
+const t1 = new Date(2026, 10, 12, 10, 0).getTime();
+fa = JF({ action: 'agenda_ajouter', titre: 'Médecin Louis', debut: t1, lieu: 'Angers', note: 'Ajouté par Wilson' });
+check('Agenda : rendez-vous ajouté (1 h par défaut)', fa.ok && evs.length === 1 && evs[0].d2 - evs[0].d1 === 3600000 && evs[0].lieu === 'Angers', JSON.stringify(fa));
+fa = JF({ action: 'agenda_ajouter', titre: 'Week-end chez mamie', journee: true, debut: '2026-11-14', fin: '2026-11-15' });
+check('Agenda : week-end en jours entiers (samedi et dimanche)', fa.ok && evs[1].entier && evs[1].d1.getDate() === 14 && evs[1].d2.getDate() === 16, JSON.stringify(evs[1]));
+fa = JF({ action: 'agenda_lire', du: '2026-11-12', jours: 7 });
+check('Agenda : lecture de la semaine', fa.ok && fa.evenements.length === 2 && fa.evenements[0].titre === 'Médecin Louis');
+fa = JF({ action: 'agenda_annuler', id: evs[1].id });
+check('Agenda : annuler un événement', fa.ok && evs.length === 1);
+check('Agenda : titre manquant refusé', JF({ action: 'agenda_ajouter', debut: t1 }).ok === false);
+logged.length = 0; ctx.essaiAgenda();
+check('Fonction essaiAgenda', logged.length === 1 && /Famille/.test(logged[0]));
 logged.length = 0; ctx.essaiFamille();
 check('Fonction essaiFamille', logged.length === 1 && /Alerte d'essai/.test(logged[0]));
 console.log(`\n${ok}/${ok + ko} vérifications OK`);

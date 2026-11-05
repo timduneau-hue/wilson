@@ -28,7 +28,7 @@ def send(conn, **sc):
 
 
 async def main():
-    conns, st = [], {'calls': [], 'msgs': {}, 'garde': None, 'alertes': [], 'gem': [], 'noms': [], 'script_a_jour': True}
+    conns, st = [], {'calls': [], 'msgs': {}, 'garde': None, 'alertes': [], 'gem': [], 'noms': [], 'script_a_jour': True, 'agenda': []}
     async with async_playwright() as p:
         b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
             f'--use-file-for-fake-audio-capture={S}/fixtures/quiet.wav', '--autoplay-policy=no-user-gesture-required'])
@@ -48,6 +48,9 @@ async def main():
             elif a == 'msg_annuler': st['msgs'][d['id']]['annule'] = 1
             elif a == 'garde_ecrire': st['garde'] = d['garde']
             elif a == 'alerte': st['alertes'].append(d); body = {'ok': True, 'envoye': True, 'n': len(st['alertes'])}
+            elif a == 'agenda_ajouter': st['agenda'].append({**d, 'id': 'ev%d' % len(st['agenda'])}); body = {'ok': True, 'id': 'ev%d' % (len(st['agenda']) - 1), 'titre': d['titre']}
+            elif a == 'agenda_annuler': st['agenda'] = [e for e in st['agenda'] if e['id'] != d['id']]; body = {'ok': True, 'titre': 'x'}
+            elif a == 'agenda_lire': body = {'ok': True, 'evenements': [{'id': 'z', 'titre': 'Week-end chez mamie', 'debut': 1794438000000, 'fin': 1794610800000, 'journee': True, 'lieu': ''}, {'id': 'y', 'titre': 'Médecin Louis', 'debut': 1794474000000, 'fin': 1794477600000, 'journee': False, 'lieu': 'Angers'}]}
             elif a == 'reglages_lire': body = {'ok': True, 'reglages': None, 't': 0}
             elif a == 'crm_bilan': body = {'ok': True, 'texte': 'Novembre 2026 : 41 clients actifs ce mois-ci (39 l\'an dernier à la même date).'}
             elif a == 'crm_journee': body = {'ok': True, 'rdv': [], 'texte': 'Prochain jour : 9h00 AD2M (Angers), 14h00 Menuiserie Gaudin (Cholet).'}
@@ -227,6 +230,28 @@ async def main():
         regl = await page.evaluate("localStorage.getItem('wilson.settings')")
         check('Empreintes jamais dans les réglages partagés, ni envoyées au script (V1)', 'desc' not in regl and not any('desc' in json.dumps(x) for x in st['calls']), '')
         check('… seulement les prénoms partent au script (pour le téléphone)', st['noms'] and set(st['noms']) <= {'Timothée', 'Marie', 'Louis'}, str(st['noms']))
+        await page.evaluate("wilson.continuous = false; wilson.endConversation('test')"); await page.wait_for_timeout(300)
+
+        # ---- L'agenda Famille (demande du 04/11/26, 21h26) ----
+        await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000); c7 = conns[-1]
+        await page.evaluate("wilson.continuous = true")
+        fns7 = [f['name'] for t in c7['setup'].get('tools', []) for f in t.get('functionDeclarations', [])]
+        check('Outil agenda proposé, consigne : agenda Famille (pas les rendez-vous clients)', 'agenda' in fns7 and 'agenda Famille' in c7['setup']['systemInstruction']['parts'][0]['text'])
+        import datetime
+        j = (datetime.date.today() + datetime.timedelta(days=2)).isoformat()
+        r = await outil(page, c7, 'a1', 'agenda', {'action': 'ajouter', 'titre': 'Médecin Louis', 'debut': j + 'T10:00', 'lieu': 'Angers'})
+        ev = st['agenda'][-1] if st['agenda'] else {}
+        exp = await page.evaluate("(d) => +new Date(d + 'T10:00:00')", j)
+        check('« Mets le médecin de Louis dans l\'agenda » : ajouté à l\'heure locale, avec qui l\'a demandé', 'Ajouté dans l\'agenda Famille' in r and '10h00' in r and ev.get('debut') == exp and ev.get('titre') == 'Médecin Louis' and 'Ajouté par Wilson' in ev.get('note', ''), r + str(ev))
+        r = await outil(page, c7, 'a2', 'agenda', {'action': 'ajouter', 'titre': 'Week-end chez mamie', 'debut': j, 'fin': (datetime.date.today() + datetime.timedelta(days=3)).isoformat(), 'journee': True})
+        ev = st['agenda'][-1]
+        check('Week-end : jours entiers, du … au …', ev.get('journee') is True and ev.get('debut') == j and ev.get('fin') and ' au ' in r, r + str(ev))
+        r = await outil(page, c7, 'a3', 'agenda', {'action': 'ajouter', 'titre': 'Soirée', 'debut': '2020-01-10T20:00'})
+        check('Date passée : il vérifie avec lui avant d\'ajouter', 'déjà passé' in r and len(st['agenda']) == 2, r)
+        r = await outil(page, c7, 'a4', 'agenda', {'action': 'annuler'})
+        check('« Annule » : seulement ce qu\'il vient d\'ajouter (le dernier)', 'Annulé' in r and len(st['agenda']) == 1 and st['agenda'][0]['titre'] == 'Médecin Louis', r)
+        r = await outil(page, c7, 'a5', 'agenda', {'action': 'lire', 'du': j, 'jours': 3})
+        check('« On a quoi ce week-end ? » : événements lus et dits', 'Week-end chez mamie' in r and 'Médecin Louis' in r and '(Angers)' in r, r)
         await page.evaluate("wilson.continuous = false; wilson.endConversation('test')"); await page.wait_for_timeout(300)
 
         # ---- Q : réactions muettes ----
