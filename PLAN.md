@@ -847,7 +847,7 @@ d'après le journal du téléphone en voiture (09h30-09h48) et ses remarques dic
 - Pas changé (à décider avec Timothée) : « lancer le GPS tout seul et rester au premier plan » (09h35) — Chrome n'ouvre une
   autre appli que sur un toucher, et Android met Wilson en pause quand Maps passe devant ; « Maison : inventaire
   impossible » toutes les 10 min sur la tablette (Home Assistant injoignable : ordinateur de la maison éteint ?).
-- Tests : `tests/e2e_journal_0511.py` (26 vérifications).
+- Tests : `tests/e2e_journal_0511.py` (27 vérifications) ; `e2e_adresse.py`, `e2e_outils.py`, `e2e_voiture_0411.py` mis à la nouvelle règle. Toutes les suites vertes, sauf `e2e_gaze.py` et `e2e_vision_health.py` (vrais modèles de vision : trop lents sans carte graphique, même échec sur 1.28.0).
 
 ## 8. Reprise du projet (à lire en premier dans une nouvelle conversation)
 
