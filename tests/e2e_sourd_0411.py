@@ -98,7 +98,9 @@ async def main():
         check('Retour après 20 s (il a changé d\'appli lui-même) : rien à dire', not any('arrière-plan pendant' in str(x) for x in dit), str(dit))
         await page.evaluate("wilson._sourd.at -= 125000; wilson._sourdFin()")
         dit = await page.evaluate("window.__dit.slice()")
-        check('Au retour : il dit combien de temps il n\'entendait pas (2 minutes)', has('Sourd pendant 125 s') and any('2 minutes' in str(x) and 'je ne t\'entendais pas' in str(x) for x in dit), str(dit))
+        # Protocole voiture (05/11/26, 16h07 : « deux voix qui parlent en même temps » au retour du GPS) : plus de phrase au
+        # retour d'arrière-plan, un petit son seulement (avant : « J'étais en arrière-plan pendant 2 minutes… »).
+        check('Au retour après 2 min : noté au journal, un petit son, plus de phrase (une seule voix)', has('Sourd pendant 125 s') and not any('arrière-plan pendant' in str(x) for x in dit), str(dit))
         # 2. micro muet
         await page.evaluate("window.__dit = []; wilson._shownAt = performance.now() - 10000; wilson._capAt = performance.now() - 7000; wilson.audio._emit = () => {}; wilson._sourdGarde()")
         dit = await page.evaluate("window.__dit.slice()")

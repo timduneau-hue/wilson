@@ -177,7 +177,7 @@ async def main():
         await page.evaluate("wilson.log('Bouton pause (volant ou écran de la voiture) : je me tais'); wilson.endConversation('volant')")
         check('… bouton pause du volant : fin de la discussion', await page.evaluate('wilson.state') == 'veille' and any('Fin de conversation (volant)' in l for l in logs))
         # Voiture déconnectée : le regard redevient obligatoire.
-        await page.evaluate("window.__bt = false; navigator.mediaDevices.dispatchEvent(new Event('devicechange'))")
+        await page.evaluate("wilson._voitureGraceMs = 0; window.__bt = false; navigator.mediaDevices.dispatchEvent(new Event('devicechange'))")   # (20 s de grâce en vrai : trous du Bluetooth)
         await page.wait_for_function('!wilson._voitureBt', timeout=5000); await page.wait_for_timeout(300)
         f0 = await page.evaluate('window.__fed'); await page.wait_for_timeout(500)
         check('Voiture déconnectée : retour à la règle du regard (verrou actif, oreille coupée)', await page.evaluate('wilson._verrouRegard') and await page.evaluate('window.__fed') == f0

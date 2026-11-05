@@ -215,6 +215,8 @@ export class AudioIO {
 
   tone(kind) {
     if (!this.ctx) return;
+    // micro à ne pas envoyer à Gemini pendant le bip (+ sortie Bluetooth) : sinon Google croit qu'on parle et annule l'outil
+    this.toneJusqua = performance.now() + 900 + Math.round(((this.ctx.outputLatency || 0) + (this.ctx.baseLatency || 0)) * 1000);
     const t0 = this.ctx.currentTime + 0.03, f = kind === 'ecoute' ? [880] : kind === 'reflexion' ? [587.33, 698.46] : kind === 'dodo' ? [698.46, 523.25] : kind === 'revenu' ? [523.25, 783.99] : [659.25, 440];
     const doux = kind === 'ecoute' || kind === 'reflexion' || kind === 'dodo';
     f.forEach((hz, i) => {
