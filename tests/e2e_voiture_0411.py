@@ -131,7 +131,7 @@ async def main():
         check('… ni quand il dit que ce n\'est PAS enregistré', not any('rien n\'est enregistré' in x for x in conn['texts'][n0:]))
         await page.wait_for_function('!wilson.audio.playing', timeout=6000)
 
-        # --- 3. muet après un outil : relance au bout de 5 s ---
+        # --- 3. muet après un outil : relance au bout de 3 s (5 s avant le 05/11/26) ---
         await page.evaluate("window.__parle(500)"); await page.wait_for_timeout(600)
         n0 = len(conn['texts'])
         conn['ws'].send(json.dumps({'toolCall': {'functionCalls': [{'id': 'r1', 'name': 'date_et_heure', 'args': {}}]}}))
@@ -139,7 +139,8 @@ async def main():
         await page.wait_for_timeout(6000)
         t = conn['texts'][n0:]
         check('Journal : résultat de l\'outil rendu à Gemini (« Outil date_et_heure → Gemini »)', has('Outil date_et_heure → Gemini'))
-        check('Muet 5 s après le résultat d\'un outil : relance une fois', sum('réponds-lui maintenant' in x for x in t) == 1 and has('Wilson muet 5 s après le résultat de date_et_heure'), str(t)[:160])
+        # 05/11/26 : relance au bout de 3 s (5 s avant) ; le journal donne le délai réel.
+        check('Muet après le résultat d\'un outil : relance une fois', sum('réponds-lui maintenant' in x for x in t) == 1 and any(re.search(r'Wilson muet \d+ s après le résultat de date_et_heure', l) for l in logs), str(t)[:160])
         await page.wait_for_timeout(5500)
         check('… une seule fois', sum('réponds-lui maintenant' in x for x in conn['texts'][n0:]) == 1)
         # outil qui dit « ne dis rien » : pas de relance
