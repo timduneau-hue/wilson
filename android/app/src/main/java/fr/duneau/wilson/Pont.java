@@ -16,7 +16,7 @@ import android.webkit.JavascriptInterface;
  * Chaque méthode est appelée par app.js ; aucune ne lève d'erreur vers la page (elle renvoie un texte ou false).
  */
 public class Pont {
-    public static final String VERSION = "2";
+    public static final String VERSION = "3";
     private final MainActivity a;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -61,7 +61,17 @@ public class Pont {
 
     /** L'état du son (journal). */
     @JavascriptInterface
-    public String etatSon() { return a.etatSon(); }
+    public String etatSon() { return a.etatSon() + " ; " + a.micro.etat(); }
+
+    /** Appli 3 : c'est l'appli qui écoute, avec le micro du téléphone (jamais celui de la voiture). Le son arrive dans la
+     *  page par window.__wilsonMicro(base64), en blocs de 40 ms à 16 kHz. Renvoie « ok : … » ou « erreur : … ». */
+    @JavascriptInterface
+    public String microDemarre(boolean echo) {
+        try { return a.micro.demarre(echo); } catch (Exception e) { return "erreur : " + e.getMessage(); }
+    }
+
+    @JavascriptInterface
+    public void microArrete() { a.micro.arrete(); }
 
     /** Wilson peut-il revenir tout seul devant (autorisation « Afficher par-dessus les autres applis ») ? */
     @JavascriptInterface

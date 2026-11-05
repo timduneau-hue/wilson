@@ -10,6 +10,9 @@ import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
+import android.media.AudioRecordingConfiguration;
+import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -41,6 +44,7 @@ public class MainActivity extends Activity {
     private static final Pattern LIEN = Pattern.compile("https://timduneau-hue\\.github\\.io/wilson/\\S*");
 
     private VueToujoursVisible vue;
+    final MicroNatif micro = new MicroNatif(this);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private boolean devant = false;
 
@@ -182,7 +186,8 @@ public class MainActivity extends Activity {
         AudioManager am = getSystemService(AudioManager.class);
         if (am == null) return;
         if (actif) {
-            if (am.getMode() == AudioManager.MODE_IN_COMMUNICATION) am.setMode(AudioManager.MODE_NORMAL);   // jamais le canal « appel »
+            couperCanalAppel();                                                         // appli 3 : avant que Wilson parle
+            ui.removeCallbacks(gardeSon); ui.postDelayed(gardeSon, 2000);
             if (focus != null) return;
             focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                     .setAudioAttributes(new AudioAttributes.Builder()
@@ -193,10 +198,65 @@ public class MainActivity extends Activity {
                     .build();
             int r = am.requestAudioFocus(focus);
             journal("son de la voiture demandé à Android : " + (r == AudioManager.AUDIOFOCUS_REQUEST_GRANTED ? "accordé" : r == AudioManager.AUDIOFOCUS_REQUEST_DELAYED ? "différé" : "REFUSÉ") + " — " + etatSon());
-        } else if (focus != null) {
-            am.abandonAudioFocusRequest(focus);
-            focus = null;
+        } else {
+            ui.removeCallbacks(gardeSon);
+            if (focus != null) { am.abandonAudioFocusRequest(focus); focus = null; }
+            if (Build.VERSION.SDK_INT >= 31 && canalForce) { am.clearCommunicationDevice(); canalForce = false; }
+            canalDit = false;
         }
+    }
+
+    // Journal du 05/11/26, 18h24 (appli 2 : « le son ne marche toujours pas dans la voiture ») : Android accordait le son,
+    // mais « communication sur Bluetooth » et micro sans nom. La vue web ne voit pas les noms des micros (Chrome, si) et
+    // prenait celui de la voiture : Android ouvre alors le canal « appel » du Bluetooth, la musique (A2DP) est suspendue et
+    // la voix de Wilson ne sort plus dans les haut-parleurs (même panne que dans Chrome le 02/11/26). Depuis l'appli 3, c'est
+    // l'appli qui écoute, avec le micro du téléphone (MicroNatif) : la vue web n'ouvre plus de micro, donc plus de canal
+    // « appel ». Garde-fou pendant chaque discussion (toutes les 2 s) : si ce canal est quand même ouvert, il est refermé.
+    // Jamais pendant un vrai appel.
+    private boolean canalForce = false, canalDit = false;
+    private final Runnable gardeSon = new Runnable() {
+        @Override public void run() {
+            if (focus == null) return;
+            couperCanalAppel();
+            ui.postDelayed(this, 2000);
+        }
+    };
+
+    void couperCanalAppel() {
+        AudioManager am = getSystemService(AudioManager.class);
+        if (am == null || am.getMode() == AudioManager.MODE_IN_CALL || am.getMode() == AudioManager.MODE_RINGTONE) return;   // vrai appel : on ne touche à rien
+        List<String> fait = new ArrayList<>();
+        try {
+            if (Build.VERSION.SDK_INT >= 31 && enregistreSurBluetooth(am)) {
+                for (AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+                    if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) { if (am.setCommunicationDevice(d)) { canalForce = true; fait.add("micro de la voiture lâché"); } break; }
+                }
+            }
+            if (am.isBluetoothScoOn()) { am.stopBluetoothSco(); am.setBluetoothScoOn(false); fait.add("canal appel refermé"); }
+            if (am.getMode() == AudioManager.MODE_IN_COMMUNICATION) { am.setMode(AudioManager.MODE_NORMAL); fait.add("mode appel quitté"); }
+        } catch (Exception e) {
+            if (!canalDit) { canalDit = true; journal("canal « appel » impossible à refermer : " + e.getMessage()); }
+        }
+        if (!fait.isEmpty() && !canalDit) { canalDit = true; journal("son de la voiture : " + String.join(", ", fait) + " — " + etatSon()); }
+    }
+
+    // Un micro de cette appli est-il ouvert sur le Bluetooth de la voiture (canal « appel ») ?
+    private static boolean enregistreSurBluetooth(AudioManager am) {
+        if (Build.VERSION.SDK_INT < 29) return false;
+        for (AudioRecordingConfiguration r : am.getActiveRecordingConfigurations()) {
+            AudioDeviceInfo d = r.getAudioDevice();
+            if (d != null && d.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return true;
+        }
+        return false;
+    }
+
+    static String nomType(AudioDeviceInfo d) {
+        if (d == null) return "?";
+        int t = d.getType();
+        return t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ? "Bluetooth musique" : t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ? "Bluetooth appel"
+                : t == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ? "haut-parleur" : t == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE ? "écouteur"
+                : t == AudioDeviceInfo.TYPE_BUILTIN_MIC ? "micro du téléphone" : t == AudioDeviceInfo.TYPE_USB_DEVICE || t == AudioDeviceInfo.TYPE_USB_ACCESSORY ? "USB"
+                : "type " + t;
     }
 
     // L'état du son, pour le journal : mode, sorties, appareil de communication.
@@ -216,10 +276,27 @@ public class MainActivity extends Activity {
         }
         if (Build.VERSION.SDK_INT >= 31) {
             AudioDeviceInfo c = am.getCommunicationDevice();
-            if (c != null) b.append(" communication sur ").append(c.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ? "Bluetooth" : c.getType() == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE ? "écouteur" : String.valueOf(c.getType()));
+            if (c != null) b.append(" communication sur ").append(nomType(c));
         }
+        b.append(am.isBluetoothScoOn() ? ", canal appel Bluetooth OUVERT" : ", canal appel fermé");
+        try {
+            for (AudioRecordingConfiguration r : am.getActiveRecordingConfigurations()) {
+                int src = r.getClientAudioSource();
+                b.append(", micro ").append(src == MediaRecorder.AudioSource.VOICE_COMMUNICATION ? "(communication)" : src == MediaRecorder.AudioSource.VOICE_RECOGNITION ? "(reconnaissance)" : src == MediaRecorder.AudioSource.MIC ? "(micro)" : "(source " + src + ")");
+                if (Build.VERSION.SDK_INT >= 29) b.append(" sur ").append(nomType(r.getAudioDevice()));
+            }
+            for (AudioPlaybackConfiguration p : am.getActivePlaybackConfigurations()) {
+                int u = p.getAudioAttributes().getUsage();
+                b.append(", lecture ").append(u == AudioAttributes.USAGE_MEDIA ? "musique" : u == AudioAttributes.USAGE_VOICE_COMMUNICATION ? "APPEL" : u == AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE ? "GPS" : "usage " + u);
+            }
+        } catch (Exception ignored) { }
         b.append(am.isMusicActive() ? ", son en cours" : ", silence");
         return b.toString();
+    }
+
+    // Le son du micro vers la page (MicroNatif, 25 fois par seconde).
+    void versPage(String js) {
+        ui.post(() -> { if (vue != null) vue.evaluateJavascript(js, null); });
     }
 
     // Une ligne dans le journal de Wilson (la page l'envoie avec les autres).
@@ -279,6 +356,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        micro.arrete();
         stopService(new Intent(this, EcouteService.class));
         if (vue != null) { vue.destroy(); vue = null; }
         super.onDestroy();
