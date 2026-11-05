@@ -24,7 +24,7 @@ import { Reactions } from './reactions.js';
 import { Memoire } from './memoire.js';
 import { Questions, QUESTION_TOOL } from './questions.js';
 
-const VERSION = '1.28.1';
+const VERSION = '1.28.2';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -62,6 +62,25 @@ const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const OBJECTIF_Q = /OBJECTIF CLIENTS ACTIFS|clients? actifs/i;
 const OBJECTIF_NB = /objectif\b[^\d\n]{0,30}?(?<![nN]\s?-\s?)(\d{1,3})\b(?!\s?%)/i;   // « objectif clients actifs 50 », « objectif de 60 »
+// Chiffres du CRM dits par Wilson (garde du 05/11/26) : un nombre suivi d'un mot du CRM, ou après « objectif », « il t'en manque ».
+const NB = String.raw`\d{1,3}(?:[   .]\d{3})+(?:,\d+)?|\d+(?:,\d+)?`;
+const RE_CHIFFRE_CRM = new RegExp(`(${NB})\\s*(k€|k\\b|mille\\b)?\\s*(€|euros?\\b|clients?\\b|commandes?\\b|devis\\b|rendez-vous\\b|visites?\\b|tâches?\\b|%|pour ?cents?\\b)`, 'gi');
+const RE_OBJECTIF_DIT = /\b(objectif|il (?:t['’]en|te) manque|manque encore)\D{0,25}?(\d{1,4})\b/gi;
+const nombre = (m) => parseFloat(String(m).replace(/[   .]/g, '').replace(',', '.'));
+// Les nombres d'un texte (« 12 500 », « 12,5 », « 19 »), sans les dates, les heures ni les durées (« 05/11/26 », « 18h00 »,
+// « 2026-11-05T18:00 », « (9 s) ») : ce ne sont pas des chiffres du CRM, et ils feraient passer un chiffre inventé (19 − 9 = 10).
+
+function nombresDans(t) {
+  const s = String(t || '').replace(/\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?)?|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b|\b\d{1,2}\s?h\s?\d{0,2}\b|\b\d+(?:[.,]\d+)?\s?(?:s|ms|min|secondes?|minutes?)\b/g, ' ');
+  const out = []; for (const m of s.matchAll(new RegExp(NB, 'g'))) { const x = nombre(m[0]); if (isFinite(x)) out.push(x); }
+  return out;
+}
+function lireChiffres() {
+  try { const l = JSON.parse(localStorage.getItem('wilson.chiffres') || '[]'); return Array.isArray(l) ? l.filter((x) => x && isFinite(x.n) && Date.now() - x.t < 8 * 3600000) : []; } catch (_) { return []; }
+}
+// Une chose à faire ou à rappeler (pas un souvenir) : « rappeler », « ce soir », « demain », « quand tu nous verras »…
+const CHOSE_A_RAPPELER = /\b(?:rappel(?:er|le|les|ez)?(?![a-z])|ce soir|demain|tout à l'heure|cet après-midi|en rentrant|quand (?:tu|vous|on|il|elle|ils) (?:me |nous |les? |la |lui )?(?:verr|voi|rentr)|penser? à|n'oublie pas de|ne pas oublier de)/i;
+const dureeTexte = (ms) => (ms < 90000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60000)} min`);
 
 class App {
   constructor() {
@@ -74,8 +93,10 @@ class App {
     this.remote = new RemoteLog(this);           // journal à distance (feuille Google lue par Claude)
     this.crm = new Crm(this);                    // CRM à la voix (PLAN 2 quater)
     this.maison = new Maison({ settings: this.settings, log: (m, imp) => this.log(m, imp) });   // la maison (PLAN 7 bis)
-    const majMaison = () => { if (this.maison.on) this.maison.rafraichir().catch((e) => this.log('Maison : inventaire impossible (' + e.message + ')')); };
-    setTimeout(majMaison, 3000); setInterval(majMaison, 10 * 60000);                // inventaire de la maison, relu toutes les 10 min
+    // Journal du 05/11/26 : « Maison : inventaire impossible » toutes les 10 min, toute la matinée (ordinateur de la maison
+    // éteint), et au démarrage du téléphone en voiture. Noté une fois, puis une fois par heure tant que ça dure, et le retour ;
+    // en voiture, pas d'inventaire (la maison ne se pilote pas de la route).
+    setTimeout(() => this._majMaison(), 3000); setInterval(() => this._majMaison(), 10 * 60000);                // inventaire de la maison, relu toutes les 10 min
     this._heard = []; this._turnN = 0;           // ce que Timothée a dit, horodaté (verrou des écritures dans le CRM)
     this.car = null;                             // mode voiture (PLAN 2 quater, C5)
     this.oreille = new Oreille();                // reconnaît « Wilson » en voiture (empreintes de la voix de Timothée)
@@ -227,7 +248,7 @@ class App {
     if (this.settings.camera) await this._startVision();
     this.sensors.startMotion(); this.sensors.startBattery();
     this._watchSpeed();
-    this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._shownAt = performance.now(); this._wakeLock(); this.audio.resume(); this._backFromCall(); this._sourdFin(); } else this._sourdDebut('appli en arrière-plan ou écran éteint'); });
+    this._wakeLock(); document.addEventListener('visibilitychange', () => { if (!document.hidden) { this._shownAt = performance.now(); this._wakeLock(); this.audio.resume(); this._backFromCall(); this._sourdFin(); this._aDireAuRetour(); } else this._sourdDebut('appli en arrière-plan ou écran éteint'); });
     setInterval(() => this._sourdGarde(), 2000);
     if (fromGesture && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => this._freeRotation()).catch(() => {});
     this._freeRotation();
@@ -418,9 +439,17 @@ class App {
     if (!dit.trim()) return '';                                                      // pas de transcription : on ne peut pas juger
     const d = n(dit), a = c.args || {};
     if (c.name === 'regarder') return /regard|vois|voir|montr|couleur|\blis\b|lire|decri|habill|qu.?est.?ce que|qu.?est.?ce qu|c.?est quoi|quoi ca|\bmain\b|tiens|ressemble|photo|devant toi|camera|doigts|reconnai|qui est|quelle marque|ceci|cela|combien d|objet|porte|tenue|coiffure/.test(d) ? '' : 'regarder';
+    // « Répète » n'est pas « réaffiche » (journal du 05/11/26, 11h06:46 : « tu peux répéter ta dernière phrase ? » → reafficher).
+    if (c.name === 'reafficher') return /affich|montr|ecran|remontr|revoi|image|photo|carte|meteo|plus longtemps|pas eu le temps/.test(d) ? '' : 'reafficher';
     if (['crm_client', 'itineraire', 'appeler'].includes(c.name)) {
       const mots = n(a.client || '').split(/[^a-z0-9]+/).filter((m) => m.length >= 3);
       if (mots.some((m) => d.includes(m) || d.includes(m.slice(0, 4)))) return '';
+      // Journal du 05/11/26, 11h07:17-11h07:43 : « Pourquoi tu m'as parlé de Tech Metallu ? » (TECMETALU) refusé 3 fois.
+      // Nom collé, sans « h » ni lettres doublées (« tech metallu » = « tecmetalu ») ; et un client dont Wilson vient de
+      // parler lui-même compte aussi.
+      const colle = (x) => n(x).replace(/[^a-z0-9]/g, '').replace(/h/g, '').replace(/(.)\1+/g, '$1');
+      const nom = colle(a.client || ''), ici = colle(dit + ' ' + (this._ditWilson || []).filter((x) => performance.now() - x.t < 120000).map((x) => x.text).join(' '));
+      if (nom.length >= 4 && (ici.includes(nom) || [...Array(Math.max(0, nom.length - 4)).keys()].some((i) => ici.includes(nom.slice(i, i + 5))))) return '';
       if (/client|crm|fiche|commande|devis|appel|chez|rendez|rdv|\blui\b|\belle\b|societe|entreprise|adresse|itineraire|gps|numero/.test(d)) return '';
       return c.name;
     }
@@ -474,6 +503,11 @@ class App {
   // on dit « Wilson » (oreille du téléphone, confirmée par Gemini), répond sans regard, et se rendort après 45 s sans lui
   // parler. Ni la tablette, ni le téléphone hors de la voiture ne changent : là, la règle R1 (le regard) reste entière.
   get _voitureBt() { return !!(this.audio && this.audio.btIn) && deviceName() === 'téléphone'; }
+  // En voiture, quelle que soit la façon (téléphone relié à la voiture, ou l'ancien mode voiture gardé en sommeil).
+  // Journal du 05/11/26, 11h03-11h08 : depuis la 1.26.0, le téléphone relié à la voiture n'allumait que `_voitureBt` ;
+  // tout ce qui testait `this.car` (consigne « En voiture » : réponses courtes, son mauvais → faire confirmer ; 3 min
+  // d'essais sans réseau ; « je me mets en veille » dit à voix haute) restait éteint : Gemini se croyait sur la tablette du salon.
+  get enVoiture() { return !!this.car || this._voitureBt; }
   _noteVoix(now = performance.now()) {
     if (now - this.audio.lastVoicedAt >= 60) return;
     let S = this._seg;
@@ -526,7 +560,7 @@ class App {
       // Sans réseau (C8) : il le dit (voix du téléphone, sans Internet), et la phrase qui l'a réveillé part au retour du réseau.
       this.face.setEmotion('confus', 3000); this.badge("Pas d'Internet : je te réponds dès qu'il revient", 6000);
       const pcm = this._wakePcm || (reason === 'prenom' ? this.audio.recent(4000) : null); this._wakePcm = null;
-      if (this.car || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant', 'reponse_tardive'].includes(reason)) this._netLost('hors ligne au réveil', { start: { reason, pcm, handle: opts.handle } });
+      if (this.enVoiture || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant', 'reponse_tardive'].includes(reason)) this._netLost('hors ligne au réveil', { start: { reason, pcm, handle: opts.handle } });
       return;
     }
     this._convDebut = Date.now();   // 7 septies : début de la discussion, pour la passe de mémoire
@@ -568,7 +602,7 @@ class App {
       if (this.convId !== myConv) return;                              // arrêtée entre-temps (appel…)
       this.log('Gemini : ' + e.message);
       this.lastError = e.message;
-      if (isNetErr(e) && (this.car || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant', 'reponse_tardive'].includes(reason))) {
+      if (isNetErr(e) && (this.enVoiture || ['prenom', 'toucher', 'apres_appel', 'apres_appel_entrant', 'reponse_tardive'].includes(reason))) {
         // Réseau trop faible pour joindre Google (C8) : même chose que hors ligne, la phrase est gardée (8 s au plus).
         const pcm = (this.pending || []).length ? concat(this.pending).slice(0, 16000 * 8) : null;
         this.mode = null; this.pending = null; this.setState('veille');
@@ -596,16 +630,19 @@ class App {
     for (let i = 0; i < flat.length; i += 3200) this.brain.sendAudio(flat.subarray(i, i + 3200));
     this._derniereReponse = null; this._doublon = null;      // nouvelle discussion : rien à comparer
     if (reason === 'test') this.brain.sendText('Présente-toi en une phrase, avec chaleur.');
-    if (reason === 'toucher') this.brain.sendText(this.car ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
+    if (reason === 'toucher' && !this._aDire) this.brain.sendText(this.enVoiture ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
     if (reason === 'apres_appel') this.brain.sendText(this._apresAppelTexte());
     if (reason === 'apres_appel_entrant') this.brain.sendText(this._apresAppelEntrantTexte());
-    if (reason === 'reponse_tardive' && this._lateText) this.brain.sendText(this._lateText);
+    if (reason === 'reponse_tardive' && !this._aDireEnvoyer() && this._lateText) this.brain.sendText(this._lateText);
     if (reason === 'message' && this._messageText) { this.brain.sendText(this._messageText); this._messageText = null; }
     if (reason === 'prenom' && this._wakeText) {
-      this.brain.sendText(this._wakeText);
+      // Une réponse du CRM attend encore (journal du 05/11/26, 11h05:13 : « Bon ben j'attends la réponse, Wilson ») :
+      // elle passe d'abord, avec ce qu'il vient de dire.
+      if (!(this._aDire && this._aDireEnvoyer(this._wakeDemande || ''))) this.brain.sendText(this._wakeText);
       // Journal du 04/11/26, 11h49:54 (voiture) : réveillé avec sa demande, Gemini n'a rien dit et rien ne l'a relancé.
       this._demandeTexte = { texte: this._wakeDemande || '', at: performance.now(), conv: this.convId, vu: false };
-    }
+      if (this._wakeDemande) this._noteHeard(this._wakeDemande, true);         // pour le garde-fou des outils (nom du client dit)
+    } else if (this._aDire && !['reponse_tardive', 'message', 'test', 'prenom'].includes(reason)) this._aDireEnvoyer();
     this._wakeText = null;
     if (this.netWait && this.netWait.start) this._netBack();          // réveillé sans réseau : c'est reparti
     this.lastActivity = performance.now();
@@ -629,7 +666,7 @@ class App {
     else if (reason === 'toucher') this._say(['Oui ?', "Je t'écoute.", 'Oui, dis-moi ?'][Math.floor(Math.random() * 3)]);
     else if (reason === 'apres_appel') this._ecoSend({ text: this._apresAppelTexte() });
     else if (reason === 'apres_appel_entrant') this._ecoSend({ text: this._apresAppelEntrantTexte() });
-    else if (reason === 'reponse_tardive' && this._lateSay) this._say(this._lateSay);
+    else if (reason === 'reponse_tardive' && this._lateSay) { this._aDire = null; this._say(this._lateSay); }
     if (this.netWait && this.netWait.start) this._netBack();
   }
 
@@ -989,6 +1026,13 @@ class App {
       if (t0 && why !== 'essai de voix') setTimeout(() => this._passeMemoire(t0, t1, qs), 15000);
     }
     this.log(`Fin de conversation (${why}) — dernière parole de Wilson il y a ${depuis(this.playEndAt)}, de Timothée il y a ${depuis(this._heardAt)}${this._voitureBt ? ', en voiture' : ''}`); this._byName = false; this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false; this._searchMs = 0;
+    // Une réponse du CRM envoyée mais pas encore dite (journal du 05/11/26, 11h04:22) : elle reste à dire ; en voiture, il
+    // se réveille pour la dire (C11 bis), sauf si on l'a fait taire au volant (elle passera à la prochaine discussion).
+    const P = this._aDire;
+    if (P && P.conv === this.convId - 1) {
+      P.conv = null; this.log(`Réponse à « ${P.question.slice(0, 60)} » pas encore dite : gardée pour la dire`);
+      if (this.enVoiture && why !== 'volant' && why !== 'essai de voix') setTimeout(() => { if (this._aDire === P && this.state === 'veille' && !this.phone && !document.hidden) this.startConversation('reponse_tardive'); }, 2500);
+    }
     // Les outils du CRM vont au bout (une préparation affiche sa carte « Oui / Non ») ; les recherches s'arrêtent.
     if (this._searches) { for (const c of this._searches.values()) if (!c.crm) c.abort(); this._searches.clear(); }
     if (this._voitureBt && why !== 'essai de voix' && why !== 'volant') { try { this.audio.tone('dodo'); } catch (_) {} }   // en voiture : il entend qu'il se rendort
@@ -1001,13 +1045,13 @@ class App {
   }
 
   _system(mode = 'live') {
-    const s = this.settings, souv = this.memoire.pourConsigne(), recents = this.memory.recent(10);
+    const s = this.settings, souv = this.memoire.pourConsigne(), recents = this.memory.recent(10), suite = this._contexteSuite();
     const bat = this.battery && !this.battery.charging && !this._batTold && !/Mobile/.test(navigator.userAgent) ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le une seule fois, brièvement, puis n'en reparle plus.` : '';
     if (bat) this._batTold = true;
     const nv = this._nouveautes(mode);
     const eco = mode === 'eco' || mode === 'eco-search';
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
-    const crm = this.crm.on, car = !!this.car, maison = this.maison.on;
+    const crm = this.crm.on, car = this.enVoiture, maison = this.maison.on;
     const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch, crm, maison }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
 Ta mémoire : après chaque discussion, tu relis toi-même ce qui s'est dit et tu retiens ce qui est utile (prénoms, goûts, dates, habitudes) : inutile d'appeler memoriser pour ça. Appelle memoriser seulement quand on te demande clairement de retenir quelque chose (« retiens que… », « n'oublie pas que… »), avec une phrase courte et autonome, puis confirme en quelques mots. « Oublie que… » : appelle oublier.
 Tu parles toujours en français, et tu ne dis jamais à voix haute tes réflexions, ce que tu vas faire avec tes outils ou des remarques sur toi-même (journal du 30/10/26 : « I need to check why the TV… »).
@@ -1015,7 +1059,8 @@ La fin : si on te dit clairement au revoir, bonne nuit ou « merci, c'est tout �
 Tes progrès : quand Timothée fait une remarque sur ta façon de fonctionner (« c'est un bug », « tu devrais… », « j'aimerais que tu… », « ne fais plus ça », une fonction qui manque), appelle remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. S'il demande ce qu'il t'a fait noter ou demandé de changer : mes_remarques (pas idees). Ne dis jamais « c'est noté » sans avoir appelé remarque. Une remarque sur ton apparence ou une chose qu'il trouve bizarre (« je ne vois plus tes pupilles », « tes yeux sont tout blancs ») en est une aussi. N'invente jamais d'explication sur ton propre fonctionnement (« c'est une mise à jour de mon visage ») : si tu ne sais pas, dis-le et note la remarque. Ne prétends pas pouvoir te modifier toi-même sur-le-champ.
 L'heure et la date : appelle date_et_heure.
 L'écran (règle de Timothée du 04/11/26) : n'affiche du texte QUE s'il te le demande (« montre-moi », « affiche », « mets-le par écrit », « écris-le à l'écran ») : appelle alors afficher et ne dis à voix haute que l'essentiel. Sinon, jamais d'écran de toi-même (ni message d'attente, ni résultat, ni réponse longue) : tu réponds à voix haute. Une photo demandée (« montre-moi un koala ») et la météo restent 5 secondes à l'écran ; « réaffiche », « remontre-moi, j'ai pas eu le temps » : reafficher. « Ferme », « enlève ça » : fermer_ecran.
-Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« rappelle-moi à 18h de… » : donne quand au format 2026-10-30T18:00, en calculant la date à partir d'aujourd'hui), meteo (pour la météo, plutôt que chercher), courses (la liste de courses de la maison), idees (« note cette idée » : rangée dans son document Google ; « envoie-moi mes idées » : par e-mail). Agis sans demander de confirmation quand la demande est claire.${this.outils && this.outils.resume() ? '\n' + this.outils.resume() : ''}`;
+« Répète », « tu peux répéter ? », « qu'est-ce que tu as dit ? » : redis simplement ta dernière phrase (aucun outil, surtout pas reafficher).
+Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« rappelle-moi à 18h de… », une heure précise : donne quand au format 2026-10-30T18:00, en calculant la date à partir d'aujourd'hui ; il sonne sur l'appareil où il est noté), messages pour un rappel « quand tu nous verras » (« rappelle-nous ce soir à la maison de… », « dis-le-nous quand on rentrera » : messages, action deposer, pour = « tous » ou son prénom, aussi_pour_moi = true, a_la_maison = true, apres = l'heure à partir de laquelle le dire ; la tablette du salon le dira à la première personne de la famille qui la regardera ; jamais memoriser pour ça), meteo (pour la météo, plutôt que chercher), courses (la liste de courses de la maison), idees (« note cette idée » : rangée dans son document Google ; « envoie-moi mes idées » : par e-mail). Agis sans demander de confirmation quand la demande est claire.${this.outils && this.outils.resume() ? '\n' + this.outils.resume() : ''}`;
     // CRM à la voix et mode voiture (PLAN 2 quater)
     const travail = !crm ? '' : `
 Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
@@ -1031,6 +1076,8 @@ Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat 
 - Ne dis jamais « c'est noté » ou « c'est enregistré » si l'enregistrement n'a pas été confirmé par le CRM.
 - Si un nom de client, un chiffre ou une date que tu as entendu te semble douteux, ne devine pas : dis ce que tu as compris et demande si c'est bien ça (« Tu parles de Franck Monvoisin, chez AD2M ? »), surtout avant de préparer une écriture.
 - Tu ne sais que ce que disent les réponses du CRM : si un détail demandé n'y est pas (le contenu d'une commande, par exemple), ${eco ? 'utilise l\'outil "question"' : 'appelle crm_question pour le chercher'} au lieu de le reconstituer.
+- Les chiffres (clients actifs, objectif, chiffre d'affaires, commandes, montants, nombres de devis) : tu n'en connais AUCUN par cœur. Tu ne dis un chiffre que s'il est dans une réponse du CRM, dans les derniers échanges ou dans ce que Timothée vient de dire. Une recherche lancée « en arrière-plan » n'a pas encore de résultat : tant que la réponse n'est pas arrivée, si on te la demande, dis « je cherche encore, je te le dis dès que je l'ai » — jamais un chiffre au hasard. L'objectif de clients actifs, tu ne peux pas le changer toi-même : dis-le à l'analyste (crm_question « OBJECTIF CLIENTS ACTIFS objectif N »).
+- Si deux réponses du CRM se contredisent (l'analyste parle d'un rendez-vous, la fiche n'en montre pas), dis-le tel quel (« l'analyste parlait d'un rendez-vous le 10, mais la fiche n'en montre pas ») et propose de vérifier ; n'invente jamais d'explication (« je l'ai vu dans un brouillon »…).
 `;
     const inv = maison && !eco ? this.maison.texteInventaire() : '';
     const maisonTxt = !maison ? '' : eco ? `
@@ -1057,7 +1104,7 @@ La famille : ${fam}${qst ? '\n' + qst : ''}
 - L'agenda Famille (Google Agenda partagé de Timothée et Camille) : « mets dans l'agenda le médecin de Louis jeudi à 10h », « on a quoi ce week-end ? » : outil agenda. Les rendez-vous clients de Timothée restent dans le CRM.
 `;
     const voiture = !car ? '' : `
-En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (caméra coupée en voiture).
+En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (le téléphone est sur son support) : pas de photo sauf s'il te demande de regarder.
 Le son de la voiture est souvent mauvais (Bluetooth, bruit de la route, réseau faible) : ce que tu entends peut être déformé (mots étranges, bouts de phrase, autre langue). Si une demande te paraît bizarre, incomplète ou hors sujet, reformule en quelques mots ce que tu as compris et demande s'il confirme, au lieu de deviner ; si tu n'as rien compris, demande-lui simplement de répéter.
 S'il parle au téléphone avec quelqu'un d'autre (une conversation qui ne t'est pas adressée), tais-toi.
 `;
@@ -1085,7 +1132,7 @@ Sers-t'en avec tact, comme un ami qui se souvient : naturellement quand c'est ut
 
 Derniers échanges (pour la continuité, n'y fais allusion que si c'est utile) :
 ${recents || '(aucun)'}
-
+${suite ? suite + '\n' : ''}
 Nous sommes ${fmtDate()}.${bat}${nv}`;
   }
 
@@ -1186,14 +1233,19 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         if (r.name === 'exprimer_emotion') continue;
         const txt = typeof r.response?.result === 'string' ? r.response.result : JSON.stringify(r.response || {});
         this.log(`Outil ${r.name} → Gemini : « ${txt.replace(/\s+/g, ' ').slice(0, 160)} »${r.scheduling ? ` (${r.scheduling})` : ''}`, true);
+        this._noteChiffres(txt);                                                   // chiffres qui ont une source (garde du 05/11/26)
       }
       respond0(rs);
       // Chien de garde (journal du 04/11/26, 11h50:59 et 11h51:37) : sur Gemini 3.1, après l'outil « remarque », il n'a plus
       // rien dit jusqu'à ce que Timothée le rappelle. S'il reste muet 5 s après un résultat, relance une fois.
+      // Jamais après une recherche lancée en arrière-plan (journal du 05/11/26, 11h05:51) : il avait déjà dit « je cherche,
+      // je te tiens au courant » et devait se taire ; « tu as le résultat de ton outil, réponds » l'a poussé à inventer
+      // « 120 clients actifs », puis « 135 », alors que l'analyste n'avait encore rien trouvé.
       const muet = (rs || []).every((r) => r.name === 'exprimer_emotion' || /ne dis rien|ne redis rien|ne fais rien/i.test(JSON.stringify(r.response || {})));
-      if (!muet) this._apresOutil = { at: performance.now(), conv: this.convId, turnN: this._turnN, noms: (rs || []).map((r) => r.name).join(', ') };
+      const fond = (rs || []).some((r) => /arrière-plan/i.test(String((r.response && r.response.result) || '')));
+      if (!muet && !fond) this._apresOutil = { at: performance.now(), conv: this.convId, turnN: this._turnN, noms: (rs || []).map((r) => r.name).join(', ') };
     };
-    b.sendText = (t) => { this.log(`Consigne à Gemini : « ${String(t).replace(/\s+/g, ' ').slice(0, 160)} »`, true); sendText0(t); };
+    b.sendText = (t) => { this.log(`Consigne à Gemini : « ${String(t).replace(/\s+/g, ' ').slice(0, 160)} »`, true); this._noteChiffres(t); sendText0(t); };
     b.on('audio', (i16, rate) => this._liveAudio(i16, rate));
     this._liveAudio = (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
@@ -1277,7 +1329,15 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         this.log(`Voix du direct : ${T.sec.toFixed(1)} s reçues${this.audio.trous ? `, ${this.audio.trous} trou(s) (voix arrivée en retard)` : ''}, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} photo(s) prise(s) à la demande${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
       }
       this._liveTurn = null; this._outPeak = 0; this.audio.trous = 0;
-      if (user || wilson) this.memory.addExchange(user, wilson, this.famille._parle());
+      // Journal du 05/11/26, 11h05:35 (« Tu te rappelles pas ma dernière question ? » → « trou de mémoire ») : une demande
+      // arrivée par l'oreille (« Wilson, j'en suis où dans mes clients actifs ? ») part en texte, sans transcription de
+      // Google : elle n'entrait pas dans les derniers échanges, et la discussion suivante ne la connaissait pas.
+      const DT = this._demandeTexte;
+      const userLog = user || (DT && DT.conv === this.convId && !DT.note && DT.texte ? (DT.note = true, DT.texte) : '');
+      if (userLog || wilson) this.memory.addExchange(userLog, wilson, this.famille._parle());
+      if (wilson) { (this._ditWilson = this._ditWilson || []).push({ t: performance.now(), text: wilson }); this._ditWilson.splice(0, this._ditWilson.length - 8); }
+      if (wilson) this._aDireDit(wilson);                                       // réponse attendue enfin donnée ?
+      if (wilson) this._verifierChiffres(wilson);                               // chiffre inventé ? (journal du 05/11/26)
       if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
       if (user) this._parleDepuis = true;
       // Il a reparlé APRÈS le résultat de l'outil (tour suivant) : la relance « réponds » ne vaut plus pour cet outil.
@@ -1316,7 +1376,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     });
     b.on('heard', (t) => {
       if (this.state !== 'conversation') return;
-      this.lastActivity = this._heardAt = performance.now(); this._noteHeard(t);
+      this.lastActivity = this._heardAt = performance.now(); this._noteHeard(t); this._noteChiffres(t, 'dit');
       if (String(t || '').trim()) this._heardTurnN = this._turnN;          // phrase en cours de transcription (pas encore de réponse)
       if (String(t || '').trim()) this._parleDepuis = true;
       if (this._gate && !this._gate.ok && nomDit(t)) this._gateOpen('nom entendu');
@@ -1383,12 +1443,12 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     const now = Date.now();
     let W = this.netWait;
     if (!W) {
-      const max = this.car ? 180000 : 60000;
+      const max = this.enVoiture ? 180000 : 60000;
       W = this.netWait = { since: now, until: now + max, n: 0, why, phrase: null, phraseAt: 0, timer: null, mode: this.mode };
       this.log(`Réseau coupé (${why}) : ${extra.start ? 'je réponds dès qu\'il revient' : 'discussion gardée'}, nouvel essai pendant ${max / 60000} min`);
       this.audio.tone('perdu'); this.face.setEmotion('confus', 4000); this.badge('Plus de réseau — je réessaie', 8000, true);
       // dit une fois (pas à chaque micro-coupure d'un réseau faible : une fois par minute au plus), après la fin de ce qu'il disait
-      if ((this.car || this.state === 'conversation' || extra.start) && (extra.start || now - (this._netToldAt || 0) > 60000)) {
+      if ((this.enVoiture || this.state === 'conversation' || extra.start) && (extra.start || now - (this._netToldAt || 0) > 60000)) {
         W.toldAt = this._netToldAt = now;
         this._sayAfter(extra.start ? 'Pas de réseau pour l\'instant, je te réponds dès qu\'il revient.' : 'Je n\'ai plus de réseau, je reprends dès qu\'il revient.');
       }
@@ -1450,7 +1510,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this.log(`Toujours pas de réseau après ${Math.round((Date.now() - W.since) / 1000)} s : veille`);
     this._netEndedAt = Date.now();
     if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('réseau');
-    if (this.car) this._say(`Toujours pas de réseau, je me mets en veille : ${this.oreille.ready ? 'redis « Wilson »' : 'touche l\'écran'} quand il reviendra.`);
+    if (this.enVoiture) this._say(`Toujours pas de réseau, je me mets en veille : ${this.oreille.ready ? 'redis « Wilson »' : 'touche l\'écran'} quand il reviendra.`);
   }
   // Pendant la coupure : la dernière phrase dite (6 s au plus) est gardée, pas l'écho de sa propre voix.
   _netKeepPhrase() {
@@ -1459,6 +1519,124 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (this.voice.speaking || t0 < (this.playEndAt || 0) + 300 || !this._addressed(now)) return;
     W.phrase = this.audio.recent(Math.min(6000, now - t0 + 700)); W.phraseAt = Date.now();
     this.log(`Phrase gardée pendant la coupure (${(W.phrase.length / 16000).toFixed(1)} s)`);
+  }
+
+  _majMaison() {
+    if (!this.maison.on || this.enVoiture) return;
+    this.maison.rafraichir().then(() => {
+      if (this._maisonKo) { this.log(`Maison : de nouveau joignable (injoignable depuis ${dureeTexte(Date.now() - this._maisonKo.depuis)})`); this._maisonKo = null; }
+    }).catch((e) => {
+      const K = this._maisonKo, now = Date.now();
+      if (!K) { this._maisonKo = { depuis: now, dit: now, n: 1 }; this.log('Maison : inventaire impossible (' + e.message + ')'); return; }
+      K.n++;
+      if (now - K.dit >= 3600000) { K.dit = now; this.log(`Maison : toujours injoignable depuis ${dureeTexte(now - K.depuis)} (${K.n} essais ; ordinateur de la maison éteint ?) — ${e.message}`); }
+    });
+  }
+
+  // ---------- Chiffres : pas de chiffre du CRM sans source (journal du 05/11/26) ----------
+  // 09h35:52 : « il te manque 3 clients pour ton objectif de 10 » sans avoir rien demandé au CRM ; 11h06:01 et 11h06:15 :
+  // « 120 clients actifs », « l'objectif c'est 135 », pendant que l'analyste cherchait encore. Chaque chiffre qui a une
+  // source est noté 8 h (résultats d'outils, consignes de l'appli, ce que Timothée a dit) ; un chiffre du CRM dit par
+  // Wilson sans aucune source est aussitôt corrigé par lui-même (« je me suis trompé… »).
+  _noteChiffres(t) {
+    const s = String(t || '');
+    if (!s || /^\[ATTENTION : tu viens de dire/.test(s)) return;
+    const l = nombresDans(s); if (!l.length) return;
+    const now = Date.now(), V = this._chiffres || (this._chiffres = lireChiffres());
+    for (const n of l) { const i = V.findIndex((x) => x.n === n); if (i >= 0) V.splice(i, 1); V.push({ n, t: now }); }
+    const lim = now - 8 * 3600000; while (V.length && (V.length > 300 || V[0].t < lim)) V.shift();
+    clearTimeout(this._chiffresT); this._chiffresT = setTimeout(() => { try { localStorage.setItem('wilson.chiffres', JSON.stringify(V)); } catch (_) {} }, 2000);
+  }
+  // Un chiffre a une source : le même, à peu près le même s'il arrondit (« environ 12 000 € »), ou un écart, une somme ou
+  // un pourcentage de deux chiffres connus (« il t'en manque 31 » = 50 − 19).
+  _chiffreVu(n, approx) {
+    const V = (this._chiffres || (this._chiffres = lireChiffres())).map((x) => x.n);
+    if (V.some((v) => Math.abs(v - n) < 1e-6)) return true;
+    if (approx && V.some((v) => v > 0 && Math.abs(v - n) / v <= 0.15)) return true;
+    const r = V.filter((v) => v >= 6 && !(v >= 1990 && v <= 2100)).slice(-80);
+    for (let i = 0; i < r.length; i++) for (let j = 0; j < r.length; j++) {
+      if (i === j) continue;
+      const a = r[i], b = r[j];
+      if (Math.abs(Math.abs(a - b) - n) < 1e-6 || Math.abs(a + b - n) < 1e-6 || Math.abs((a / b) * 100 - n) < 1) return true;
+    }
+    return false;
+  }
+  _verifierChiffres(texte) {
+    if (!this.crm.on || this.mode !== 'live' || !this.brain.open) return;
+    const t = String(texte || ''), faux = [];
+    const juger = (brut, mult, avant, autour, extrait) => {
+      let n = nombre(brut); if (!isFinite(n)) return;
+      if (mult) n *= 1000;
+      const important = /objectif|manque|actifs/i.test(avant + ' ' + autour), compte = /^\d+\s*(clients?|commandes?|devis|rendez-vous|visites?|tâches?)\b/i.test(autour);
+      if (!important && n <= (compte ? 12 : 5)) return;                   // « 8 tâches », « 2 rendez-vous » : il compte ce que le CRM a listé
+      const approx = mult || n >= 1000 || /(environ|à peu près|presque|près de|autour de|un peu (plus|moins) de|plus de|moins de)\s*$/i.test(avant);
+      const e = extrait.replace(/\s+/g, ' ').trim();
+      if (!this._chiffreVu(n, approx) && !faux.includes(e)) faux.push(e);
+    };
+    for (const m of t.matchAll(RE_CHIFFRE_CRM)) juger(m[1], !!m[2], t.slice(Math.max(0, m.index - 40), m.index), t.slice(m.index, m.index + m[0].length + 25), m[0]);
+    for (const m of t.matchAll(RE_OBJECTIF_DIT)) { const fin = m.index + m[0].length; juger(m[2], false, t.slice(Math.max(0, m.index - 10), fin - m[2].length), 'objectif', t.slice(m.index, fin)); }
+    if (!faux.length) return;
+    const now = performance.now();
+    if (now - (this._chiffreFauxAt || -1e9) < 20000) { this.log(`Chiffre sans source (déjà corrigé il y a moins de 20 s) : « ${faux.join(' », « ')} »`); return; }
+    this._chiffreFauxAt = now;
+    const enCours = this._analyses && this._analyses.size;
+    this.log(`Chiffre sans source : « ${faux.join(' », « ')} » — ni le CRM ni Timothée ne l'ont donné : je lui fais corriger`, true);
+    this.brain.sendText(`[ATTENTION : tu viens de dire « ${faux[0]} », mais ce chiffre ne vient d'aucun résultat du CRM ni de ce que Timothée a dit : tu l'as inventé. Dis-lui tout de suite, en une phrase, que tu t'es trompé et que tu n'as pas ce chiffre${enCours ? ' : la recherche est en cours, tu le lui diras dès que tu l\'as' : ' ; propose de le chercher dans le CRM'}. N'invente aucune explication.]`);
+  }
+
+  // ---------- Réponse attendue (C11 bis) : jamais perdue ----------
+  // Journal du 05/11/26, 11h04:22 : la réponse de l'analyste est arrivée à la seconde où la discussion se fermait (silence) :
+  // envoyée dans une session qui se fermait, jamais dite ; « Wilson » 7 s après → « Oui ? », puis « j'ai un trou de mémoire ».
+  // Elle reste « à dire » jusqu'à ce que Wilson l'ait vraiment dite (15 min au plus) : la discussion ne se ferme pas pendant
+  // qu'il la dit, elle passe en premier à la discussion suivante, et en voiture il se réveille pour la dire.
+  _aDireTexte(P, demande = '') {
+    const deb = `[La recherche dans le CRM que tu avais lancée pour la question « ${P.question} » est terminée (${P.s} s). Résultat : ${P.dire}`;
+    return demande ? `${deb} Timothée vient de te dire : « ${demande} ». Donne-lui d'abord ce résultat, en commençant par « J'ai la réponse à ta question sur … » (quelques mots du sujet), puis réponds à ce qu'il vient de dire si c'est autre chose.]`
+      : `${deb} Dis-la-lui maintenant, en commençant par « J'ai la réponse à ta question sur … » (quelques mots du sujet).]`;
+  }
+  _aDireEnvoyer(demande = '') {
+    const P = this._aDire;
+    if (!P || this.mode !== 'live' || !this.brain.open || this.state !== 'conversation') return false;
+    if (Date.now() - P.at > 15 * 60000) { this.log(`Réponse à « ${P.question.slice(0, 60)} » jamais dite en 15 min : abandonnée`); this._aDire = null; return false; }
+    if ((P.n || 0) >= 3) {                                                  // 3 envois sans qu'il la dise : la voix du téléphone la lit
+      this.log('Réponse attendue envoyée 3 fois sans être dite : je la lis avec la voix de l\'appareil'); this._aDire = null; this._say(`J'ai la réponse à ta question. ${P.dire}`); return true;
+    }
+    P.conv = this.convId; P.envoyeAt = performance.now(); P.n = (P.n || 0) + 1; P.relance = false;
+    this._permettre(30000, 'réponse tardive'); this._resumedAt = performance.now(); this.lastActivity = performance.now();
+    this.brain.sendText(this._aDireTexte(P, demande));
+    const conv = this.convId;
+    setTimeout(() => {                                                      // pas dite au bout de 8 s : une relance
+      if (this._aDire !== P || P.conv !== conv || conv !== this.convId || this.audio.playing || !this.brain.open || P.relance) return;
+      P.relance = true; this.log('Réponse attendue pas encore dite : relance'); this._resumedAt = performance.now();
+      this.brain.sendText(`[Donne-lui maintenant à voix haute la réponse à sa question « ${P.question} » : ${P.dire}]`);
+    }, 8000);
+    return true;
+  }
+  _aDireDit(wilson) {
+    const P = this._aDire; if (!P || P.conv !== this.convId) return;
+    const n = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const w = n(wilson), mots = [...new Set(n(P.dire).split(/[^a-z0-9]+/).filter((m) => m.length >= 5 || /^\d+$/.test(m)))];
+    const communs = mots.filter((m) => w.includes(m)).length;
+    if (/j'ai la reponse|reponse a ta question/.test(w) || (mots.length && communs >= Math.min(3, mots.length))) { this._aDire = null; this.log('Réponse attendue dite'); }
+  }
+  // De retour au premier plan (après le GPS, l'écran éteint) avec une réponse qui attend : en voiture, il la dit.
+  _aDireAuRetour() {
+    const P = this._aDire;
+    if (!P || P.conv != null || !this.enVoiture) return;
+    setTimeout(() => { if (this._aDire === P && P.conv == null && this.state === 'veille' && !this.phone && !document.hidden) { this.log('De retour au premier plan, une réponse du CRM attend : je la dis'); this.startConversation('reponse_tardive'); } }, 1500);
+  }
+  _aDireEnCours(now = performance.now()) { const P = this._aDire; return !!(P && P.conv === this.convId && now - (P.envoyeAt || 0) < 25000); }
+  // Pour la consigne de chaque discussion : la précédente vient de finir, une recherche tourne encore, une réponse attend.
+  _contexteSuite() {
+    const l = [], now = Date.now(), L = this.memory.log, der = L[L.length - 1];
+    if (der && der.ts && now - der.ts < 10 * 60000) l.push(`Votre dernière discussion date d'il y a ${dureeTexte(now - der.ts)} (voir les derniers échanges) : si on te parle de « ma question », « tu te rappelles ? », « alors ? », « j'attends la réponse », c'est la suite de ces échanges.`);
+    for (const A of (this._analyses || new Map()).values()) l.push(`Recherche dans le CRM en cours depuis ${dureeTexte(performance.now() - A.t0)} : « ${A.question} ». Tu n'as PAS encore le résultat : si on te le demande, dis que tu cherches encore et que tu le diras dès que tu l'as, sans donner aucun chiffre.`);
+    if (this._aDire) l.push(`La réponse du CRM à la question « ${this._aDire.question} » est arrivée : elle va t'être donnée en message.`);
+    return l.join('\n');
+  }
+  _suiteRecente() {
+    const L = this.memory.log, der = L[L.length - 1], dt = der && der.ts ? Date.now() - der.ts : Infinity;
+    return dt < 5 * 60000 ? ` C'est la suite de votre discussion d'il y a ${dureeTexte(dt)}.` : '';
   }
 
   // Journal du 04/11/26, 11h48:37 : verrou refusé (« rien à enregistrer »), et Wilson dit « J'enregistre la tâche maintenant.
@@ -1499,7 +1677,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       const pasDemande = this._outilPasDemande(c);
       if (pasDemande) {
         this.log(`Outil ${c.name} refusé : rien de tel dans ce qui a été dit (« ${this._entenduRecent().slice(-120)} »)`, true);
-        res.push({ id: c.id, name: c.name, response: { result: "Personne ne t'a demandé cela : ce que tu as entendu n'était sans doute pas pour toi (bruit, gens qui parlent entre eux). Ne fais rien et ne dis rien." } });
+        const pourquoi = pasDemande === 'reafficher' ? "Il ne t'a rien demandé d'afficher : s'il veut que tu répètes, redis simplement ta dernière phrase, sans outil."
+          : this.enVoiture && pasDemande !== 'regarder' ? `Le client « ${a.client || ''} » ne correspond pas à ce que tu as entendu. S'il te parle bien d'un client, redemande-lui son nom pour vérifier ; si ce n'était pas pour toi (radio), tais-toi.`
+          : "Personne ne t'a demandé cela : ce que tu as entendu n'était sans doute pas pour toi (bruit, gens qui parlent entre eux). Ne fais rien et ne dis rien.";
+        res.push({ id: c.id, name: c.name, response: { result: pourquoi } });
         continue;
       }
       if (CRM_TOOL_NAMES.includes(c.name)) { this._crmTool(c); continue; }     // réponse envoyée quand le CRM a répondu
@@ -1515,7 +1696,17 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
           if (g) this.face.play(g); if (a.geste === 'clin_oeil') this.face.doWink(1);
           break;
         }
-        case 'memoriser': this.memoire.ajouter(a.fait, { cat: a.categorie, qui: a.qui || this.famille._parle(), origine: 'demandé' }); this.log('Retenu (demandé) : ' + a.fait, true); this.face.play('nod'); out = { result: 'mémorisé' }; break;
+        case 'memoriser':
+          // Journal du 05/11/26, 11h01:25 : « ce soir, quand Wilson nous verra à la maison, rappelle-nous de parler du cadeau
+          // de Louis » → memoriser « … de discuter du sujet avec Camille » (le sujet perdu), puis effacé par la passe de
+          // mémoire 2 min après (une chose ponctuelle) : la demande a disparu sans un mot. Une chose à faire ou à rappeler
+          // n'est pas un souvenir : Gemini est renvoyé vers le bon outil.
+          if (CHOSE_A_RAPPELER.test(a.fait || '')) {
+            this.log(`memoriser refusé : « ${String(a.fait).slice(0, 100)} » est une chose à rappeler, pas un souvenir`, true);
+            out = { result: "Ce n'est pas un souvenir mais une chose à rappeler : ne le mémorise pas. Pour qu'on le dise à la maison quand on vous verra, appelle messages (action deposer, pour « tous » ou son prénom, aussi_pour_moi true, a_la_maison true, apres = l'heure, texte = la chose à rappeler avec son sujet précis) ; pour une heure précise, appelle rappel ; pour l'agenda Famille, appelle agenda. Puis confirme en une phrase." };
+            silent = false; break;
+          }
+          this.memoire.ajouter(a.fait, { cat: a.categorie, qui: a.qui || this.famille._parle(), origine: 'demandé' }); this.log('Retenu (demandé) : ' + a.fait, true); this.face.play('nod'); out = { result: 'mémorisé' }; break;
         case 'oublier': { const g = this.memoire.oublier(a.sujet || ''); out = { result: g.length ? 'Oublié : ' + g.join(' ; ') : 'Aucun souvenir ne correspond.' }; silent = false; this.log('Oublier « ' + a.sujet + ' » : ' + g.length + (g.length ? ' (' + g.join(' ; ') + ')' : ''), true); break; }
         case 'date_et_heure': out = { result: fmtDate() }; silent = false; break;
         case 'terminer_conversation': { this.endAfterSpeech = true; const id = this.convId; setTimeout(() => { if (id === this.convId && this.endAfterSpeech && !this.audio.playing) this.endConversation('au revoir'); }, 4000); break; }
@@ -1720,19 +1911,23 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         // regardé quand la demande arrive → elle lui est adressée à coup sûr ; et s'il reste muet, relance une fois.
         const vu = this._gazing();
         if (r.demande) {
-          this.brain.sendText(vu ? this._texteRegarde(r.demande) : this._texteDeLoin(r.demande, r.doute));
+          if (!(this._aDire && this._aDire.conv !== this.convId && this._aDireEnvoyer(r.demande))) this.brain.sendText(vu ? this._texteRegarde(r.demande) : this._texteDeLoin(r.demande, r.doute));
           this._demandeTexte = { texte: r.demande, at: performance.now(), conv: this.convId, vu };
+          this._noteHeard(r.demande, true);
         } else if (!vu) this._ecouteSeule();
         this.lastActivity = performance.now();
         return;
       }
       if (this.state !== 'veille') return;
       this._wakeText = r.demande ? this._texteDeLoin(r.demande, r.doute) : null; this._wakeDemande = r.demande || ''; this._wakePcm = new Int16Array(0);
-      this.face.play('wake'); await this.startConversation('prenom');
-      if (!r.demande) this._ecouteSeule();
+      this.face.play('wake');
       // Remarque de Timothée du 05/11/26, 09h45 (« le petit bip bip, c'était bien ») : en voiture, il ne voit pas l'écran ;
-      // une petite note dit tout de suite qu'il a été entendu, avant la réponse de Gemini.
-      else if (voiture) setTimeout(() => { try { this.audio.tone('ecoute'); } catch (_) {} }, 250);
+      // une petite note dit tout de suite qu'il a été entendu. Jouée dès le « oui » de la vérification (le lecteur de la
+      // voiture se met en route en éveil), et plus après la connexion à Google (une seconde de plus, en même temps que la réponse).
+      const ouvre = this.startConversation('prenom');
+      if (r.demande && voiture) setTimeout(() => { try { this.audio.tone('ecoute'); } catch (_) {} }, 300);
+      await ouvre;
+      if (!r.demande) this._ecouteSeule();
     } catch (e) {
       clearTimeout(minuterie);
       const lent = ctl && ctl.signal.aborted;
@@ -1767,6 +1962,8 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     return `[On vient de te dire, en te regardant : « ${demande} ». C'est pour toi : réponds maintenant, à voix haute, brièvement. La transcription peut être approximative : si elle ne veut rien dire, demande de répéter.]`;
   }
   _texteDeLoin(demande, doute = false) {
+    // En voiture (journal du 05/11/26 : « du canapé par exemple » envoyé à chaque réveil en voiture) : il conduit.
+    if (this.enVoiture) return `[Timothée t'appelle en voiture (« Wilson, … ») : « ${demande} ». Réponds-lui maintenant, brièvement. Le son de la voiture est souvent mauvais : si la transcription ne veut rien dire, demande-lui de répéter ; si un nom de client ou un chiffre te semble douteux, fais-le confirmer avant d'agir.${this._suiteRecente()}]`;
     return `[On vient de te parler de loin, sans te regarder (« Wilson, … », du canapé par exemple) : « ${demande} ». Fais-le ou réponds maintenant, brièvement. La transcription peut être approximative (de loin, télé possible) : si elle ne veut rien dire, demande-lui de répéter. Si la demande est vague sur ce qu'il faut faire (« l'éteindre », « ça », « le mettre ») ou ${doute ? 'si elle est mêlée à d\'autres phrases (on n\'est pas sûr qu\'on t\'ait appelé)' : 'si elle semble venir de la télé'}, n'agis pas sur la maison : demande d'abord de quoi il s'agit (« Tu veux que j'éteigne la grande lumière ? »). Si c'est visiblement quelqu'un qui parle de toi à une autre personne, ne dis rien.]`;
   }
   // « Wilson » tout seul (journal du 30/10/26 : 6 « Oui ? » pour rien) : il ne dit plus rien. Une petite note et son
@@ -1778,7 +1975,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     // plus ») : il ne voit pas l'écran, Wilson répond « Oui ? » et attend 20 s.
     const voiture = this._voitureBt, attente = voiture ? 20000 : 8000;
     this.pill('Je t\'écoute…', 'run', attente);
-    if (voiture && this.brain.open) {
+    if (voiture && this.brain.open && this._aDire && this._aDireEnvoyer()) {
+      // Journal du 05/11/26, 11h04:29 : il l'appelait pour avoir la réponse arrivée 7 s plus tôt ; Wilson disait « Oui ? ».
+      this.log('« Wilson » tout seul, en voiture, une réponse du CRM attend : je la donne');
+    } else if (voiture && this.brain.open) {
       this.log('« Wilson » tout seul, en voiture : je réponds « Oui ? » et j\'écoute 20 s');
       this.brain.sendText('[Timothée t\'appelle en voiture : dis seulement « Oui ? » et écoute la suite.]');
     } else this.log('« Wilson » tout seul : j\'écoute sans rien dire');
@@ -1869,7 +2069,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
 
   // Résultat d'un outil du CRM : info (texte pour Gemini) et, pour le mode économique, dire (phrase toute prête).
   async _crmRun(name, a, signal, { heard } = {}) {
-    const C = this.crm, car = !!this.car;
+    const C = this.crm, car = this.enVoiture;
     if (!C.on) return { info: "Le CRM n'est pas relié à Wilson sur cet appareil (Réglages → CRM). Dis-le simplement.", dire: "Le CRM n'est pas relié sur cet appareil." };
     const lu = (r) => (r.ok ? { info: pourGemini(r.texte, car) } : { info: `Le CRM ne répond pas : ${r.erreur || 'erreur'}. Dis-le simplement.`, dire: 'Le CRM ne répond pas pour le moment.' });
     switch (name) {
@@ -2028,7 +2228,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     const prev = this._passe || Promise.resolve();
     this._passe = prev.then(async () => {
       try {
-        const ou = this.car ? 'en voiture, sur le téléphone de Timothée' : deviceName() === 'téléphone' ? 'sur le téléphone de Timothée' : 'sur la tablette du salon';
+        const ou = this.enVoiture ? 'en voiture, sur le téléphone de Timothée' : deviceName() === 'téléphone' ? 'sur le téléphone de Timothée' : 'sur la tablette du salon';
         const r = await this.memoire.passe({ echanges, questions, ou });
         if (r) for (const x of r.reponses) await this.questions.repondre(x.id, x.reponse, 'retrouvée en relisant la discussion');
       } catch (e) { this.log('Mémoire : relecture de la discussion impossible (' + (e.message || e) + ')'); }
@@ -2168,13 +2368,22 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   }
   _lateAnswer(A, res, s, n = 0) {
     const again = (ms) => { if (n < 400) setTimeout(() => this._lateAnswer(A, res, s, n + 1), ms); };
-    if (this.phone || this.state === 'eveil' || this.netWait) return again(3000);           // pendant un appel ou une reconnexion : après
     const dire = res.dire || res.info;
+    if (!n) {                                                                              // à dire, quoi qu'il arrive
+      const P0 = this._aDire;                                                              // une autre réponse attend encore : les deux ensemble
+      this._aDire = P0 ? { question: `${P0.question} » puis « ${A.question}`, dire: `${P0.dire} Et pour ta question « ${A.question} » : ${dire}`, s, at: Date.now(), conv: null, envoyeAt: 0, cle: A.id }
+        : { question: A.question, dire, s, at: Date.now(), conv: null, envoyeAt: 0, cle: A.id };
+      this._noteChiffres(dire);
+    }
+    if (this._aDire && this._aDire.cle !== A.id) return;                                   // une réponse plus récente l'a reprise avec elle
+    // pendant un appel, une reconnexion, ou l'appli cachée (GPS devant, écran éteint : il ne serait pas entendu) : après
+    if (this.phone || this.state === 'eveil' || this.netWait || (document.hidden && this.state !== 'conversation')) return again(3000);
+    if (!this._aDire) return;                                                              // déjà dite entre-temps (discussion suivante)
     this.log(`Réponse à « ${A.question.slice(0, 80)} » arrivée après ${s} s${this.state === 'conversation' ? '' : ' : je me réveille pour la dire'}`, true);
-    this._lateText = `[La recherche dans le CRM que tu avais lancée pour la question « ${A.question} » est terminée (${s} s). Résultat : ${dire} Dis-la-lui maintenant, en commençant par « J'ai la réponse à ta question sur … » (quelques mots du sujet).]`;
+    this._lateText = this._aDireTexte(this._aDire);
     this._lateSay = `J'ai la réponse à ta question. ${dire}`;
-    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) { this._permettre(30000, 'réponse tardive'); this.brain.sendText(this._lateText); return; }
-    if (this.state === 'conversation') { this._say(this._lateSay); return; }
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) { this._aDireEnvoyer(); return; }
+    if (this.state === 'conversation') { this._aDire = null; this._say(this._lateSay); return; }
     this.startConversation('reponse_tardive');
   }
 
@@ -2396,7 +2605,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       if (this.netWait) this._netSchedule(300);
       this.crm.flushQueue();
       // En voiture, la discussion s'est arrêtée faute de réseau il y a peu : il prévient que c'est revenu.
-      if (!this.netWait && this.car && this._netEndedAt && Date.now() - this._netEndedAt < 10 * 60000 && this.state === 'veille') {
+      if (!this.netWait && this.enVoiture && this._netEndedAt && Date.now() - this._netEndedAt < 10 * 60000 && this.state === 'veille') {
         this._netEndedAt = 0; this.audio.tone('revenu'); this._say('Le réseau est revenu.');
       }
     });
@@ -2438,7 +2647,8 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (this.state === 'conversation') {
       const E = this.ecoState, thinking = E && (E.busy || E.cap);
       // une question à l'analyste garde la discussion ouverte 90 s ; au-delà, la réponse viendra de toute façon (C11 bis)
-      const searching = !!(this._searches && this._searches.size) || [...(this._analyses || new Map()).values()].some((A) => now - A.t0 < 90000);
+      // (et une réponse du CRM qu'il est en train de donner ne se coupe pas : journal du 05/11/26, 11h04:22)
+      const searching = !!(this._searches && this._searches.size) || [...(this._analyses || new Map()).values()].some((A) => now - A.t0 < 90000) || this._aDireEnCours(now);
       // Images : aucune envoyée d'office (R6) ; seulement à la demande (outil « regarder »).
       const keep = this.car || this._voitureBt ? CAR_IDLE_MS : this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
@@ -2503,7 +2713,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     else if (AO && now - AO.at > APRES_OUTIL_MS && ((!this.audio.speaking && now - (this.audio.lastVoicedAt || 0) > 1500) || now - AO.at > 2 * APRES_OUTIL_MS) && !this.audio.playing && this.brain.open && !this.paused && !(this._searches && this._searches.size) && !(this._analyses && [...this._analyses.values()].some((A) => !A.cancelled))) {
       this._apresOutil = null;
       this.log(`Wilson muet ${((now - AO.at) / 1000).toFixed(0)} s après le résultat de ${AO.noms} : relance`);
-      this.brain.sendText('[Tu as le résultat de ton outil : réponds-lui maintenant à voix haute, brièvement, en français.]');
+      this.brain.sendText('[Tu as le résultat de ton outil : réponds-lui maintenant à voix haute, brièvement, en français, avec seulement ce que dit ce résultat (aucun chiffre ni détail inventé).]');
     }
     // Journal du 05/11/26, 09h47:21 (voiture) : 1er son 44,9 s après la fin de sa phrase. Le bruit de la route faisait
     // croire à Google qu'il parlait encore : il attendait la fin de la phrase. Phrase transcrite, plus un mot depuis 5 s,
@@ -2526,10 +2736,13 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     // bip, c'était bien ») : aussi pendant qu'un outil travaille (remarque, rappel, météo…) et tant qu'il n'a pas répondu après.
     const cherche = this.state === 'conversation' && ((this._searches && this._searches.size) || (this._analyses && [...this._analyses.values()].some((A) => !A.cancelled || A.fond))
       || this._outilsEnCours > 0 || !!this._apresOutil);
+    // (journal du 05/11/26, 11h03:19-11h04:20 : « Je cherche : petit son… » écrit 20 fois : le compteur repartait de zéro
+    // chaque fois que le bruit de la route passait pour de la voix ; il n'est remis à zéro que quand il ne cherche plus)
     if (cherche && vb && !this.audio.playing && !this.audio.speaking) {
       if (!this._chercheDepuis) this._chercheDepuis = now;
       if (now - this._chercheDepuis > 1500 && now - (this._ticAt || 0) > 2500) { this._ticAt = now; try { this.audio.tone('reflexion'); } catch (_) {} if (!this._ticN++) this.log('Je cherche : petit son de réflexion (voiture)'); }
-    } else { this._chercheDepuis = 0; this._ticN = 0; }
+    } else if (!cherche) { this._chercheDepuis = 0; this._ticN = 0; }
+    else this._chercheDepuis = 0;
     // Veille → dodo quand la pièce est vide (ou la nuit).
     if (v && v.hasPerson) this.presenceAt = now;
     if (this.state === 'veille' && !this.car) {

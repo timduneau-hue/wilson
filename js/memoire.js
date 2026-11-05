@@ -43,7 +43,7 @@ export const CONSIGNE_PASSE = `Tu es la mémoire de Wilson, le compagnon de la f
 - les codes, mots de passe, numéros de carte ou de compte, adresses e-mail ;
 - ce qu'on a demandé d'oublier.
 
-Regarde d'abord les souvenirs existants (avec leur id) : si l'information y est déjà, ne la répète pas. Si elle le contredit ou le précise, mets l'id de l'ancien dans "oublier" et la nouvelle version dans "ajouter". Si quelqu'un demande d'oublier quelque chose, mets les ids concernés dans "oublier".
+Regarde d'abord les souvenirs existants (avec leur id) : si l'information y est déjà, ne la répète pas. Si elle le contredit ou le précise, mets l'id de l'ancien dans "oublier" et la nouvelle version dans "ajouter". Si quelqu'un demande d'oublier quelque chose, mets les ids concernés dans "oublier". Un souvenir marqué « demandé » (la famille a demandé à Wilson de le retenir) ne va JAMAIS dans "oublier", sauf si la discussion demande clairement de l'oublier ou le corrige.
 Chaque souvenir : une phrase courte, autonome et précise, au présent, avec les prénoms (jamais « il », « je » ou « moi ») : « Camille n'aime pas la coriandre. » Une date dite de façon relative (« samedi prochain », « dans quinze jours ») s'écrit en clair (« le 14/11/26 »), à partir du jour de la discussion. "qui" = le ou les prénoms concernés (ou « famille »). Au plus ${MAX_AJOUTS} ajouts.
 La plupart des discussions ne contiennent rien à retenir : c'est normal, réponds alors avec des listes vides.`;
 
@@ -196,12 +196,22 @@ export class Memoire {
     if (dit.length < 15 && !questions.length) return null;   // « merci », « bonne nuit » : rien à relire
     let texte = echanges.map((e) => [e.user ? `${e.qui || 'Quelqu\'un'} : ${e.user}` : '', e.wilson ? `Wilson : ${e.wilson}` : ''].filter(Boolean).join('\n')).join('\n');
     if (texte.length > 9000) texte = '…\n' + texte.slice(-9000);
-    const souv = this.items.length ? this.items.slice(-150).map((x) => `[${x.id}] (${x.cat}${x.qui ? ', ' + x.qui : ''}) ${x.texte}`).join('\n') : '(aucun)';
+    const souv = this.items.length ? this.items.slice(-150).map((x) => `[${x.id}] (${x.cat}${x.qui ? ', ' + x.qui : ''}${x.origine === 'demandé' ? ', demandé' : ''}) ${x.texte}`).join('\n') : '(aucun)';
     const qs = questions.length ? `\n\nQuestions que Claude (celui qui prépare les mises à jour de Wilson) a fait poser à Timothée pendant cette discussion :\n${questions.map((q) => `[${q.id}] « ${q.question} »`).join('\n')}\nSi TIMOTHÉE (lui seulement, pas Camille ni quelqu'un d'autre) y a répondu, mets sa réponse dans "reponses" : {id, reponse = ce qu'il a répondu, mis au propre, sans rien inventer}. Ces réponses ne vont pas dans "ajouter". S'il n'a pas répondu ou a dit « plus tard », rien.` : '';
     const msg = `Souvenirs actuels :\n${souv}${qs}\n\nLa discussion (${jour(Date.now())}${ou ? ', ' + ou : ''}) :\n${texte}`;
     const { json, model } = await eco.texteJson({ key, system: CONSIGNE_PASSE, text: msg, schema: SCHEMA_PASSE, signal });
     this.passes++;
-    const oublies = this.oublierIds((json.oublier || []).filter((id) => this.items.some((x) => x.id === id)));
+    // Journal du 05/11/26, 11h03:15 : ce que la famille avait demandé de retenir 2 min plus tôt a été « oublié » par la passe
+    // (jugé ponctuel). Un souvenir demandé n'est oublié que si quelqu'un a demandé de l'oublier ou l'a corrigé dans la discussion.
+    const demandeOubli = /oubli|efface|supprim|retire|enl[eè]ve|c'est faux|plus vrai|corrig/i.test(dit);
+    const proteges = [];
+    const idsOubli = (json.oublier || []).filter((id) => {
+      const x = this.items.find((y) => y.id === id); if (!x) return false;
+      if (x.origine === 'demandé' && !demandeOubli) { proteges.push(x.texte); return false; }
+      return true;
+    });
+    if (proteges.length) this.log(`Mémoire : gardé (demandé par la famille, personne n'a demandé de l'oublier) « ${proteges.join(' », « ')} »`);
+    const oublies = this.oublierIds(idsOubli);
     const ajoutes = [];
     for (const a of (json.ajouter || []).slice(0, MAX_AJOUTS)) {
       const it = this._ajouter(a.texte, { cat: a.categorie, qui: a.qui, origine: 'discussion' });
