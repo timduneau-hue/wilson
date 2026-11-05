@@ -27,6 +27,13 @@ async def main():
             await pg.wait_for_function('window.wilson && wilson.state==="veille"', timeout=20000)
             await pg.evaluate('wilson._checkUpdate()'); await pg.wait_for_timeout(1500)
             check('Pas de boucle de rechargement si la version tarde', len(loads) == 2, f'{len(loads)} chargements')
+            # Demande du 04/11/26, 21h26 : une fois par jour, la nuit (4h00-5h00), même si Wilson tourne.
+            await pg.evaluate("wilson._fenetreMaj = () => false; sessionStorage.clear(); wilson._reloadWhenIdle('9.9.9', { nuit: true })"); await pg.wait_for_timeout(2500)
+            check('Nouvelle version installée en journée : il attend la nuit', len(loads) == 2, f'{len(loads)} chargements')
+            await pg.evaluate("wilson._fenetreMaj = () => true; wilson._reloadWhenIdle('9.9.9', { nuit: true })"); await pg.wait_for_timeout(2500)
+            check('… la nuit (entre 4h00 et 5h00) : rechargement', len(loads) == 3, f'{len(loads)} chargements')
+            await pg.wait_for_function('window.wilson && wilson.state==="veille"', timeout=20000)
+            check('Fenêtre de mise à jour : 4h00-5h00', await pg.evaluate("wilson._fenetreMaj(new Date(2026, 10, 5, 4, 30)) && !wilson._fenetreMaj(new Date(2026, 10, 5, 14, 0)) && !wilson._fenetreMaj(new Date(2026, 10, 5, 5, 0))"))
         finally:
             open(VJ,'w').write(ORIG)
         check('Aucune erreur JavaScript', not errs, str(errs)[:200])

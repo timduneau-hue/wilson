@@ -29,8 +29,14 @@ export const FAMILLE_TOOLS = [
   { name: 'garde', behavior: 'BLOCKING',
     description: "Garde de la maison (« on part, surveille la maison », « on est rentrés », « la maison est sous garde ? ») : activer, arreter, etat. Pendant la garde tu écoutes les sons de la maison (fumée, verre brisé, alarme : e-mail à Timothée ; sonnette, chien : raconté au retour) et tu signales un visage inconnu.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['activer', 'arreter', 'etat'] } }, required: ['action'] } },
+  { name: 'agenda', behavior: 'BLOCKING',   // demande de Timothée du 04/11/26, 21h26
+    description: "L'agenda « Famille » (Google Agenda partagé de Timothée et Camille, en jaune : médecin des enfants, soirées, week-ends…). Pas pour les rendez-vous clients de Timothée (ça, c'est le CRM). ajouter : titre court et clair (« Médecin Louis », « Soirée chez Paul », « Week-end chez mamie »), debut = date et heure locales au format 2026-11-12T10:00, ou la date seule 2026-11-14 avec journee = true pour un jour entier ; fin facultative (pour un week-end : le dernier jour) ; lieu facultatif. lire : du = premier jour (2026-11-14), jours = combien de jours (7 par défaut) — « qu'est-ce qu'on a ce week-end ? ». annuler : seulement ce que tu viens d'ajouter, si tu t'es trompé. Calcule les dates à partir d'aujourd'hui ; si le jour ou l'heure n'est pas clair, demande avant d'ajouter.",
+    parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['ajouter', 'lire', 'annuler'] }, titre: S, debut: S, fin: S, journee: { type: 'BOOLEAN' }, lieu: S, du: S, jours: { type: 'NUMBER' } }, required: ['action'] } },
 ];
 export const FAMILLE_TOOL_NAMES = FAMILLE_TOOLS.map((t) => t.name);
+const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+const jourDit = (t) => { const d = new Date(t); return `${JOURS[d.getDay()]} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; };
+const JOUR_SEUL = /^\d{4}-\d{2}-\d{2}$/;
 
 const lire = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch (_) { return d; } };
 const ecrire = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
@@ -258,6 +264,7 @@ export class Famille {
     if (name === 'messages') return this._outilMessages(a);
     if (name === 'visages') return this._outilVisages(a, onPas);
     if (name === 'garde') return this._outilGarde(a);
+    if (name === 'agenda') return this._outilAgenda(a);
     return 'Outil inconnu.';
   }
   _parle() { const P = this.qui && !this.telephone ? this.qui.qui() : null; return this.telephone ? PROPRIO : P && P.sur ? P.nom : ''; }
@@ -336,6 +343,60 @@ export class Famille {
       const resume = this._finGarde('arrêtée à la voix');
       if (resume) { const m = this.msgs.find((x) => x.de === 'Wilson' && !x.remis && x.texte === resume); if (m) { m.remis = { t: Date.now(), a: this._parle() || 'famille' }; m.remisLocal = true; this._sauver(); } }
       return `Garde arrêtée.${resume ? ' ' + resume + ' Dis-le simplement.' : ' Rien de spécial pendant l\'absence.'}`;
+    }
+    return 'Action inconnue.';
+  }
+
+  // ---------- L'agenda « Famille » (Google Agenda partagé, par le script de Timothée) ----------
+  async _outilAgenda({ action, titre = '', debut = '', fin = '', journee = false, lieu = '', du = '', jours = 7 }) {
+    const R = this.app.remote;
+    if (!R || !R.on) return 'L\'agenda Famille passe par le script de Wilson, qui n\'est pas relié sur cet appareil. Dis-le simplement.';
+    const pasPret = (r) => !r ? 'Le script ne répond pas (réseau ?). Dis-le simplement.'
+      : /action inconnue/.test(r.erreur || '') ? 'Le script de Wilson n\'a pas encore la partie agenda (mise à jour à faire). Dis-le simplement.'
+        : /introuvable/.test(r.erreur || '') && action !== 'annuler' ? 'L\'agenda « Famille » est introuvable dans le Google Agenda de Timothée. Dis-le simplement.'
+          : /autoris|permission|Authorization/i.test(r.erreur || '') ? 'Le script n\'a pas encore l\'autorisation d\'utiliser Google Agenda (lancer « essaiAgenda » dans l\'éditeur). Dis-le simplement.'
+            : `Impossible (${r.erreur || 'erreur'}). Dis-le simplement.`;
+    if (action === 'lire') {
+      const r = await R.ask({ action: 'agenda_lire', du: JOUR_SEUL.test(String(du).slice(0, 10)) ? String(du).slice(0, 10) : '', jours: Math.max(1, Math.min(62, Math.round(+jours || 7))) }).catch(() => null);
+      if (!r || !r.ok) return pasPret(r);
+      const l = r.evenements || [];
+      if (!l.length) return `Rien dans l'agenda Famille${du ? ' sur cette période' : ' ces ' + (jours || 7) + ' prochains jours'}.`;
+      return `Agenda Famille : ${l.map((e) => `${jourDit(e.debut)}${e.journee ? (e.fin - e.debut > 86400000 * 1.5 ? ` au ${jourDit(e.fin - 1000)}` : ' (toute la journée)') : ' ' + heure(e.debut)} : ${e.titre}${e.lieu ? ' (' + e.lieu + ')' : ''}`).join(' ; ')}. Dis l'essentiel, simplement.`;
+    }
+    if (action === 'ajouter') {
+      const t = String(titre).trim(); if (!t) return 'Quel titre ? Demande-lui ce qu\'il faut noter.';
+      const qui = this._parle(), d = String(debut).trim(), entier = !!journee || JOUR_SEUL.test(d);
+      const p = { action: 'agenda_ajouter', titre: t, lieu: String(lieu || ''), note: `Ajouté par Wilson${qui ? ' pour ' + qui : ''} le ${quand(Date.now()).replace(/^à /, "aujourd'hui à ")}.` };
+      let quandDit;
+      if (entier) {
+        const j1 = d.slice(0, 10), j2 = String(fin || '').slice(0, 10);
+        if (!JOUR_SEUL.test(j1)) return 'Quel jour ? Demande-lui la date.';
+        Object.assign(p, { journee: true, debut: j1, fin: JOUR_SEUL.test(j2) && j2 > j1 ? j2 : '' });
+        quandDit = p.fin ? `du ${jourDit(new Date(j1 + 'T12:00'))} au ${jourDit(new Date(p.fin + 'T12:00'))}` : `${jourDit(new Date(j1 + 'T12:00'))}, toute la journée`;
+        if (new Date(j1 + 'T23:59') < Date.now()) return `Le ${jourDit(new Date(j1 + 'T12:00'))} est déjà passé : vérifie la date avec lui avant d'ajouter.`;
+      } else {
+        const t1 = new Date(d.length === 16 ? d + ':00' : d);
+        if (!d || isNaN(t1)) return 'Quel jour et à quelle heure ? Demande-lui.';
+        if (+t1 < Date.now() - 3600000) return `Le ${jourDit(t1)} à ${heure(t1)} est déjà passé : vérifie la date avec lui avant d'ajouter.`;
+        const t2 = fin ? new Date(String(fin).length === 16 ? fin + ':00' : fin) : null;
+        Object.assign(p, { debut: +t1, fin: t2 && !isNaN(t2) && t2 > t1 ? +t2 : '' });
+        quandDit = `${jourDit(t1)} à ${heure(t1)}`;
+      }
+      const r = await R.ask(p).catch(() => null);
+      if (!r || !r.ok) return pasPret(r);
+      (this.ajouts = (this.ajouts || []).filter((x) => Date.now() - x.t < 86400000)).push({ id: r.id, titre: t, t: Date.now(), quandDit });
+      this.log(`Agenda Famille : ajouté « ${t} », ${quandDit}`, true);
+      return `Ajouté dans l'agenda Famille : « ${t} », ${quandDit}${lieu ? ', ' + lieu : ''}. Confirme en une phrase en redisant le jour et l'heure (il peut te demander d'annuler si c'est faux).`;
+    }
+    if (action === 'annuler') {
+      const l = (this.ajouts || []).filter((x) => Date.now() - x.t < 86400000);
+      const x = (titre ? l.filter((y) => norm(y.titre).includes(norm(titre)) || norm(titre).includes(norm(y.titre))) : l).pop();
+      if (!x) return 'Je ne peux annuler que ce que je viens d\'ajouter (dans les dernières 24 heures) ; le reste se modifie dans Google Agenda. Dis-le simplement.';
+      const r = await R.ask({ action: 'agenda_annuler', id: x.id }).catch(() => null);
+      if (!r || !r.ok) return pasPret(r);
+      this.ajouts = this.ajouts.filter((y) => y !== x);
+      this.log(`Agenda Famille : annulé « ${x.titre} »`, true);
+      return `Annulé : « ${x.titre} » (${x.quandDit}) n'est plus dans l'agenda Famille.`;
     }
     return 'Action inconnue.';
   }
