@@ -989,6 +989,24 @@ reçoit le son par `window.__wilsonMicro` (`js/audio.js`, `_openNatif`, `_onNati
 garde-fou natif du canal « appel » ; journal plus précis (micro utilisé, type de chaque son joué). Onglet État : « micro : celui
 de l'appli (téléphone) ».
 
+**Soirée du 05/11/26, 23h02 (1.33.0) — Claude pour les questions difficiles, et le journal du soir** — Section 10 (relais
+Claude du PC). Journal de la soirée relu (tablette 19h37-22h54, téléphone en voiture 19h21-19h24) ; corrections :
+- **Analyste sur des modèles fermés** (19h22:54) : « gemini-2.5-flash is no longer available to new users » à chaque question
+  → un modèle fermé (404, « no longer available ») n'est plus essayé pendant 30 jours (`analyste.js`, `eco.js`).
+- **« Tu veux autre chose pendant ce temps ? »** (remarque de 19h23:54) : la recherche en arrière-plan dit « Je cherche. » et
+  rien d'autre, aucune question (K5).
+- **« La liste des tâches était un cafouillis complet »** (19h22:56-19h23:16) : la relance « réponse attendue pas encore dite »
+  est partie pendant un trou de sa voix alors qu'il la disait déjà ; elle a coupé la réponse, reprise au milieu. Plus de relance
+  tant qu'il parle ou a parlé depuis l'envoi (`_voixDepuis`).
+- **Muet après l'agenda** (21h45:29-21h45:57, « tu as bien mis le rendez-vous de demain ? ») : la transcription de sa question est
+  arrivée 1 s après le résultat de l'outil et a désarmé le chien de garde (« il a reparlé ») ; seule une phrase d'un tour suivant
+  le désarme maintenant.
+- **Batterie inventée** (21h51:53 « je ne suis pas en charge », puis « il est branché ») : outil `batterie` (niveau et branchement
+  réels).
+- **Lumières allumées sur « éteins »** (20h18:43-20h18:52 : les trois allumées, puis « allumer » et « éteindre » ensemble) :
+  commande contraire à sa dernière demande refusée ; « ok — … : éteint » après « allumer » devient un échec dit tel quel.
+- **Maison injoignable 21h43-22h54** : le PC de la maison s'était mis en veille ; l'installateur du relais l'empêche (sur secteur).
+
 ## 9. L'application Android (accord de Timothée du 05/11/26, 16h58)
 
 Pourquoi : une page web ne peut ni envoyer une adresse à Android Auto sans ouvrir Maps sur le téléphone, ni continuer

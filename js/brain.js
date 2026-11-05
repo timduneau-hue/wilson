@@ -124,6 +124,8 @@ export const TOOLS = [{
       parameters: { type: 'OBJECT', properties: { sujet: { type: 'STRING' } }, required: ['sujet'] } },
     { name: 'date_et_heure', behavior: 'BLOCKING',
       description: 'Donne la date et l\'heure exactes maintenant.' },
+    { name: 'batterie', behavior: 'BLOCKING',
+      description: "Batterie de l'appareil où tu es (tablette ou téléphone) : niveau, et s'il est branché (en charge) ou non. Pour toute question sur ta batterie, ta charge, ton câble ou ta prise : tu ne le sais pas sans cet outil." },
     { name: 'terminer_conversation', behavior: 'NON_BLOCKING',
       description: 'À appeler SEULEMENT quand on te dit clairement au revoir, bonne nuit, ou « merci, c\'est tout » : tu retournes en veille après ta réponse. Jamais sur un reproche ni une remarque (« tu ne réponds plus », « ne me parle pas comme ça ») : là, tu restes et tu écoutes.' },
     { name: 'regarder', behavior: 'BLOCKING',

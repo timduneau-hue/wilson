@@ -1,8 +1,8 @@
 // Wilson — service worker : l'appli démarre même sans réseau et les modèles de vision ne sont téléchargés qu'une fois.
-const VERSION = 'wilson-1.32.0';
+const VERSION = 'wilson-1.33.0';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'version.json', 'css/wilson.css',
-  'js/app.js', 'js/vision-worker.js', 'js/voice.js', 'js/eco.js', 'js/face.js', 'js/audio.js', 'js/brain.js', 'js/vision.js', 'js/memory.js', 'js/sensors.js', 'js/settings.js', 'js/remote.js', 'js/sync.js', 'js/crm.js', 'js/analyste.js', 'js/maison.js', 'js/outils.js', 'js/oreille.js', 'js/qui.js', 'js/qui-worker.js', 'js/famille.js', 'js/garde.js', 'js/garde-worker.js', 'js/reactions.js', 'js/memoire.js', 'js/questions.js', 'js/voiture.js', 'vendor/qrcode/qrcode.js',
+  'js/app.js', 'js/vision-worker.js', 'js/voice.js', 'js/eco.js', 'js/face.js', 'js/audio.js', 'js/brain.js', 'js/vision.js', 'js/memory.js', 'js/sensors.js', 'js/settings.js', 'js/remote.js', 'js/sync.js', 'js/crm.js', 'js/analyste.js', 'js/maison.js', 'js/outils.js', 'js/oreille.js', 'js/qui.js', 'js/qui-worker.js', 'js/famille.js', 'js/garde.js', 'js/garde-worker.js', 'js/reactions.js', 'js/memoire.js', 'js/questions.js', 'js/voiture.js', 'js/claude.js', 'vendor/qrcode/qrcode.js',
   'js/faces/util.js', 'js/faces/lumiere.js', 'js/faces/bouille.js', 'js/faces/led.js', 'js/faces/miel.js', 'visages.html',
   'js/worklets/capture.js', 'icons/icon-192.png', 'icons/icon-512.png',
 ];

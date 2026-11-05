@@ -165,6 +165,17 @@ export class Maison {
     }
   }
 
+  // Journal du 05/11/26, 20h18:52 : « allumer → Lumière jaune salon : ok — Lumière jaune salon : éteint » (Gemini avait
+  // envoyé « allumer » et « éteindre » en même temps). Une lumière ou une prise qui n'est pas dans l'état demandé après la
+  // commande : échec, dit tel quel (jamais « c'est allumé » quand c'est éteint).
+  _verifie(e, allume, info) {
+    if (e.domaine !== 'light' && e.domaine !== 'switch') return { ok: true, info };
+    const n = (this.inv || []).find((x) => x.id === e.id);
+    if (!n || !n.state || n.state === 'unavailable' || n.state === 'unknown') return { ok: true, info };
+    if (allume ? n.state === 'off' : n.state === 'on') return { ok: false, info: `${info} (commande envoyée, mais ${e.nom} est resté${allume ? ' éteint' : ' allumé'})` };
+    return { ok: true, info };
+  }
+
   async _agir(e, action, valeur, inv, signal) {
     const id = e.id, d = e.domaine, num = (v, def) => { const x = parseFloat(String(v).replace(',', '.')); return Number.isFinite(x) ? x : def; };
     const svc = async (domain, service, data = {}) => {
@@ -191,11 +202,11 @@ export class Maison {
           if (d === 'script' || d === 'scene') { await svc(d, 'turn_on'); return { ok: true, info: `${e.nom} lancé.` }; }
           if ((d === 'media_player' || d === 'remote') && !(await this._reveiller(e, inv, svc))) return { ok: false, info: this.TELE_COUPEE };
           if (d === 'cover') { await svc('cover', 'open_cover'); return { ok: true, info: await apres() }; }
-          await svc(onoff || 'homeassistant', 'turn_on'); return { ok: true, info: await apres(e, (x) => x !== 'off' && x !== 'unavailable') };
+          await svc(onoff || 'homeassistant', 'turn_on'); return this._verifie(e, true, await apres(e, (x) => x !== 'off' && x !== 'unavailable'));
         case 'eteindre':
           if (d === 'cover') { await svc('cover', 'close_cover'); return { ok: true, info: await apres() }; }
           if (d === 'script') { await svc('script', 'turn_off'); return { ok: true, info: `${e.nom} arrêté.` }; }
-          await svc(onoff || 'homeassistant', 'turn_off'); return { ok: true, info: await apres(e, (x) => x === 'off' || x === 'standby') };
+          await svc(onoff || 'homeassistant', 'turn_off'); return this._verifie(e, false, await apres(e, (x) => x === 'off' || x === 'standby'));
         case 'basculer': await svc(onoff || 'homeassistant', 'toggle'); return { ok: true, info: await apres() };
         case 'luminosite':
           if (d !== 'light') return { ok: false, info: `${e.nom} n'est pas une lumière.` };
