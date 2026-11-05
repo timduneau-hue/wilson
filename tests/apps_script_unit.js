@@ -36,7 +36,7 @@ const sheets = { 'Journal': fakeSheet('Journal'), 'Délais': fakeSheet('Délais'
 sheets['Journal'].data[0] = ['Date', 'Version', 'Message'];
 sheets['Délais'].data[0] = ['Date', 'Envoi'];
 sheets['État'].data[0] = ['Clé', 'Valeur'];
-let opened = null, locked = 0; const fetched = [], logged = [], props = {}, mails = [], evs = [];
+let opened = null, locked = 0; const cache = {}; let dormi = 0; const fetched = [], logged = [], props = {}, mails = [], evs = [];
 const evt = (o) => ({ ...o, getId: () => o.id, getTitle: () => o.titre, getStartTime: () => o.d1, getEndTime: () => o.d2, isAllDayEvent: () => !!o.entier, getLocation: () => o.lieu || '', deleteEvent: () => { evs.splice(evs.indexOf(o), 1); } });
 const cal = {
   getEvents: (a, b) => evs.filter((e) => e.d1 < b && e.d2 > a).map(evt),
@@ -46,10 +46,13 @@ const cal = {
 };
 let tavily = () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ answer: 'Demain à Angers : éclaircies, 9 à 17 °C.', response_time: 0.8,
   results: [{ title: 'Météo Angers', url: 'https://meteo.example/angers', content: 'Samedi : éclaircies, minimales 9 °C, maximales 17 °C. '.repeat(20) }] }) });
+let fauxTemps = 0;
+class FDate extends Date { constructor(...a) { super(...(a.length ? a : [Date.now() + fauxTemps])); } static now() { return Date.now() + fauxTemps; } }
 const ctx = {
-  console, JSON, Date, Math, String, Object, isFinite,
+  console, JSON, Date: FDate, Math, String, Object, isFinite,
   SpreadsheetApp: { openById: (id) => { opened = id; return { getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => { if (sheets[n]) throw new Error('existe déjà'); return (sheets[n] = fakeSheet(n)); } }; } },
-  LockService: { getScriptLock: () => ({ waitLock: () => { locked++; }, releaseLock: () => { locked--; } }) },
+  LockService: { getScriptLock: () => ({ waitLock: () => { locked++; }, tryLock: () => { locked++; return true; }, releaseLock: () => { locked--; } }) },
+  CacheService: { getScriptCache: () => ({ get: (k) => (k in cache ? cache[k] : null), put: (k, v, ttl) => { if (String(v).length > 100000) throw new Error('trop grand pour le cache'); cache[k] = String(v); } }) },
   ContentService: { createTextOutput: (t) => ({ text: t, getContent() { return t; }, setMimeType(m) { this.mime = m; return this; } }), MimeType: { JSON: 'json' } },
   UrlFetchApp: { fetch: (url, o) => { fetched.push({ url, o }); return tavily(url, o); } },
   Logger: { log: (x) => logged.push(x) },
@@ -58,7 +61,7 @@ const ctx = {
   Session: { getEffectiveUser: () => ({ getEmail: () => 'moi@exemple.fr' }) },
   MailApp: { sendEmail: (o) => mails.push(o) },
   CalendarApp: { getCalendarsByName: (n) => (n === 'Famille' ? [cal] : []) },
-  Utilities: { formatDate: (d, tz, f) => (f === 'yyyy-MM-dd' ? '2026-11-04' : f === "HH'h'mm" ? '14h12' : '23/10/26 15h30:00'), base64Decode: (b) => Buffer.from(b, 'base64'), newBlob: (bytes, type, name) => ({ bytes, type, name }) },
+  Utilities: { sleep: (ms) => { dormi += ms; fauxTemps += ms; }, formatDate: (d, tz, f) => (f === 'yyyy-MM-dd' ? '2026-11-04' : f === "HH'h'mm" ? '14h12' : '23/10/26 15h30:00'), base64Decode: (b) => Buffer.from(b, 'base64'), newBlob: (bytes, type, name) => ({ bytes, type, name }) },
   ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' }), getOAuthToken: () => 'JETON-DE-TIMOTHEE' },
   DriveApp: { getRootFolder: () => ({ getName: () => 'Mon Drive' }) },
   HtmlService: { createHtmlOutput: (h) => ({ html: h, setTitle(t) { this.title = t; return this; } }) },
@@ -66,7 +69,8 @@ const ctx = {
 vm.createContext(ctx);
 const code = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'journal.gs'), 'utf8').replace('COLLE_ICI_L_ID_DE_LA_FEUILLE', 'ID_TEST');
 vm.runInContext(code, ctx);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'famille.gs'), 'utf8'), ctx);   // messages, garde, alertes (PLAN 7 sexies)
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'famille.gs'), 'utf8'), ctx);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'claude.gs'), 'utf8'), ctx);   // questions difficiles pour Claude (PLAN 10)   // messages, garde, alertes (PLAN 7 sexies)
 
 const post = (o) => ctx.doPost({ postData: { contents: JSON.stringify(o) } });
 const t0 = Date.parse('2026-10-23T13:00:00Z');
@@ -239,5 +243,58 @@ r = post({ action: 'mem_lire' });
 check('doPost : mem_… passe par famille.gs', JSON.parse(r.getContent()).ok === true && JSON.parse(r.getContent()).souvenirs.length >= 3);
 r = post({ action: 'q_lire' });
 check('doPost : q_… passe par famille.gs', JSON.parse(r.getContent()).ok === true && Array.isArray(JSON.parse(r.getContent()).questions));
+
+{
+// ---------- Questions difficiles pour Claude sur le PC (PLAN 10, claude.gs) ----------
+const C = (o) => JSON.parse(post(o).getContent());
+const SECRET = 'secret-du-pc-tire-au-sort-0123456789';
+let cq = C({ action: 'claude_etat' });
+check('Claude : PC jamais vu → absent', cq.ok && cq.pc.vivant === false && cq.pc.vu === null);
+cq = C({ action: 'claude_demander', id: 'q1', question: 'Compare la paumelle X à la Y', appareil: 'téléphone' });
+check('Claude : PC absent → question refusée tout de suite (Wilson fait sans lui)', cq.ok && cq.accepte === false && cq.pc.vivant === false && !cache['claude_q_q1']);
+cq = C({ action: 'claude_prendre', secret: 'court', attente: 0 });
+check('Claude : secret trop court refusé', cq.ok === false && /secret/.test(cq.erreur));
+cq = C({ action: 'claude_prendre', secret: SECRET, attente: 0, version: 'relais 1' });
+check('Claude : 1er relais → secret retenu, PC vu, rien à prendre', cq.ok && cq.question === null && props.claude_secret === SECRET && C({ action: 'claude_etat' }).pc.vivant === true);
+cq = C({ action: 'claude_prendre', secret: SECRET + 'x', attente: 0 });
+check('Claude : un autre secret est refusé', cq.ok === false && /refusé/.test(cq.erreur));
+cq = C({ action: 'claude_demander', id: 'q1', question: 'Compare la paumelle X à la Y', type: 'internet', voiture: true, appareil: 'téléphone' });
+check('Claude : PC là → question acceptée, en attente', cq.ok && cq.accepte === true && cq.etat === 'attente' && JSON.parse(cache.claude_file).includes('q1'));
+cq = C({ action: 'claude_demander', id: 'q1', question: 'Compare la paumelle X à la Y' });
+check('Claude : même question renvoyée (coupure) → pas de doublon', cq.ok && cq.accepte && JSON.parse(cache.claude_file).filter((x) => x === 'q1').length === 1);
+cq = C({ action: 'claude_resultat', id: 'q1', attente: 0 });
+check('Claude : résultat → encore en attente', cq.ok && cq.etat === 'attente' && cq.dire === '');
+cq = C({ action: 'claude_prendre', secret: SECRET, attente: 25 });
+check('Claude : le relais prend la question (texte, type, voiture)', cq.ok && cq.question && cq.question.id === 'q1' && cq.question.type === 'internet' && cq.question.voiture === true && JSON.parse(cache.claude_file).length === 0);
+cq = C({ action: 'claude_resultat', id: 'q1', attente: 0 });
+check('Claude : résultat → en cours', cq.ok && cq.etat === 'en_cours' && cq.pris !== null);
+dormi = 0; cq = C({ action: 'claude_prendre', secret: SECRET, attente: 25 });
+check('Claude : file vide → le relais attend 25 s puis rappelle', cq.ok && cq.question === null && dormi >= 24000 && dormi <= 26000, dormi + ' ms');
+cq = C({ action: 'claude_rendre', secret: SECRET, id: 'q1', ok: true, dire: 'La X porte 80 kg, la Y 120 kg, d\'après les fiches Setin et Boschat.', detail: 'Détail…', duree: 42, etapes: 9 });
+check('Claude : réponse déposée', cq.ok && cq.etat === 'faite');
+cq = C({ action: 'claude_resultat', id: 'q1', attente: 15 });
+check('Claude : Wilson reçoit la réponse', cq.ok && cq.etat === 'faite' && /120 kg/.test(cq.dire) && cq.duree === 42 && cq.detail === 'Détail…');
+cq = C({ action: 'claude_rendre', secret: 'autre-secret-tout-aussi-long-0123456789', id: 'q1', dire: 'piratage' });
+check('Claude : réponse sans le bon secret refusée', cq.ok === false && /piratage/.test(cache.claude_q_q1) === false);
+C({ action: 'claude_demander', id: 'q2', question: 'Question annulée', type: 'crm', contexte: 'Dernier client : AD2M', regles: 'Règles du CRM' });
+C({ action: 'claude_demander', id: 'q3', question: 'Question suivante', type: 'crm' });
+cq = C({ action: 'claude_annuler', id: 'q2' });
+check('Claude : annulation d\'une question pas encore prise', cq.ok && cq.etat === 'annulee');
+cq = C({ action: 'claude_prendre', secret: SECRET, attente: 5 });
+check('Claude : la question annulée est sautée, la suivante est prise', cq.ok && cq.question && cq.question.id === 'q3' && cq.question.type === 'crm');
+dormi = 0; cq = C({ action: 'claude_resultat', id: 'q3', attente: 15, etat: 'en_cours' });
+check('Claude : Wilson attend au plus 15 s par appel', cq.ok && cq.etat === 'en_cours' && dormi >= 14000 && dormi <= 16000, dormi + ' ms');
+C({ action: 'claude_rendre', secret: SECRET, id: 'q3', ok: false, erreur: 'Claude n\'a pas pu se connecter' });
+cq = C({ action: 'claude_resultat', id: 'q3' });
+check('Claude : erreur du relais transmise à Wilson', cq.ok && cq.etat === 'erreur' && /connecter/.test(cq.erreur));
+cq = C({ action: 'claude_prendre', secret: SECRET, max: 0, occupe: 2 });
+check('Claude : relais occupé → signe de vie seulement', cq.ok && cq.question === null && C({ action: 'claude_etat' }).pc.occupe === 2);
+fauxTemps += 61000;
+check('Claude : PC pas vu depuis plus d\'une minute → absent', C({ action: 'claude_etat' }).pc.vivant === false && C({ action: 'claude_etat' }).pc.vu >= 61);
+check('Claude : question inconnue', C({ action: 'claude_resultat', id: 'zzz' }).ok === false && C({ action: 'claude_demander', id: '', question: 'x' }).ok === false);
+check('Claude : verrou toujours rendu', locked === 0);
+vm.runInContext('oublierPC()', ctx);
+check('Claude : oublierPC efface le secret', !('claude_secret' in props));
+}
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);
