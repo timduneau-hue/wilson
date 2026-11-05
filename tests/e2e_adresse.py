@@ -153,7 +153,9 @@ async def main():
         await page.evaluate("wilson.oreille.onDetect({ score: 1.2, limite: 2 })"); await page.wait_for_timeout(1200)
         check('E3 corrigé : l\'oreille propose, Gemini dit « non » (télé, famille) → aucun réveil', await page.evaluate("wilson.state === 'veille'") and has('» → non'))
         await page.evaluate("wilson.oreille.onDetect({ score: 1.2, limite: 2 })"); await page.wait_for_timeout(300)
-        check('… et pendant 3 s après un « non », les faux candidats suivants ne coûtent rien', len([l for l in logs if '» → non' in l]) == 1)
+        # 05/11/26 (journal du matin en voiture) : l'attente de 3 s après un « non » jetait le vrai « Wilson » dit juste après.
+        # Le candidat suivant est vérifié ; le garde-fou reste la réserve de vérifications (10, une de plus toutes les 40 s).
+        check('… après un « non », le candidat suivant est vérifié quand même (05/11/26), la réserve reste le garde-fou', len([l for l in logs if '» → non' in l]) == 2 and await page.evaluate("wilson._nomJetons.n < 9.5"))
         await page.evaluate("window.__nom = true; wilson._nomCalme = 0; wilson.oreille.onDetect({ score: 1.2, limite: 2 })")
         await page.wait_for_function("wilson.state === 'conversation' && wilson.brain.open", timeout=8000); c = conns[-1]
         check('« Wilson » confirmé par Gemini : discussion ouverte sans le regarder, sans verrou de transcription', await page.evaluate("wilson._byName && !wilson._gate && wilson._addressed()") and has('→ oui, « Wilson »'))
