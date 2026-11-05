@@ -15,6 +15,8 @@ export const ANALYSE_MAX_MS = 10 * 60000;
 // Une requête à Gemini sans réponse au bout de 60 s : abandonnée, modèle suivant (journal du 05/11/26, 09h40 : une seule
 // étape, aucune recherche, et la réponse est arrivée au bout de 187 s ; rien au journal sur ce qui traînait).
 export const REQUETE_MAX_MS = 60000;   // les briefings (modèle qui réfléchit, gros résultats) prennent jusqu'à ~30 s
+export const RELAIS_MS = 20000;        // sans réponse au bout de 20 s : le modèle suivant est interrogé en même temps (05/11/26)
+const LENT_MS = 15 * 60000;            // modèle lent ou surchargé : essayé en dernier pendant 15 min
 const MAX_ETAPES = 8;
 const TABLES = ['commandes', 'devis', 'devis_a_relancer', 'clients', 'taches', 'comptes_rendus', 'visites', 'veille'];
 const OPS = ['=', '!=', '>', '>=', '<', '<=', 'contient', 'ne_contient_pas', 'commence_par', 'entre', 'parmi', 'vide', 'non_vide', 'ressemble'];
@@ -74,7 +76,7 @@ const netErr = (e) => !navigator.onLine || (e && (e.name === 'TypeError' || e.ne
 export class Analyste {
   // ask(payload, signal) : question au CRM (par le script de Timothée) ; log(m) : journal.
   constructor({ ask, log = () => {} } = {}) {
-    this.ask = ask; this.log = log; this.modelUsed = null; this._schema = null; this.requeteMaxMs = REQUETE_MAX_MS;
+    this.ask = ask; this.log = log; this.modelUsed = null; this._schema = null; this.requeteMaxMs = REQUETE_MAX_MS; this.relaisMs = RELAIS_MS; this.lent = {};
     try { this.refused = JSON.parse(localStorage.getItem('wilson.analyste.refus') || '{}') || {}; } catch (_) { this.refused = {}; }
   }
 
@@ -93,53 +95,90 @@ export class Analyste {
     return r.texte;
   }
 
-  // Une requête à Gemini (JSON imposé), modèle suivant si quota ou modèle indisponible. Réseau coupé : on attend.
-  async _gemini({ key, system, contents, signal, until }) {
+  // Une requête à Gemini (JSON imposé). Journal du 05/11/26, 11h03-11h04 : gemini-3.8-flash muet 60 s avant de passer au
+  // suivant (qui a répondu en 5 s), puis 11h05:58-11h06:00 deux modèles « high demand ». Désormais : sans réponse au bout de
+  // 20 s, le modèle suivant est interrogé en même temps (le premier qui répond gagne, l'autre est arrêté) ; un modèle lent ou
+  // surchargé passe en dernier pendant 15 min ; quota épuisé : en dernier pendant 1 h. Réseau coupé : on attend.
+  _gemini({ key, system, contents, signal, until }) {
     const now = Date.now();
     const pref = this.modelUsed ? [this.modelUsed, ...ANALYSTE_MODELS.filter((m) => m !== this.modelUsed)] : ANALYSTE_MODELS;
-    const models = [...pref.filter((m) => !(this.refused[m] > now)), ...pref.filter((m) => this.refused[m] > now)];
-    let last = null;
-    for (const model of models) {
-      for (let schema = true; ; schema = false) {
-        const body = { systemInstruction: { parts: [{ text: system }] }, contents,
-          generationConfig: { maxOutputTokens: 8192, responseMimeType: 'application/json', ...(schema ? { responseSchema: ANALYSTE_SCHEMA } : {}) } };
-        let r, j = null, trop = false;
-        const t1 = Date.now();
-        for (;;) {                                          // réseau coupé : on attend qu'il revienne (C8), jusqu'au délai
-          // délai maximal par requête, relié à l'arrêt de l'appelant
-          const c = new AbortController(), stop = () => c.abort(), minut = setTimeout(() => { trop = true; c.abort(); }, this.requeteMaxMs);
-          if (signal) { if (signal.aborted) c.abort(); else signal.addEventListener('abort', stop, { once: true }); }
-          try { r = await fetch(API + model + ':generateContent', { method: 'POST', signal: c.signal, headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); try { j = await r.json(); } catch (_) {} break; }
-          catch (e) {
-            if (trop && !(signal && signal.aborted)) break;                   // trop long : modèle suivant (plus bas)
-            if (e.name === 'AbortError' || !netErr(e)) throw e;
-            if (Date.now() > until) throw e;
-            this.log('Analyste : pas de réseau, j\'attends');
-            await sleep(5000, signal);
-          } finally { clearTimeout(minut); if (signal) signal.removeEventListener('abort', stop); }
-        }
-        if (trop) { last = new Error(`${model} sans réponse en ${Math.round(this.requeteMaxMs / 1000)} s`); this.log(`Analyste : ${model} sans réponse en ${Math.round((Date.now() - t1) / 1000)} s : modèle suivant`); break; }
-        if (r.ok) {
-          const parts = ((((j && j.candidates) || [])[0] || {}).content || {}).parts || [];
-          const txt = parts.filter((p) => p.text && !p.thought).map((p) => p.text).join('');
-          let out = null;
-          try { out = JSON.parse(txt.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) {}
-          if (out && out.action) {
-            if (this.refused[model]) { delete this.refused[model]; this._saveRefus(); }
-            this.modelUsed = model; return { out, model, txt };
-          }
-          last = new Error('réponse illisible de Gemini'); this.log(`Analyste : ${model} → réponse illisible : modèle suivant`); break;
-        }
-        const msg = (j && j.error && j.error.message) || `erreur ${r.status}`;
-        last = new Error(msg); last.status = r.status;
-        this.log(`Analyste : ${model} → ${String(msg).slice(0, 100)} (${Math.round((Date.now() - t1) / 1000)} s)`);
-        if (r.status === 401 || r.status === 403) { last.auth = true; throw last; }
-        if (r.status === 429 || /quota|exhausted|rate.?limit/i.test(msg)) { this.refused[model] = Date.now() + 3600000; this._saveRefus(); break; }
-        if (r.status === 400 && schema && /schema|mime|json|enum|propert/i.test(msg)) continue;      // schéma refusé : même modèle, sans schéma
-        break;                                                                                          // modèle indisponible : suivant
+    const ko = (m) => this.refused[m] > now, lent = (m) => this.lent[m] > now;
+    const models = [...pref.filter((m) => !ko(m) && !lent(m)), ...pref.filter((m) => !ko(m) && lent(m)), ...pref.filter(ko)];
+    return new Promise((resoudre, rejeter) => {
+      let i = 0, enCours = 0, fini = false, last = null, relais = null;
+      const ctls = [];
+      const fin = (f) => { if (fini) return; fini = true; clearTimeout(relais); for (const c of ctls) c.abort(); f(); };
+      const lancer = () => {
+        if (fini) return;
+        if (i >= models.length) { if (!enCours) fin(() => rejeter(last || new Error('aucun modèle disponible'))); return; }
+        const model = models[i++], c = new AbortController(); ctls.push(c);
+        if (signal) { if (signal.aborted) c.abort(); else signal.addEventListener('abort', () => c.abort(), { once: true }); }
+        enCours++;
+        clearTimeout(relais);
+        relais = setTimeout(() => {
+          if (fini || i >= models.length || enCours >= 2) return;
+          this.lent[model] = Date.now() + LENT_MS;                     // lent : en dernier la prochaine fois (sauf s'il répond quand même)
+          this.log(`Analyste : ${model} sans réponse en ${Math.round(this.relaisMs / 1000)} s : ${models[i]} interrogé en même temps`);
+          lancer();
+        }, this.relaisMs);
+        this._modele(model, { key, system, contents, signal: c.signal, until }).then((r) => { enCours--; fin(() => resoudre(r)); }, (e) => {
+          enCours--;
+          if (fini) return;
+          if ((signal && signal.aborted) || e.auth) { fin(() => rejeter(e)); return; }
+          if (e.name !== 'AbortError') last = e;
+          if (enCours < 2) lancer();
+          if (!enCours && i >= models.length) fin(() => rejeter(last || e));
+        });
+      };
+      lancer();
+    });
+  }
+  // Un modèle : avec le schéma JSON, puis sans s'il est refusé ; délai maximal par requête ; réseau coupé : on attend.
+  async _modele(model, { key, system, contents, signal, until }) {
+    for (let schema = true; ; schema = false) {
+      const body = { systemInstruction: { parts: [{ text: system }] }, contents,
+        generationConfig: { maxOutputTokens: 8192, responseMimeType: 'application/json', ...(schema ? { responseSchema: ANALYSTE_SCHEMA } : {}) } };
+      let r, j = null, trop = false;
+      const t1 = Date.now();
+      for (;;) {                                          // réseau coupé : on attend qu'il revienne (C8), jusqu'au délai
+        const c = new AbortController(), stop = () => c.abort(), minut = setTimeout(() => { trop = true; c.abort(); }, this.requeteMaxMs);
+        if (signal) { if (signal.aborted) c.abort(); else signal.addEventListener('abort', stop, { once: true }); }
+        try { r = await fetch(API + model + ':generateContent', { method: 'POST', signal: c.signal, headers: { 'x-goog-api-key': cleanKey(key), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); try { j = await r.json(); } catch (_) {} break; }
+        catch (e) {
+          if (trop && !(signal && signal.aborted)) break;                   // trop long : modèle suivant
+          if (e.name === 'AbortError' || !netErr(e)) throw e;
+          if (Date.now() > until) throw e;
+          this.log('Analyste : pas de réseau, j\'attends');
+          await sleep(5000, signal);
+        } finally { clearTimeout(minut); if (signal) signal.removeEventListener('abort', stop); }
       }
+      if (trop) {
+        this.lent[model] = Date.now() + LENT_MS;
+        this.log(`Analyste : ${model} sans réponse en ${Math.round((Date.now() - t1) / 1000)} s : modèle suivant`);
+        throw new Error(`${model} sans réponse en ${Math.round(this.requeteMaxMs / 1000)} s`);
+      }
+      if (r.ok) {
+        const parts = ((((j && j.candidates) || [])[0] || {}).content || {}).parts || [];
+        const txt = parts.filter((p) => p.text && !p.thought).map((p) => p.text).join('');
+        let out = null;
+        try { out = JSON.parse(txt.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) {}
+        if (out && out.action) {
+          if (this.refused[model]) { delete this.refused[model]; this._saveRefus(); }
+          delete this.lent[model];
+          this.modelUsed = model; return { out, model, txt };
+        }
+        this.log(`Analyste : ${model} → réponse illisible : modèle suivant`);
+        throw new Error('réponse illisible de Gemini');
+      }
+      const msg = (j && j.error && j.error.message) || `erreur ${r.status}`;
+      const err = new Error(msg); err.status = r.status;
+      this.log(`Analyste : ${model} → ${String(msg).slice(0, 100)} (${Math.round((Date.now() - t1) / 1000)} s)`);
+      if (r.status === 401 || r.status === 403) { err.auth = true; throw err; }
+      if (r.status === 429 || /quota|exhausted|rate.?limit/i.test(msg)) { this.refused[model] = Date.now() + 3600000; this._saveRefus(); throw err; }
+      if (r.status === 400 && schema && /schema|mime|json|enum|propert/i.test(msg)) continue;      // schéma refusé : même modèle, sans schéma
+      if (r.status === 503 || /high demand|overloaded|unavailable/i.test(msg)) this.lent[model] = Date.now() + LENT_MS;
+      throw err;                                                                                       // modèle indisponible : suivant
     }
-    throw last || new Error('aucun modèle disponible');
   }
   _saveRefus() { try { localStorage.setItem('wilson.analyste.refus', JSON.stringify(this.refused)); } catch (_) {} }
 

@@ -13,7 +13,7 @@ export const OUTILS = [
       image: { type: 'STRING', description: "ce qu'il faut illustrer par une photo (cherchée sur Wikipédia), ex. « koala », « tour Eiffel » ; vide sinon" } }, required: ['titre'] } },
   { name: 'fermer_ecran', behavior: 'BLOCKING', description: "Ferme ce qui est affiché à l'écran." },   // sans paramètres : un objet vide est refusé par Google (tests/e2e_conn.py)
   { name: 'reafficher', behavior: 'BLOCKING',   // demande de Timothée du 04/11/26 (« réaffiche la photo, j'ai pas eu le temps de voir »)
-    description: "Réaffiche ce qui vient d'être montré (photo, météo, texte), plus longtemps : « réaffiche la photo », « remontre-moi la météo, j'ai pas eu le temps de voir ». duree_sec : combien de temps s'il le dit (60 s sinon).",
+    description: "Réaffiche ce qui vient d'être montré (photo, météo, texte), plus longtemps : « réaffiche la photo », « remontre-moi la météo, j'ai pas eu le temps de voir ». Jamais pour « répète » ou « tu peux répéter ? » : là, redis simplement ta dernière phrase. duree_sec : combien de temps s'il le dit (60 s sinon).",
     parameters: { type: 'OBJECT', properties: { duree_sec: N } } },
   { name: 'minuteur', behavior: 'BLOCKING',
     description: "Minuteurs (compte à rebours visible, sonnerie à la fin) : lancer (duree_sec, nom facultatif : « pâtes »), annuler (nom, ou le dernier), liste.",

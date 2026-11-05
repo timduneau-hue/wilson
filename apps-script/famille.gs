@@ -59,6 +59,10 @@ function msgDeposer_(m) {
   if (!texte || !m.pour) return { ok: false, erreur: 'message incomplet' };
   var id = String(m.id || Date.now()).replace(/[^\w-]/g, '').slice(0, 40);
   var o = { id: id, pour: String(m.pour).slice(0, 30), de: String(m.de || '').slice(0, 30), texte: texte.slice(0, 600), t: +m.t || Date.now(), par: String(m.par || '').slice(0, 20), remis: null };
+  // Rappel « quand tu nous verras » (05/11/26) : pas avant une heure, à la maison seulement, aussi pour celui qui l'a laissé.
+  if (+m.apres > 0) o.apres = +m.apres;
+  if (m.maison) o.maison = true;
+  if (m.soi) { o.soi = true; o.auteur = String(m.auteur || '').slice(0, 30); }
   var lock = LockService.getScriptLock(); lock.waitLock(10000);
   try {
     var p = PropertiesService.getScriptProperties();

@@ -16,13 +16,24 @@ const VIDE_MS = 2 * 60000;           // garde demandée : la pièce doit être r
 const ALERTE_ECART_MS = 10 * 60000;  // G3 : une alerte du même genre toutes les 10 min au plus
 const REMISE_ECART_MS = 2 * 60000;   // M3 : une tentative de remise toutes les 2 min au plus
 const PROPRIO = 'Timothée';          // le téléphone est celui de Timothée
-const TOUS = /^(tous|tout le monde|toute la famille|la famille|famille|everyone)$/;
+const TOUS = /^(tous|tout le monde|toute la famille|la famille|famille|everyone|nous|nous deux|nous tous|vous|vous deux|les deux|la maison)$/;
+// Rappel « quand tu nous verras » (journal du 05/11/26, 11h01 : « dès que Wilson à la maison, sur la tablette, nous verra ce
+// soir… ») : un message que la personne se laisse à elle-même (et à la famille), dit à la maison seulement, pas avant une heure.
+// Le script déjà déployé ne garde que id, pour, de, texte, t, par : ces trois réglages voyagent aussi dans l'id
+// (« r_<heure en base 36>_<m : maison, s : pour soi aussi>_… »), et un rappel pour soi part avec « de » vide pour qu'une
+// tablette pas encore à jour (1.28.0, jusqu'à la mise à jour de la nuit) le remette aussi à celui qui l'a laissé.
+export function metaMessage(m) {
+  const r = /^r_([0-9a-z]*)_([a-z]*)_/.exec(String((m && m.id) || '')) || [];
+  const apres = +(m && m.apres) || (r[1] ? parseInt(r[1], 36) : 0) || 0;
+  return { apres, maison: !!((m && m.maison) || /m/.test(r[2] || '')), soi: !!((m && m.soi) || /s/.test(r[2] || '')) };
+}
 
 const S = { type: 'STRING' };
 export const FAMILLE_TOOLS = [
   { name: 'messages', behavior: 'BLOCKING',
-    description: "Messages de la famille (« dis à Marie que je rentre vers 20h », « laisse un mot à Louis », « j'ai des messages ? », « est-ce que Marie a eu mon message ? ») : deposer (pour = prénom du destinataire, ou « tous » ; de = qui le laisse ; texte = le message tel qu'il l'a dit, mis au propre, sans rien inventer), lire (les messages de la personne qui te parle), statut (pour = le destinataire), annuler (pour). Wilson le remet lui-même quand le destinataire le regarde.",
-    parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['deposer', 'lire', 'statut', 'annuler'] }, pour: S, de: S, texte: S }, required: ['action'] } },
+    description: "Messages de la famille (« dis à Marie que je rentre vers 20h », « laisse un mot à Louis », « j'ai des messages ? », « est-ce que Marie a eu mon message ? ») : deposer (pour = prénom du destinataire, ou « tous » ; de = qui le laisse ; texte = le message tel qu'il l'a dit, mis au propre, avec son sujet précis, sans rien inventer), lire (les messages de la personne qui te parle), statut (pour = le destinataire), annuler (pour). Wilson le remet lui-même quand le destinataire le regarde. Aussi pour un rappel « quand tu nous verras » (« rappelle-nous ce soir à la maison de… », « dis-le-moi quand je rentrerai ») : deposer avec aussi_pour_moi = true (la personne qui parle le recevra aussi), a_la_maison = true (dit seulement par la tablette du salon) et apres = l'heure à partir de laquelle le dire (format 2026-11-05T18:00 ; « ce soir » = 18:00 aujourd'hui).",
+    parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['deposer', 'lire', 'statut', 'annuler'] }, pour: S, de: S, texte: S,
+      aussi_pour_moi: { type: 'BOOLEAN' }, a_la_maison: { type: 'BOOLEAN' }, apres: S }, required: ['action'] } },
   { name: 'visages', behavior: 'BLOCKING',
     description: "Les visages que tu reconnais : apprendre (« apprends mon visage, je suis Louis » : prenom ; la personne doit être seule devant toi et te regarder ; avant d'appeler, dis « Regarde-moi bien… »), oublier (prenom), liste, qui (qui te regarde en ce moment). Tout reste sur la tablette.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['apprendre', 'oublier', 'liste', 'qui'] }, prenom: S }, required: ['action'] } },
@@ -70,14 +81,22 @@ export class Famille {
     const p = norm(pour);
     if (!p) return null;
     if (TOUS.test(p)) return 'tous';
-    const l = this.noms();
-    return l.find((n) => norm(n) === p) || l.find((n) => p.split(/[\s,]+/).includes(norm(n))) || null;
+    const l = this.noms(), mots = p.split(/[\s,]+/);
+    if (l.filter((n) => mots.includes(norm(n))).length > 1 || /\s(et|avec)\s/.test(p)) return 'tous';   // « Timothée et Camille », « Louis et moi »
+    return l.find((n) => norm(n) === p) || l.find((n) => mots.includes(norm(n))) || null;
   }
   // Messages qui attendent cette personne (et ceux « pour tous »).
+  // Un rappel « à la maison » n'est jamais dit par le téléphone ; aucun n'est dit avant son heure.
   enAttente(nom) {
-    const n = norm(nom);
-    return this.msgs.filter((m) => !m.remis && !m.annule && (norm(m.pour) === n || m.pour === 'tous') && norm(m.de) !== n);
+    const n = norm(nom), now = Date.now();
+    return this.msgs.filter((m) => {
+      if (m.remis || m.annule || !(norm(m.pour) === n || m.pour === 'tous')) return false;
+      const M = metaMessage(m);
+      return (norm(m.de) !== n || M.soi) && !(M.apres && now < M.apres) && !(M.maison && this.telephone);
+    });
   }
+  // « de Camille », ou, pour un rappel laissé pour soi : « rappel laissé par Timothée ».
+  _deQui(m) { return metaMessage(m).soi ? `rappel laissé par ${m.de || (m.par === 'téléphone' ? PROPRIO : 'la famille')} ${quand(m.t)}` : `de ${m.de || 'quelqu\'un de la famille'} (${quand(m.t)})`; }
 
   // ---------- partage par le script (M2) ----------
   async _script(payload) {
@@ -144,10 +163,10 @@ export class Famille {
     if (!l.length) return;
     this._remiseAt = now;
     this.remise = { ids: l.map((m) => m.id), nom: P.nom, at: now, conv: null };
-    const texte = l.map((m) => `de ${m.de || 'quelqu\'un de la famille'} (${quand(m.t)}) : « ${m.texte} »`).join(' ; ');
+    const texte = l.map((m) => `${this._deQui(m)} : « ${m.texte} »`).join(' ; ');
     this.log(`Message(s) pour ${P.nom} : il me regarde, je les lui dis (${l.length})`, true);
     A._messageText = `[${P.nom} vient de te regarder (reconnu à son visage). Tu as ${l.length > 1 ? l.length + ' messages' : 'un message'} pour ${P.nom === 'tous' ? 'la famille' : 'lui ou elle'} : ${texte}. Dis-le-lui maintenant, simplement, comme un ami qui transmet (« ${P.nom}, un message de … : … »), sans rien ajouter, puis écoute s'il veut répondre : tu peux déposer sa réponse avec l'outil messages.]`;
-    A._messageSay = `${P.nom}, ${l.length > 1 ? 'des messages' : 'un message'} pour toi. ` + l.map((m) => `De ${m.de || 'la famille'} : ${m.texte}`).join('. ');
+    A._messageSay = `${P.nom}, ${l.length > 1 ? 'des messages' : 'un message'} pour toi. ` + l.map((m) => (metaMessage(m).soi ? `Rappel : ${m.texte}` : `De ${m.de || 'la famille'} : ${m.texte}`)).join('. ');
     A.startConversation('message');
     this.remise.conv = A.convId;
   }
@@ -187,7 +206,7 @@ export class Famille {
     const qui = this.telephone ? PROPRIO : P && P.sur ? P.nom : null;
     const att = qui ? this.enAttente(qui).filter((m) => !(this.remise && this.remise.ids.includes(m.id))) : [];   // déjà en cours de remise : pas deux fois
     if (att.length && mode === 'live') {
-      l.push(`Messages pour ${qui} à lui dire au début de ta première réponse, en une phrase (« Au fait, un message de … : … ») : ${att.map((m) => `de ${m.de || 'la famille'} (${quand(m.t)}) : « ${m.texte} »`).join(' ; ')}.`);
+      l.push(`Messages pour ${qui} à lui dire au début de ta première réponse, en une phrase (« Au fait, un message de … : … ») : ${att.map((m) => `${this._deQui(m)} : « ${m.texte} »`).join(' ; ')}.`);
       this.promis = { ids: att.map((m) => m.id), nom: qui, at: performance.now(), conv: null };
       setTimeout(() => { if (this.promis) this.promis.conv = this.app.convId; }, 0);
     }
@@ -251,8 +270,11 @@ export class Famille {
   }
 
   // ---------- M1 : déposer ----------
-  deposer({ pour, de = '', texte }) {
-    const m = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), pour, de: de || '', texte: String(texte).trim().slice(0, 600), t: Date.now(), par: deviceName(), remis: null, local: true };
+  deposer({ pour, de = '', texte, soi = false, maison = false, apres = 0 }) {
+    const hasard = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const id = soi || maison || apres ? `r_${apres ? Math.round(apres).toString(36) : ''}_${maison ? 'm' : ''}${soi ? 's' : ''}_${hasard}` : hasard;
+    const m = { id, pour, de: soi ? '' : de || '', texte: String(texte).trim().slice(0, 600), t: Date.now(), par: deviceName(), remis: null, local: true,
+      ...(soi ? { soi: true, auteur: de || '' } : {}), ...(maison ? { maison: true } : {}), ...(apres ? { apres: Math.round(apres) } : {}) };
     this.msgs.push(m); this._sauver();
     const { local, ...envoye } = m;
     this._envoi = this._script({ action: 'msg_deposer', msg: envoye }).then((r) => { if (r && r.ok) { m.local = false; this._sauver(); return true; } return false; }).catch(() => false);
@@ -268,17 +290,26 @@ export class Famille {
     return 'Outil inconnu.';
   }
   _parle() { const P = this.qui && !this.telephone ? this.qui.qui() : null; return this.telephone ? PROPRIO : P && P.sur ? P.nom : ''; }
-  async _outilMessages({ action, pour = '', de = '', texte = '' }) {
+  async _outilMessages({ action, pour = '', de = '', texte = '', aussi_pour_moi = false, a_la_maison = false, apres = '' }) {
     if (this.app.remote && this.app.remote.on && performance.now() - this._lireAt > 15000) await this.synchroniser().catch(() => {});
     const qui = this._parle();
     if (action === 'deposer') {
       const t = String(texte).trim(); if (!t) return 'Quel message ? Demande-lui de le redire.';
       const dest = this._destinataire(pour), noms = this.noms();
       if (!dest && noms.length) return `Je ne reconnais pas « ${pour} » : les visages que je connais sont ${noms.join(', ')}. Demande-lui pour qui est le message (un de ces prénoms, ou « tout le monde »).`;
-      const m = this.deposer({ pour: dest || joliNom(pour), de: de || qui, texte: t });
-      this.log(`Message déposé pour ${m.pour}${m.de ? ' de ' + m.de : ''} : ${t.slice(0, 80)}`, true);
+      const soi = !!aussi_pour_moi, maison = !!a_la_maison || soi;
+      let apresT = 0;
+      if (apres) {
+        const d = new Date(String(apres).trim());
+        if (isNaN(d)) return `Heure illisible (« ${apres} ») : redonne apres au format 2026-11-05T18:00.`;
+        apresT = d.getTime(); if (apresT < Date.now() - 60000) apresT = 0;                // heure déjà passée : dès que possible
+      }
+      const m = this.deposer({ pour: dest || joliNom(pour), de: de || qui, texte: t, soi, maison, apres: apresT });
+      this.log(`${soi ? 'Rappel « quand je vous verrai » déposé' : 'Message déposé'} pour ${m.pour}${de || qui ? ' de ' + (de || qui) : ''}${apresT ? ` (pas avant ${heure(apresT)})` : ''}${maison ? ' (à la maison)' : ''} : ${t.slice(0, 80)}`, true);
       const partage = await this._envoi;
-      const ou = this.telephone ? 'la tablette du salon le lui dira quand elle le verra' : `je le dirai à ${m.pour === 'tous' ? 'la première personne de la famille' : m.pour} quand ${m.pour === 'tous' ? 'elle' : 'il ou elle'} me regardera`;
+      const aPartir = apresT ? ` à partir de ${apresT - Date.now() < 20 * 3600000 && new Date(apresT).getDate() === new Date().getDate() ? heure(apresT) : jourDit(apresT) + ' ' + heure(apresT)}` : '';
+      const ou = soi ? `la tablette du salon vous le dira quand elle verra ${m.pour === 'tous' ? 'l\'un de vous' : m.pour}${aPartir}`
+        : this.telephone ? `la tablette du salon le lui dira quand elle le verra${aPartir}` : `je le dirai à ${m.pour === 'tous' ? 'la première personne de la famille' : m.pour} quand ${m.pour === 'tous' ? 'elle' : 'il ou elle'} me regardera${aPartir}`;
       if (!dest) return `Message gardé pour « ${m.pour} », mais je ne reconnais encore aucun visage : pour que je le remette, il faut m'apprendre le visage de ${m.pour} (« Wilson, apprends mon visage »). Dis-le simplement.`;
       if (this.telephone && !partage) return 'Message gardé sur le téléphone seulement : le script de Wilson n\'est pas encore à jour, la tablette ne peut pas le recevoir. Dis-le simplement.';
       return `Message déposé : ${ou}. Confirme en une phrase courte.`;
@@ -288,11 +319,12 @@ export class Famille {
       const l = this.enAttente(pour ? (this._destinataire(pour) || pour) : qui);
       if (!l.length) return `Aucun message en attente pour ${qui}.`;
       this.promis = { ids: l.map((m) => m.id), nom: qui, at: performance.now(), conv: this.app.convId };
-      return `Messages pour ${qui} : ${l.map((m) => `de ${m.de || 'la famille'} (${quand(m.t)}) : « ${m.texte} »`).join(' ; ')}. Dis-les-lui simplement.`;
+      return `Messages pour ${qui} : ${l.map((m) => `${this._deQui(m)} : « ${m.texte} »`).join(' ; ')}. Dis-les-lui simplement.`;
     }
     // Statut, annuler : les messages pour ce destinataire ; sans destinataire, ceux que la personne qui parle a laissés.
     const dest = this._destinataire(pour) || (pour ? joliNom(pour) : '');
-    const miens = this.msgs.filter((m) => (dest ? norm(m.pour) === norm(dest) : !qui || norm(m.de) === norm(qui))).slice(-5);
+    const auteur = (m) => m.de || m.auteur || (metaMessage(m).soi && m.par === 'téléphone' ? PROPRIO : '');
+    const miens = this.msgs.filter((m) => (dest ? norm(m.pour) === norm(dest) : !qui || norm(auteur(m)) === norm(qui))).slice(-5);
     if (action === 'statut') {
       if (!miens.length) return `Aucun message récent${dest ? ' pour ' + dest : ''}.`;
       return miens.map((m) => `pour ${m.pour} (${quand(m.t)}) « ${m.texte.slice(0, 80)} » : ${m.annule ? 'annulé' : m.remis ? `remis ${quand(m.remis.t)}${m.remis.a && m.remis.a !== m.pour ? ' à ' + m.remis.a : ''}` : 'pas encore remis'}`).join(' ; ') + '.';

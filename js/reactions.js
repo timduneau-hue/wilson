@@ -6,6 +6,9 @@ const SOURIRE_MS = 30 * 60000;         // sourire à une personne reconnue : une
 const REGARD_LONG_MS = 6000, CLIN_MS = 2 * 60000;
 const SURSAUT_MS = 30000;
 const INCONNU_MS = 60000;
+// État du 05/11/26 : « depart 192 » contre « arrivee 10 » sur la tablette depuis 4h00 : chaque fois que la détection perdait
+// le visage une fraction de seconde, il prenait l'air ennuyé. « Parti » seulement après 20 s sans personne.
+const PARTI_MS = 20000;
 
 export class Reactions {
   constructor(app) {
@@ -25,15 +28,17 @@ export class Reactions {
   tick(now = performance.now()) {
     const A = this.app, v = A.vision;
     if (!v) return;
-    const libre = this.libre, la = !!v.hasPerson;
+    const libre = this.libre;
+    if (v.hasPerson) this._vuAt = now;
+    const la = !!v.hasPerson || now - (this._vuAt || -1e12) < PARTI_MS;         // présent tant qu'on l'a vu il y a moins de 20 s
     // Quelqu'un arrive (pièce vide depuis 5 min) : il se réveille, curieux ; le matin, le premier visage : il s'étire et sourit.
     if (la && !this._vu) {
       const jour = new Date().toDateString(), h = new Date().getHours();
       if (libre && this._matin !== jour && h >= (A.settings.nightEnd || 7) && h < 12 && !A._isNight()) { this._matin = jour; this._faire('matin', (f) => { f.play('yawn'); setTimeout(() => { f.play('wake'); f.setEmotion('joie', 2200, 0.8); }, 2400); }); }
       else if (libre && now - this._videDepuis > ARRIVEE_VIDE_MS) this._faire('arrivee', (f) => { f.play('wake'); f.setEmotion('curieux', 1800, 0.7); });
     }
-    // Tout le monde part : il les suit encore des yeux, puis s'assoupit doucement (l'appli le met en somnolence).
-    if (!la && this._vu) { this._videDepuis = now; if (libre) this._faire('depart', (f) => f.setEmotion('ennui', 2500, 0.5)); }
+    // Tout le monde est parti (personne depuis 20 s) : il s'assoupit doucement (l'appli le met en somnolence).
+    if (!la && this._vu) { this._videDepuis = this._vuAt || now; if (libre) this._faire('depart', (f) => f.setEmotion('ennui', 2500, 0.5)); }
     this._vu = la;
     // Regardé 6 s sans qu'on lui parle : clin d'œil et sourire tendre (toutes les 2 min au plus).
     if (v.looking && libre) {
