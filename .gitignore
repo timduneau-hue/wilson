@@ -3,3 +3,7 @@ tests/shots/
 tests/fixtures/*.y4m
 __pycache__/
 tests/fixtures/voix/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

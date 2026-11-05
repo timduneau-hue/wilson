@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'fr.duneau.wilson'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'fr.duneau.wilson'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1'
+    }
+
+    // Toujours la même clé (PLAN 9, A8) : une nouvelle version s'installe par-dessus l'ancienne. La clé est créée une seule
+    // fois par GitHub (android/wilson.keystore) et protégée par le secret WILSON_CLE du dépôt : aucun mot de passe ici.
+    def cle = System.getenv('WILSON_CLE')
+    signingConfigs {
+        wilson {
+            storeFile file('../wilson.keystore')
+            storePassword cle
+            keyAlias 'wilson'
+            keyPassword cle
+            storeType 'pkcs12'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig cle ? signingConfigs.wilson : null
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
