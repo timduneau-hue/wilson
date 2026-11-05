@@ -100,12 +100,30 @@ function claudePrendre_(d) {
 }
 
 function claudeRendre_(d) {
-  return claudeChanger_(d.id, function (q) {
+  var fini = null;
+  var r = claudeChanger_(d.id, function (q) {
     if (q.etat === 'annulee') return;
     q.etat = d.ok === false ? 'erreur' : 'faite';
     q.dire = String(d.dire || '').slice(0, 3000); q.detail = String(d.detail || '').slice(0, 12000);
     q.erreur = String(d.erreur || '').slice(0, 500); q.duree = +d.duree || 0; q.etapes = +d.etapes || 0; q.fini = Date.now();
+    fini = q;
   });
+  if (fini) { try { claudeHistorique_(fini); } catch (e) {} }   // l'historique ne doit jamais bloquer la réponse
+  return r;
+}
+
+// Onglet « Claude » de la feuille du journal (demande de Timothée du 05/11/26, 23h58 : « où est-ce que je peux voir les
+// requêtes Claude via Wilson ? ») : une ligne par question, la plus récente en haut, avec la réponse dite et le détail.
+var CLAUDE_COLS = ['Date', 'Appareil', 'Type', 'Question', 'Réponse dite', 'Détail et sources', 'Durée (s)', 'Étapes', 'État'];
+var CLAUDE_HISTO_MAX = 2000;
+function claudeHistorique_(q) {
+  var sh = onglet_('Claude', CLAUDE_COLS);
+  sh.insertRowsBefore(2, 1);
+  sh.getRange(2, 2, 1, 8).setNumberFormat('@');
+  sh.getRange(2, 1, 1, 9).setValues([[new Date(q.t || Date.now()), q.appareil || '', (q.type === 'crm' ? 'CRM' : 'Internet') + (q.voiture ? ' (voiture)' : ''),
+    q.question || '', q.etat === 'erreur' ? 'Erreur : ' + (q.erreur || '') : (q.dire || ''), q.detail || '', String(q.duree || ''), String(q.etapes || ''), q.etat === 'faite' ? 'réponse' : 'erreur']]);
+  sh.getRange(2, 1).setNumberFormat('dd/mm/yy hh"h"mm');
+  var last = sh.getLastRow(); if (last > CLAUDE_HISTO_MAX + 100) sh.deleteRows(CLAUDE_HISTO_MAX + 2, last - CLAUDE_HISTO_MAX - 1);
 }
 
 function claudeChanger_(id, f) {
