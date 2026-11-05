@@ -1,5 +1,8 @@
 // Relais Claude du PC (pc/relais.mjs) et accès CRM en lecture seule (pc/crm-mcp.mjs), sans réseau ni Claude : `node relais_unit.mjs`
 import { PassThrough } from 'node:stream';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { decouper, demande, argumentsClaude, Relais } from '../pc/relais.mjs';
 import { OUTILS, appeler, serveur } from '../pc/crm-mcp.mjs';
 
@@ -21,7 +24,7 @@ check('Demande : date, type, voiture, question, contexte, règles', /vendredi 06
 // ---------- Les droits de Claude ----------
 const a = argumentsClaude({ mcp: 'C:\\W\\mcp.json', consigne: 'C:\\W\\consigne.md' });
 const val = (f) => a[a.indexOf(f) + 1];
-check('Claude : impression seule, JSON, Sonnet', a[0] === '-p' && val('--output-format') === 'json' && val('--model') === 'sonnet');
+check('Claude : impression seule, JSON, Sonnet, effort élevé', a[0] === '-p' && val('--output-format') === 'json' && val('--model') === 'sonnet' && val('--effort') === 'high');
 check('Claude : outils limités à la recherche et à la lecture de pages', val('--tools') === 'WebSearch,WebFetch' && !/Bash|Write|Edit|PowerShell/.test(val('--tools')));
 check('Claude : seul le CRM en lecture seule en plus, le reste refusé', val('--allowedTools') === 'WebSearch,WebFetch,mcp__crm' && val('--permission-mode') === 'dontAsk' && a.includes('--strict-mcp-config') && a.includes('--no-session-persistence'));
 
@@ -43,7 +46,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 1 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 2 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -57,7 +60,7 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 1');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 2');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
 
 // ---------- Le CRM en lecture seule ----------
@@ -90,5 +93,21 @@ check('MCP : liste des outils, marqués lecture seule', reps[1].result.tools.len
 check('MCP : appel d\'un outil', reps.find((x) => x.id === 3).result.content[0].text === 'résultat de crm_bilan');
 check('MCP : méthode inconnue → erreur propre', reps.find((x) => x.id === 4).error.code === -32601);
 
+
+// ---------- Le relais se met à jour tout seul depuis GitHub ----------
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relais-'));
+  for (const f of ['relais.mjs', 'crm-mcp.mjs', 'consigne.md']) fs.writeFileSync(path.join(dir, f), 'ancien ' + f + ' '.repeat(300));
+  let distant = { 'relais.mjs': 'export const x = 1;\n' + '// '.repeat(100), 'crm-mcp.mjs': 'ancien crm-mcp.mjs' + ' '.repeat(300), 'consigne.md': 'Nouvelle consigne' + '.'.repeat(300) };
+  const fx = async (u) => { const f = u.split('/pc/')[1].split('?')[0]; return { ok: true, text: async () => distant[f] }; };
+  const R2 = new Relais({ dir, config: { script: 'S', secret: 'x'.repeat(40) }, fetchImpl: async (u, o) => (u.includes('raw.githubusercontent.com') ? fx(u) : { status: 200, text: async () => 'ok' }), log: () => {} });
+  check('Mise à jour : fichiers changés remplacés (code vérifié avant)', (await R2.miseAJour()) === true && /export const x/.test(fs.readFileSync(path.join(dir, 'relais.mjs'), 'utf8')) && /Nouvelle consigne/.test(fs.readFileSync(path.join(dir, 'consigne.md'), 'utf8')) && /ancien crm/.test(fs.readFileSync(path.join(dir, 'crm-mcp.mjs'), 'utf8')));
+  check('Mise à jour : rien de changé → rien à faire', (await R2.miseAJour()) === false);
+  distant['crm-mcp.mjs'] = 'export const = cassé ;' + ' '.repeat(300);
+  check('Mise à jour : code cassé refusé, rien remplacé', (await R2.miseAJour()) === false && /ancien crm/.test(fs.readFileSync(path.join(dir, 'crm-mcp.mjs'), 'utf8')) && !fs.readdirSync(dir).some((f) => /neuf/.test(f)));
+  R2.enCours = 1; distant['crm-mcp.mjs'] = 'export const y = 2;' + ' '.repeat(300);
+  check('Mise à jour : jamais pendant une question', (await R2.miseAJour()) === false);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);

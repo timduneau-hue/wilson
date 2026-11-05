@@ -37,6 +37,7 @@ async def main():
             elif a == 'claude_resultat':
                 n = st['n_res'][d['id']] = st['n_res'].get(d['id'], 0) + 1
                 if st['mode'] == 'jamais_pris': await asyncio.sleep(min(1.0, d.get('attente', 1))); body = {'ok': True, 'etat': 'attente', 'pc': st['pc']}
+                elif st['mode'] == 'lent' and n <= 4: await asyncio.sleep(1.0); body = {'ok': True, 'etat': 'en_cours', 'pris': 1, 'pc': st['pc']}
                 elif n == 1: body = {'ok': True, 'etat': 'en_cours', 'pris': 1, 'pc': st['pc']}
                 else: await asyncio.sleep(1.2); body = {'ok': True, 'etat': 'faite', 'dire': st['dire'], 'detail': 'Tectus TE 340 3D : 80 kg. Source : simonswerk.fr', 'etapes': 9, 'duree': 41, 'pc': st['pc']}
             elif a == 'claude_annuler': body = {'ok': True, 'etat': 'annulee'}
@@ -118,6 +119,17 @@ async def main():
         dem = st['demandes'][0] if st['demandes'] else {}
         check('crm_question → Claude (type crm, règles du CRM jointes)', dem.get('type') == 'crm' and 'Ne devine jamais' in dem.get('regles', '') and 'exercice' in dem.get('regles', ''), json.dumps(dem, ensure_ascii=False)[:300])
         check('… réponse de Claude rendue, l\'analyste Gemini n\'est pas appelé', 'AD2M, Gallais et FMA' in res and st['gem'] == g0, f"{res} / gem {st['gem'] - g0}")
+
+        # 2 bis. Recherche longue à la maison : le bip-bip aussi (question du 06/11/26, 00h11)
+        st['mode'] = 'lent'; st['dire'] = DIRE; logs.clear()
+        await page.evaluate("wilson._heardAt = 0")
+        t_dep = await page.evaluate("performance.now()")
+        await tool(conn, 'question_difficile', {'question': 'Compare deux crémones'}, 'd0')
+        await asyncio.sleep(2.5)
+        dbg = await page.evaluate("JSON.stringify({ st: wilson.state, an: wilson._analyses && wilson._analyses.size, pl: wilson.audio.playing, vs: wilson.voice.speaking, h: performance.now() - (wilson._heardAt || 0), cd: wilson._chercheDepuis, tic: wilson._ticAt, vb: wilson._voitureBt, bm: wilson.settings.bipMaison })")
+        res = await attendre_resp(conn, 'd0', 20)
+        check('Recherche longue à la maison : petit son de réflexion (bip-bip)', (json.loads(dbg).get('tic') or 0) > t_dep and json.loads(dbg).get('vb') is not True and DIRE[:20] in res, dbg)
+        st['mode'] = 'faite'
 
         # 3. PC absent : l'analyste répond, et Wilson le dit une fois
         st['pc'] = {'vivant': False, 'vu': 400}; st['demandes'].clear(); g0 = st['gem']

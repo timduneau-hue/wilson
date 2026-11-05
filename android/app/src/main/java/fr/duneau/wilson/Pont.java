@@ -16,7 +16,7 @@ import android.webkit.JavascriptInterface;
  * Chaque méthode est appelée par app.js ; aucune ne lève d'erreur vers la page (elle renvoie un texte ou false).
  */
 public class Pont {
-    public static final String VERSION = "3";
+    static String VERSION = "?";                        // numéro de l'appli installée (versionCode), lu au démarrage (A13)
     private final MainActivity a;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -24,6 +24,22 @@ public class Pont {
 
     @JavascriptInterface
     public String version() { return VERSION; }
+
+    /** A13 : une nouvelle version de l'appli est téléchargée et attend d'être installée. */
+    @JavascriptInterface
+    public boolean majPrete() { return a.maj != null && a.maj.prete(); }
+
+    /** A13 : l'installer maintenant (la page ne l'appelle que Wilson en veille, pas en voiture). */
+    @JavascriptInterface
+    public String majInstaller() { try { return a.maj == null ? "pas de mise à jour" : a.maj.installer(); } catch (Exception e) { return "installation impossible : " + e.getMessage(); } }
+
+    /** A13 : où en est la mise à jour de l'appli (onglet État). */
+    @JavascriptInterface
+    public String majEtat() { return a.maj == null ? "?" : a.maj.etat; }
+
+    /** A13 : vérifier tout de suite s'il y a une nouvelle version. */
+    @JavascriptInterface
+    public void majVerifier() { if (a.maj != null) a.maj.verifier(true); }
 
     /** A3 : lance le guidage (Google Maps, sinon Waze) vers cette adresse ; la voiture l'affiche par Android Auto. */
     @JavascriptInterface

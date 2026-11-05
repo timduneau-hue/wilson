@@ -4,14 +4,17 @@
 // le CRM en lecture seule (crm-mcp.mjs) : aucune commande, aucun fichier, aucune écriture.
 // Lancé tout seul à l'ouverture de session (boucle.cmd, fenêtre cachée) ; Node 18 ou plus, sans bibliothèque.
 
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 1';
+export const VERSION = 'relais 2';
+const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
+const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md'];
+const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const MAX_EN_COURS = 2;                 // deux questions en même temps au plus
 const CLAUDE_MAX_MS = 4 * 60000;        // au-delà, Claude est arrêté (Wilson a dit qu'il attendait 4 min au plus)
@@ -52,8 +55,9 @@ export function demande(q, maintenant = new Date()) {
 }
 
 // consigne : le texte de consigne.md (passé tel quel : --system-prompt remplace la consigne de développeur de Claude Code).
-export function argumentsClaude({ mcp, consigne, modele = 'sonnet' }) {
-  return ['-p', '--output-format', 'json', '--model', modele, '--max-turns', String(MAX_TOURS),
+// effort : réflexion de Claude (low, medium, high, xhigh, max) ; « high » par défaut : des réponses fiables (06/11/26).
+export function argumentsClaude({ mcp, consigne, modele = 'sonnet', effort = 'high' }) {
+  return ['-p', '--output-format', 'json', '--model', modele, '--effort', effort, '--max-turns', String(MAX_TOURS),
     '--tools', OUTILS, '--allowedTools', `${OUTILS},mcp__crm`, '--permission-mode', 'dontAsk',
     '--mcp-config', mcp, '--strict-mcp-config', '--system-prompt', consigne, '--no-session-persistence'];
 }
@@ -93,13 +97,45 @@ export class Relais {
     try { return JSON.parse(t); } catch (_) { throw new Error(`réponse illisible du script (${r.status}) : ${t.slice(0, 120)}`); }
   }
 
+  // Mise à jour du relais depuis GitHub : les fichiers ont changé → vérifiés (node --check), remplacés, puis le relais
+  // s'arrête et boucle.cmd le relance 15 s plus tard avec le nouveau code. Jamais pendant une question.
+  async miseAJour() {
+    if (this.enCours) return false;
+    const change = [];
+    for (const f of FICHIERS) {
+      const r = await this.fetch(DEPOT + f + '?t=' + Date.now(), { signal: AbortSignal.timeout(30000), cache: 'no-store' });
+      if (!r.ok) return false;
+      const neuf = await r.text(), chemin = path.join(this.dir, f);
+      const ici = fs.existsSync(chemin) ? fs.readFileSync(chemin, 'utf8') : '';
+      if (neuf.length > 200 && neuf !== ici) change.push([f, neuf]);
+    }
+    if (!change.length) return false;
+    for (const [f, t] of change) {
+      if (!f.endsWith('.mjs')) continue;
+      const tmp = path.join(this.dir, f.replace(/\.mjs$/, '.neuf.mjs'));
+      fs.writeFileSync(tmp, t);
+      const v = spawnSync(process.execPath, ['--check', tmp], { windowsHide: true });
+      try { fs.unlinkSync(tmp); } catch (_) {}
+      if (v.status !== 0) { this.journal(`mise à jour ignorée : ${f} ne passe pas la vérification`); return false; }
+    }
+    if (this.enCours) return false;
+    for (const [f, t] of change) fs.writeFileSync(path.join(this.dir, f), t);
+    this.journal(`mis à jour depuis GitHub (${change.map((x) => x[0]).join(', ')}) : je redémarre`);
+    await this.viderJournal();
+    return true;
+  }
+
   async boucle() {
     let attente = 5000;
-    this.journal(`démarré (${os.hostname()}, Node ${process.versions.node})`);
-    let dernierJournal = Date.now();
+    this.journal(`démarré (${VERSION}, ${os.hostname()}, Node ${process.versions.node}, ${this.cfg.modele || 'sonnet'}, effort ${this.cfg.effort || 'high'})`);
+    let dernierJournal = Date.now(), derniereMaj = Date.now() - MAJ_MS + 60000;   // 1re vérification une minute après le démarrage
     while (!this.stop) {
       try {
         if (Date.now() - dernierJournal > 10000) { dernierJournal = Date.now(); await this.viderJournal(); }
+        if (!this.enCours && Date.now() - derniereMaj > MAJ_MS && this.majAuto !== false) {
+          derniereMaj = Date.now();
+          try { if (await this.miseAJour()) { this.stop = true; process.exit(0); } } catch (e) { this.log('mise à jour impossible : ' + e.message); }
+        }
         if (this.enCours >= MAX_EN_COURS) {                                   // occupé : il dit seulement qu'il est là
           await this.post({ action: 'claude_prendre', secret: this.cfg.secret, max: 0, occupe: this.enCours, version: VERSION }, 30000);
           await pause(20000); continue;
@@ -150,7 +186,7 @@ export class Relais {
   _claude(q) {
     return new Promise((ok, ko) => {
       const travail = path.join(this.dir, 'travail'); fs.mkdirSync(travail, { recursive: true });
-      const args = argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet' });
+      const args = argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: this.cfg.effort || 'high' });
       const env = { ...process.env, ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER || '' };
       delete env.ANTHROPIC_API_KEY;                                         // jamais de facturation à l'usage : l'abonnement seulement
       const p = spawn(this.exe(), args, { cwd: travail, env, windowsHide: true });

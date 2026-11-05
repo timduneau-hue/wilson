@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- A2 : Samsung ferme les applis en arrière-plan -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- A13 : l'appli installe elle-même ses nouvelles versions -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
@@ -62,6 +65,14 @@
                 <data android:scheme="https" android:host="timduneau-hue.github.io" android:pathPrefix="/wilson" />
             </intent-filter>
         </activity>
+
+        <!-- A13 : réponse d'Android à l'installation, et réouverture après une mise à jour -->
+        <receiver android:name=".MajStatut" android:exported="false" />
+        <receiver android:name=".MajFaite" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".EcouteService"
