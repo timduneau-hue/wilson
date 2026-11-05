@@ -44,7 +44,9 @@ export class RemoteLog {
     try { bilan = this.app.bilan(); } catch (e) { bilan = { Bilan: 'erreur : ' + e.message }; }
     const appareil = deviceName();
     // L'appareil est ajouté à la version (colonne B du journal) : on sait d'où vient chaque ligne, sans changer le script.
-    const body = JSON.stringify({ appareil, version: `${this.app.version} · ${appareil}`, _v: this.app.version, lignes, mesures, bilan });
+    // Dans l'appli Android (PLAN 9, A9) : « 1.31.0 · téléphone (appli 1) ».
+    let app = ''; try { if (window.WilsonAndroid) app = ` (appli ${window.WilsonAndroid.version()})`; } catch (_) {}
+    const body = JSON.stringify({ appareil, version: `${this.app.version} · ${appareil}${app}`, _v: this.app.version, lignes, mesures, bilan });
     if (beacon && navigator.sendBeacon) {
       try { if (navigator.sendBeacon(this.url, new Blob([body], { type: 'text/plain;charset=utf-8' }))) { this.sentAt = Date.now(); this.sent++; return true; } } catch (_) {}
     }

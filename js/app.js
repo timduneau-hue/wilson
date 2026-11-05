@@ -29,11 +29,14 @@ import * as VP from './voiture.js';
 const OUTILS_VOITURE = ['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_question', 'itineraire', 'appeler', 'crm_noter', 'crm_confirmer',
   'date_et_heure', 'chercher', 'meteo', 'rappel', 'minuteur', 'remarque', 'mes_remarques', 'idees', 'messages', 'agenda', 'memoriser', 'oublier',
   'terminer_conversation', 'repondre_question'];
+// L'appli Android (PLAN 9) : son pont, s'il est là (null dans Chrome). Jamais d'erreur vers Wilson.
+const appli = () => { try { return window.WilsonAndroid || null; } catch (_) { return null; } };
+const pont = (f, ...a) => { try { const A = appli(); return A && typeof A[f] === 'function' ? A[f](...a) : null; } catch (_) { return null; } };
 const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.30.0';
+const VERSION = '1.31.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -225,6 +228,8 @@ class App {
       'Garde de la maison': this.famille.decrire(),
       'Réactions muettes': this.reactions.decrire(),
       'CRM': this.crm.on ? `relié — ${this.crm.state || 'pas encore interrogé'}${this.crm.cache.size ? `, ${this.crm.cache.size} fiche(s) gardée(s)` : ''}${this.crm.pending ? ', une écriture attend sa confirmation' : ''}${this.crm.queue.length ? `, ${this.crm.queue.length} écriture(s) confirmée(s) en attente du réseau` : ''}` : (this.settings.crm ? 'activé, mais pas de script sur cet appareil' : 'non relié'),
+      'Appli Android': appli() ? `oui (appli ${pont('version')}), retour après le GPS : ${pont('peutRevenir') ? 'oui' : 'NON (autorisation « par-dessus les autres applis » manquante)'}, ${pont('premierPlan') === false ? 'derrière une autre appli' : 'à l\'écran'}` : 'non (navigateur)',
+      'Protocole voiture': this._voitureBt ? `actif — caméra ${this.vision ? 'ALLUMÉE' : 'éteinte'}, verrou de vérité` : 'non (pas en voiture)',
       'Mode voiture': `${!VOITURE && !this.car ? 'supprimé' : this.car ? `oui (${this.car.why})` : 'non'}${VOITURE && this.settings.voitureAuto && deviceName() === 'téléphone' ? `, automatique en roulant${this._geoErr ? ' (GPS : ' + this._geoErr + ')' : this.speed != null ? `, vitesse ${Math.round(this.speed * 3.6)} km/h` : ''}` : ''}`,
       'Oreille (voiture)': this.oreille.ready ? `apprise, ${this.oreille.templates.length} empreintes, limite ${this.oreille.limite.toFixed(1)} (${this.oreille.sens})${this.oreille.last.length ? ' — dernières phrases : ' + this.oreille.last.slice(-8).map((x) => x.s + (x.oui ? '✓' : '')).join(' ') : ''}` : 'pas apprise',
       'Réglages communs': this.remote.on ? (this.sync.state || 'pas encore vérifiés') : 'pas de script : réglages propres à cet appareil',
@@ -536,7 +541,8 @@ class App {
   get _voitureBt() {
     if (deviceName() !== 'téléphone' || !this.audio) return false;
     const now = performance.now();
-    if (this.audio.btIn) { this._btVuAt = now; return true; }
+    if (appli() && now - (this._btAppliAt || 0) > 2000) { this._btAppliAt = now; this._btAppli = !!pont('bluetoothVoiture'); }   // A4, toutes les 2 s
+    if (this.audio.btIn || this._btAppli) { this._btVuAt = now; return true; }
     return !!this._btVuAt && now - this._btVuAt < (this._voitureGraceMs ?? VOITURE_QUITTE_MS);   // 05/11/26 : pas de bascule sur un trou du Bluetooth
   }
   // Protocole voiture actif (PLAN 2 quinquies) : téléphone relié à la voiture, cerveau direct.
@@ -1106,7 +1112,7 @@ ${crm ? `   - Un client, ses contacts, sa dernière visite, ses coordonnées : c
 3. Tu dis le résultat tel quel : seulement les noms, chiffres, dates et villes qui y sont. Ce qui n'y est pas, tu dis que le CRM ne le dit pas, et tu proposes de le chercher avec crm_question. Les chiffres : tu n'en connais AUCUN par cœur. Une recherche lancée « en arrière-plan » n'a pas encore de résultat : si on te la demande, dis « je cherche encore, je te le dis dès que je l'ai ». Si deux réponses du CRM se contredisent, dis-le tel quel ; n'invente jamais d'explication (« je l'ai vu dans un brouillon »…).
 4. Au moindre doute (nom mal entendu, plusieurs clients possibles, phrase coupée, son mauvais, autre langue dans la transcription), tu ne devines pas : tu reformules ce que tu as compris et tu demandes « c'est bien ça ? ». Plusieurs clients possibles : cite-les (nom et ville) et demande lequel. Le son de la voiture est souvent mauvais : si la transcription ne veut rien dire, demande-lui de répéter.
 5. Écrire dans le CRM (visite, compte rendu, rendez-vous, tâche, note) : JAMAIS sans son accord. crm_noter, puis tu lui relis mot pour mot la phrase préparée et tu demandes « Je l'enregistre ? » ; seulement après son « oui » : crm_confirmer. Tu ne dis « c'est enregistré » (ni « c'est noté », ni « j'ai ajouté ») que quand crm_confirmer l'a confirmé. « Indique que je suis passé chez X aujourd'hui », « note la visite » : crm_noter, type compte_rendu, échange visite, texte « Visite » suivi des personnes vues s'il les cite. Les comptes rendus et rendez-vous arrivent en brouillon dans son CRM : il les valide lui-même.
-6. « Emmène-moi chez X », « guide-moi vers X », « lance le GPS » : itineraire tout de suite, sans lui demander s'il le veut. Un bouton s'affiche : dis-lui d'appuyer sur « Y aller » (le guidage passe aussi sur l'écran de la voiture ; pour te reparler ensuite, il revient sur Wilson). « Appelle X » : appeler (bouton vert). Un bouton ne s'affiche QUE par ces outils : ne dis jamais « j'affiche » sans les appeler ; si le client change, rappelle l'outil pour le bon client.` : ''}
+6. « Emmène-moi chez X », « guide-moi vers X », « lance le GPS » : itineraire tout de suite, sans lui demander s'il le veut. ${appli() ? 'Le guidage part directement dans la voiture (Android Auto) et tu restes avec lui : dis « C\'est parti, je te guide vers … ».' : 'Un bouton s\'affiche : dis-lui d\'appuyer sur « Y aller » (le guidage passe aussi sur l\'écran de la voiture ; pour te reparler ensuite, il revient sur Wilson).'} « Appelle X » : appeler (bouton vert). Un bouton ne s'affiche QUE par ces outils : ne dis jamais « j'affiche » sans les appeler ; si le client change, rappelle l'outil pour le bon client.` : ''}
 7. Le reste : l'heure et la date : date_et_heure ; la météo : meteo ; une information sur Internet : chercher ; un rappel à une heure précise : rappel (quand au format 2026-10-30T18:00) ; un minuteur : minuteur ; « rappelle-nous ce soir à la maison », « dis à Camille que… » : messages (deposer ; pour un rappel à la maison : pour = « tous » ou son prénom, aussi_pour_moi = true, a_la_maison = true, apres = l'heure) ; l'agenda Famille (Google Agenda partagé avec Camille) : agenda ; « note cette idée » : idees ; « retiens que… » : memoriser.
 8. Une remarque sur ta façon de fonctionner (« pour la prochaine mise à jour… », « c'est un bug », « tu devrais… ») : remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. Ne dis jamais « c'est noté » sans avoir appelé remarque. N'invente jamais d'explication sur ton propre fonctionnement et ne promets rien.
 9. « Répète », « tu peux répéter ? » : redis simplement ta dernière phrase (aucun outil, surtout pas reafficher).
@@ -2364,6 +2370,17 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       }
       case 'itineraire': {                                                            // C12
         const r = await C.routeTarget(a, signal);
+        // Appli Android (PLAN 9, A3) : le guidage part tout de suite, dans la voiture, et Wilson revient devant tout seul.
+        if (r.ok && appli()) {
+          const g = String(pont('naviguer', r.target.adresse || '', r.target.societe || '') || 'erreur');
+          this.log(`Guidage lancé vers ${r.target.societe} (${r.target.adresse}) : ${g}`, true);
+          if (/^ok/.test(g)) {
+            this._guidage = { societe: r.target.societe, adresse: r.target.adresse, at: Date.now() };
+            const revient = pont('peutRevenir') !== false && !/retour automatique impossible/.test(g);
+            return { info: `Le guidage vers ${r.target.societe} (${r.target.adresse}) est lancé avec ${/Waze/.test(g) ? 'Waze' : 'Google Maps'} : il s'affiche sur l'écran de la voiture${revient ? ', et tu reviens tout seul sur l\'écran du téléphone' : ''}. Dis-le-lui en une phrase (« C'est parti, je te guide vers … »).`,
+              dire: `C'est parti, je te guide vers ${r.target.societe}.` };
+          }
+        }
         if (r.ok) this.showRoute(r.target);
         return { info: r.dire, dire: r.ok ? `J'affiche l'itinéraire vers ${r.target.societe} : appuie sur le bouton bleu.` : null };
       }
@@ -2678,7 +2695,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     el.innerHTML = `<div class="card route" data-kind="route"><div class="card-t">Itinéraire</div><div class="card-n">${esc(t.societe)}</div><div class="card-s">${esc(t.adresse)}</div>`
       + `<div class="card-b"><a class="card-go route" href="${esc(t.maps)}" target="_blank" rel="noopener">Y aller</a><a class="card-go waze" href="${esc(t.waze)}" target="_blank" rel="noopener">Waze</a><button class="card-x" type="button">Fermer</button></div></div>`;
     el.hidden = false;
-    el.querySelectorAll('.card-go').forEach((x) => x.addEventListener('click', () => this._goRoute(t)));
+    el.querySelectorAll('.card-go').forEach((x) => x.addEventListener('click', (ev) => {
+      if (appli()) { ev.preventDefault(); this.log(`GPS (appli) vers ${t.societe} : ${pont('naviguer', t.adresse || '', t.societe || '')}`, true); this.hideCard('route'); return; }   // A3 : la discussion continue
+      this._goRoute(t);
+    }));
     el.querySelector('.card-x').addEventListener('click', () => this.hideCard());
     clearTimeout(this._cardT); this._cardT = setTimeout(() => this.hideCard('route'), 120000);
     this._ecran = { kind: 'route', societe: t.societe, cle: t.cle || '', douteux: !!t.douteux, at: Date.now(), turn: this._turnN };

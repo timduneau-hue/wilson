@@ -1,0 +1,80 @@
+# Wilson pour Android (PLAN.md, section 9, A8) : construit l'APK à chaque changement du dossier android/ et le publie dans
+# les « Releases » du dépôt. Lien fixe pour l'installer : https://github.com/timduneau-hue/wilson/releases/latest/download/wilson.apk
+name: Appli Android
+
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      # La clé de signature : créée une seule fois ici, protégée par le secret WILSON_CLE (Settings → Secrets and variables
+      # → Actions), puis gardée dans le dépôt (inutilisable sans ce mot de passe).
+      - name: Clé de signature
+        shell: bash
+        env:
+          WILSON_CLE: ${{ secrets.WILSON_CLE }}
+        run: |
+          if [ -z "$WILSON_CLE" ]; then
+            echo "Il manque le secret WILSON_CLE (dépôt → Settings → Secrets and variables → Actions → New repository secret)." | tee build.log
+            exit 1
+          fi
+          if [ ! -f android/wilson.keystore ]; then
+            keytool -genkeypair -keystore android/wilson.keystore -storetype PKCS12 -storepass "$WILSON_CLE" -keypass "$WILSON_CLE" \
+              -alias wilson -keyalg RSA -keysize 2048 -validity 20000 -dname "CN=Wilson, O=Timothee Duneau, C=FR"
+            git config user.name "wilson-ci" && git config user.email "wilson-ci@users.noreply.github.com"
+            git add android/wilson.keystore
+            git commit -m "Appli Android : clé de signature (protégée par le secret WILSON_CLE)"
+            git push
+          fi
+
+      - name: Construire l'APK
+        shell: bash
+        working-directory: android
+        env:
+          WILSON_CLE: ${{ secrets.WILSON_CLE }}
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee ../build.log
+          cp app/build/outputs/apk/release/app-release.apk ../wilson.apk
+          ls -la ../wilson.apk
+
+      - name: Publier dans les Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-${{ github.run_number }}
+          name: Wilson pour Android (${{ github.run_number }})
+          body: "Installer sur le téléphone : https://github.com/timduneau-hue/wilson/releases/latest/download/wilson.apk"
+          files: wilson.apk
+          make_latest: true
+
+      # Le journal de construction, lisible par Claude (branche « journal-android »), même en cas d'échec.
+      - name: Journal de construction
+        if: always()
+        shell: bash
+        run: |
+          [ -f build.log ] || echo "pas de journal (échec avant la construction)" > build.log
+          mkdir -p /tmp/j && cp build.log /tmp/j/build.log
+          echo "${{ job.status }} · run ${{ github.run_number }} · ${{ github.sha }}" > /tmp/j/STATUT
+          cd /tmp/j && git init -q && git checkout -q -b journal-android
+          git config user.name "wilson-ci" && git config user.email "wilson-ci@users.noreply.github.com"
+          git add . && git commit -q -m "journal ${{ github.run_number }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" journal-android

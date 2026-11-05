@@ -1,0 +1,10 @@
+// Wilson pour Android (PLAN.md, section 9) : une coque autour de la page https://timduneau-hue.github.io/wilson/
+pluginManagement {
+    repositories { google(); mavenCentral(); gradlePluginPortal() }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories { google(); mavenCentral() }
+}
+rootProject.name = 'Wilson'
+include ':app'
