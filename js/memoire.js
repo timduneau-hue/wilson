@@ -45,6 +45,7 @@ export const CONSIGNE_PASSE = `Tu es la mémoire de Wilson, le compagnon de la f
 
 Regarde d'abord les souvenirs existants (avec leur id) : si l'information y est déjà, ne la répète pas. Si elle le contredit ou le précise, mets l'id de l'ancien dans "oublier" et la nouvelle version dans "ajouter". Si quelqu'un demande d'oublier quelque chose, mets les ids concernés dans "oublier". Un souvenir marqué « demandé » (la famille a demandé à Wilson de le retenir) ne va JAMAIS dans "oublier", sauf si la discussion demande clairement de l'oublier ou le corrige.
 Chaque souvenir : une phrase courte, autonome et précise, au présent, avec les prénoms (jamais « il », « je » ou « moi ») : « Camille n'aime pas la coriandre. » Une date dite de façon relative (« samedi prochain », « dans quinze jours ») s'écrit en clair (« le 14/11/26 »), à partir du jour de la discussion. "qui" = le ou les prénoms concernés (ou « famille »). Au plus ${MAX_AJOUTS} ajouts.
+Petit ménage (au plus 2 par discussion, dans "oublier") : si deux souvenirs existants disent la même chose (« Le parapluie rouge est dans l'entrée. » et « Le parapluie est rangé dans l'entrée. »), oublie le moins précis ; un souvenir marqué « ancien » qui ne vaut que pour un moment (« Le son est bon aujourd'hui. ») ou qui n'a pas de sens (« Les gens sont là avec l'utilisateur. ») s'oublie aussi. Jamais un souvenir « demandé ».
 La plupart des discussions ne contiennent rien à retenir : c'est normal, réponds alors avec des listes vides.`;
 
 export const SCHEMA_PASSE = {
@@ -196,7 +197,7 @@ export class Memoire {
     if (dit.length < 15 && !questions.length) return null;   // « merci », « bonne nuit » : rien à relire
     let texte = echanges.map((e) => [e.user ? `${e.qui || 'Quelqu\'un'} : ${e.user}` : '', e.wilson ? `Wilson : ${e.wilson}` : ''].filter(Boolean).join('\n')).join('\n');
     if (texte.length > 9000) texte = '…\n' + texte.slice(-9000);
-    const souv = this.items.length ? this.items.slice(-150).map((x) => `[${x.id}] (${x.cat}${x.qui ? ', ' + x.qui : ''}${x.origine === 'demandé' ? ', demandé' : ''}) ${x.texte}`).join('\n') : '(aucun)';
+    const souv = this.items.length ? this.items.slice(-150).map((x) => `[${x.id}] (${x.cat}${x.qui ? ', ' + x.qui : ''}${x.origine === 'demandé' ? ', demandé' : x.origine === 'ancien' ? ', ancien' : ''}) ${x.texte}`).join('\n') : '(aucun)';
     const qs = questions.length ? `\n\nQuestions que Claude (celui qui prépare les mises à jour de Wilson) a fait poser à Timothée pendant cette discussion :\n${questions.map((q) => `[${q.id}] « ${q.question} »`).join('\n')}\nSi TIMOTHÉE (lui seulement, pas Camille ni quelqu'un d'autre) y a répondu, mets sa réponse dans "reponses" : {id, reponse = ce qu'il a répondu, mis au propre, sans rien inventer}. Ces réponses ne vont pas dans "ajouter". S'il n'a pas répondu ou a dit « plus tard », rien.` : '';
     const msg = `Souvenirs actuels :\n${souv}${qs}\n\nLa discussion (${jour(Date.now())}${ou ? ', ' + ou : ''}) :\n${texte}`;
     const { json, model } = await eco.texteJson({ key, system: CONSIGNE_PASSE, text: msg, schema: SCHEMA_PASSE, signal });
@@ -210,6 +211,10 @@ export class Memoire {
       if (x.origine === 'demandé' && !demandeOubli) { proteges.push(x.texte); return false; }
       return true;
     });
+    // Nuit du 06/11/26 : la passe fait aussi un peu de ménage (doublons, souvenirs du moment), mais jamais en masse : sans
+    // demande d'oubli, pas plus d'oublis que d'ajouts (remplacements) + 2.
+    const maxOubli = (json.ajouter || []).slice(0, MAX_AJOUTS).length + 2;
+    if (!demandeOubli && idsOubli.length > maxOubli) { this.log(`Mémoire : oubli limité à ${maxOubli} (${idsOubli.length} proposés, personne n'a demandé d'oublier)`); idsOubli.length = maxOubli; }
     if (proteges.length) this.log(`Mémoire : gardé (demandé par la famille, personne n'a demandé de l'oublier) « ${proteges.join(' », « ')} »`);
     const oublies = this.oublierIds(idsOubli);
     const ajoutes = [];
