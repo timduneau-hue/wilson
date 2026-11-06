@@ -151,6 +151,20 @@ async def main():
         check('… et la feuille suit (ajout + oubli envoyés au script)', not any(m['id'] == 'mA' for m in st['mem']) and any(m['texte'] == 'Louis adore les dinosaures.' for m in st['mem']))
         check('Une réponse à une question qui n\'a pas été posée est ignorée', 'q1' not in st['reponses'])
         check('Journal : ce qui a été retenu (pour l\'analyse de la nuit)', has('Mémoire (gemini-3.8-flash) : retenu « Louis adore les dinosaures. »') and has('oublié « Les piles'), str([l for l in logs if 'Mémoire' in l][-3:]))
+        # Nuit du 06/11/26 : petit ménage des anciens souvenirs (doublons, souvenirs du moment), jamais en masse.
+        await page.evaluate("""['Le parapluie rouge est dans l\\'entrée.', 'Le parapluie est rangé dans l\\'entrée.', 'Le son est bon aujourd\\'hui.', 'Gaspard aime le thé vert.'].forEach((t) => wilson.memoire._ajouter(t, { cat: 'autre', origine: 'ancien' }))""")
+        anc = await page.evaluate("wilson.memoire.items.filter((x) => x.origine === 'ancien' && /parapluie|son est bon|thé vert/.test(x.texte)).map((x) => x.id)")
+        st['passe_out'] = {'ajouter': [], 'oublier': anc}
+        await page.evaluate("wilson.memory.addExchange('Tu sais, le parapluie rouge, je le prends tous les matins pour aller au travail.', 'D accord !', 'Timothée')")
+        await page.evaluate("wilson._passeMemoire(%d, Date.now(), [])" % (int(time.time() * 1000) - 1000))
+        for _ in range(30):
+            await page.wait_for_timeout(250)
+            if has('oubli limité'): break
+        P = st['passes'][-1]
+        check('Passe : la consigne demande un petit ménage (doublons, souvenirs du moment, jamais « demandé »)', 'Petit ménage' in P['sys'] and 'au plus 2' in P['sys'] and 'Jamais un souvenir « demandé »' in P['sys'])
+        check('… et elle voit quels souvenirs sont « ancien »', ', ancien) Le parapluie rouge' in P['text'], P['text'][:600])
+        reste = await page.evaluate("wilson.memoire.items.filter((x) => /parapluie|son est bon|thé vert/.test(x.texte)).length")
+        check('… jamais en masse : 4 oublis proposés sans demande → 2 seulement', reste == 2 and has('oubli limité à 2 (4 proposés'), str(reste))
         # « Retiens que… » / « oublie… » tout de suite
         await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000); c = conns[-1]
         fns = {f['name']: f for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', [])}
