@@ -82,7 +82,9 @@ export const HA_VERIF_MS = 5 * 60000, HA_ACTION_MS = 30 * 60000;
 export class GardeHA {
   constructor({ cfg = {}, journal = () => {}, fetchImpl = globalThis.fetch, vbox, run, maintenant = () => Date.now(), pauseMs = 5000 } = {}) {
     const c = cfg.ha === false ? null : (cfg.ha || {});
-    this.on = !!c; this.url = String((c && c.url) || 'http://homeassistant.local:8123').replace(/\/+$/, ''); this.vm = (c && c.vm) || '';
+    // 11/11/26 : ce Home Assistant répond sur le port 80 (http://homeassistant.local), pas sur 8123 : les deux sont essayés.
+    this.on = !!c; this.urls = (c && c.url ? [c.url] : ['http://homeassistant.local', 'http://homeassistant.local:8123']).map((u) => String(u).replace(/\/+$/, ''));
+    this.url = this.urls[0]; this.vm = (c && c.vm) || '';
     this.journal = journal; this.fetch = fetchImpl; this.maintenant = maintenant;
     this.vbox = vbox !== undefined ? vbox : [process.env.VBOX_MSI_INSTALL_PATH && path.join(process.env.VBOX_MSI_INSTALL_PATH, 'VBoxManage.exe'),
       'C:\\Program Files\\Oracle\\VirtualBox\\VBoxManage.exe'].filter(Boolean).find((x) => { try { return fs.existsSync(x); } catch (_) { return false; } }) || '';
@@ -102,8 +104,9 @@ export class GardeHA {
   // pcEnLigne : le PC joint le script de Wilson (sinon, inutile de toucher à Home Assistant).
   async verifier({ pcEnLigne = true } = {}) {
     if (!this.on || !this.vbox) { if (this.on && !this.dit) { this.dit = 'pas de VirtualBox'; this.journal('VirtualBox introuvable sur ce PC : je ne surveille pas Home Assistant'); } return 'coupé'; }
-    let ok = await this.repond(this.url);
-    if (!ok && this.ip) ok = await this.repond(`http://${this.ip}:8123`);
+    let ok = false;
+    for (const u of [this.url, ...this.urls.filter((x) => x !== this.url)]) if (await this.repond(u)) { ok = true; this.url = u; break; }
+    if (!ok && this.ip) { const port = new URL(this.url).port; ok = await this.repond(`http://${this.ip}${port ? ':' + port : ''}`); }
     if (ok) {
       if (this.enPanne) this.journal(`Home Assistant répond de nouveau (muet depuis ${Math.round((this.maintenant() - this.enPanne) / 60000)} min)`);
       this.muet = 0; this.enPanne = 0; this.dejaVu = true;
