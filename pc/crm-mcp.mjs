@@ -1,4 +1,4 @@
-// Wilson — le CRM de Timothée pour Claude, EN LECTURE SEULE (PLAN.md, section 10, K3).
+// Wilson — le CRM (et le suivi bourse) de Timothée pour Claude, EN LECTURE SEULE (PLAN.md, section 10, K3).
 // Petit serveur MCP (stdio, JSON-RPC par lignes) lancé par Claude Code sur le PC de la maison. Chaque outil ne fait qu'une
 // lecture, relayée par le script « Wilson journal » au CRM (mêmes fonctions que les outils de Wilson). Aucune écriture n'est
 // possible : il n'existe aucun outil pour ça ici (les écritures restent crm_noter + « oui » dans Wilson, règle C2).
@@ -41,13 +41,17 @@ export const OUTILS = [
     description: "Catalogue et ventes Boschat : quels clients achètent un fabricant ou un article (question « qui_achete »), ou référence, prix et disponibilité d'un article Boschat (question « infos »).",
     inputSchema: { type: 'object', properties: { produit: { type: 'string' }, question: { type: 'string', enum: ['qui_achete', 'infos'] } }, required: ['produit'] },
     payload: (a) => ({ produit: String(a.produit || ''), question: a.question === 'infos' ? 'infos' : 'qui_achete' }) },
+  // Suivi bourse de Timothée (11/11/26), lu par le script « Wilson journal » dans sa feuille Google (fichier bourse.gs).
+  { name: 'bourse_etat', action: 'bourse_etat',
+    description: "Son suivi bourse personnel (feuille Google, en lecture seule) : PEA chez Bourse Direct (capital versé, liquidités, date d'ouverture, fiscalité), chaque action (quantité, PRU, cours, variation du jour, valorisation, plus ou moins-value, limite de vente et échéance), totaux, historique quotidien (tout vendu frais déduits, écart avec le capital, gain net si retrait, statut) et son LDD. jours : nombre de relevés d'historique (15 par défaut, 60 au plus).",
+    inputSchema: { type: 'object', properties: { jours: { type: 'integer' } } }, payload: (a) => ({ jours: Math.min(Math.max(Number(a.jours) || 15, 1), 60) }) },
 ];
 
 // secret : celui du relais (config.json) ; le script de Wilson exige une clé ou ce secret depuis le 11/11/26.
 export async function appeler(nom, args, { script, secret, fetchImpl = globalThis.fetch } = {}) {
   const o = OUTILS.find((x) => x.name === nom);
   if (!o) return { isError: true, content: [{ type: 'text', text: `outil inconnu : ${nom}` }] };
-  if (!/^crm_(schema|requete|client|journee|bilan|produit)$/.test(o.action)) throw new Error('lecture seule');   // garde-fou
+  if (!/^(crm_(schema|requete|client|journee|bilan|produit)|bourse_etat)$/.test(o.action)) throw new Error('lecture seule');   // garde-fou
   try {
     const r = await fetchImpl(script, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: o.action, ...(o.payload ? o.payload(args || {}) : {}), ...(secret ? { secret } : {}) }), signal: AbortSignal.timeout(90000) });

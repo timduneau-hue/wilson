@@ -30,6 +30,9 @@ export const OUTILS = [
   { name: 'idees', behavior: 'BLOCKING',
     description: "Ses idées (« note cette idée », « écris ça quelque part », « qu'est-ce que j'ai noté ? », « envoie-moi mes idées ») : noter (texte = l'idée mise au propre, sans rien inventer), lire (les dernières), afficher (à l'écran), envoyer (par e-mail à Timothée, avec le lien du document). Elles sont rangées dans le document Google « Wilson — mes idées » de son Drive.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['noter', 'lire', 'afficher', 'envoyer'] }, texte: S }, required: ['action'] } },
+  { name: 'bourse', behavior: 'BLOCKING',   // demande de Timothée du 11/11/26 : « que Wilson ait accès à mon suivi bourse »
+    description: "Son suivi bourse (feuille Google de son Drive, en lecture seule) : PEA chez Bourse Direct (capital versé, liquidités, date d'ouverture), chaque action (quantité, PRU, cours, variation du jour, valorisation, plus ou moins-value, limite de vente), totaux, historique quotidien (tout vendu frais déduits, écart avec le capital, gain net si retrait, statut du coussin) et son LDD. Pour TOUTE question sur sa bourse, son PEA, ses actions, ses plus-values, son LDD : appelle-le d'abord, tu n'en connais aucun chiffre par cœur. action : lire (par défaut), ou afficher s'il demande de le voir à l'écran.",
+    parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['lire', 'afficher'] } } } },
   { name: 'remarque', behavior: 'BLOCKING',
     description: "Remarque de Timothée sur ton fonctionnement, pour ta prochaine mise à jour (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile. Une seule fois par remarque. Une correction qui vaut pour toujours (la prononciation d'un nom, la façon d'appeler quelqu'un) : appelle AUSSI memoriser, pour l'appliquer dès maintenant. Ensuite, dis seulement « C'est noté. », puis réponds au reste de ce qu'il a dit ou écoute la suite.",
     parameters: { type: 'OBJECT', properties: { texte: S }, required: ['texte'] } },
@@ -83,6 +86,7 @@ export class Outils {
       case 'meteo': return this.meteo(a);
       case 'courses': return this.courses(a);
       case 'idees': return this.idees(a);
+      case 'bourse': return this.bourse(a);
       case 'remarque': return this.remarque(a);
       case 'mes_remarques': return this.mesRemarques();
       default: return 'Outil inconnu.';
@@ -336,6 +340,33 @@ export class Outils {
     }
     if (!reste.length) return 'La liste de courses est vide.';
     return `Liste de courses (${reste.length}) : ${reste.map((x) => x.name).join(', ')}.${action === 'afficher' ? ' Elle est affichée à l\'écran.' : ''}`;
+  }
+
+  // ---------- F7 : le suivi bourse (feuille Google de Timothée, lue par son script ; réservé à Timothée comme le CRM) ----------
+  async bourse({ action = 'lire' } = {}) {
+    const A = this.app, R = A.remote;
+    const aut = typeof A._crmAutorise === 'function' ? A._crmAutorise() : { ok: false };
+    if (!aut.ok) {
+      this.log(`Bourse refusée : ${aut.qui ? `c'est ${aut.qui} qui me regarde` : 'je ne reconnais pas Timothée'} — réservée à Timothée`, true);
+      return `REFUSÉ : sa bourse est privée, réservée à Timothée${aut.qui ? `, et c'est ${aut.qui} qui te regarde` : ', et tu ne reconnais pas son visage en ce moment'}. Dis seulement que c'est réservé à Timothée${aut.qui ? '' : ' et qu'il doit bien te regarder'} ; aucun chiffre.`;
+    }
+    if (!R || !R.on) return "Le script de Wilson n'est pas relié sur cet appareil (Réglages → Journal à distance) : je ne peux pas lire le suivi bourse. Dis-le simplement.";
+    let r = this._bourse && Date.now() - this._bourse.t < 120000 ? this._bourse.r : null;   // 2 min : les cours bougent peu entre deux questions
+    if (!r) {
+      r = await R.ask({ action: 'bourse_etat' });
+      if (r && r.ok) this._bourse = { t: Date.now(), r };
+    }
+    if (!r || !r.ok) {
+      const e = String((r && r.erreur) || 'pas de réponse');
+      this.log(`Bourse : ${e}`, true);
+      return /action inconnue/.test(e) ? "Le suivi bourse n'est pas encore relié : le script de Wilson doit être mis à jour (fichier bourse.gs). Dis-le simplement."
+        : `Le suivi bourse ne répond pas (${e}). Dis-le simplement.`;
+    }
+    if (action === 'afficher') this._montrer(`<pre style="white-space:pre-wrap;font:inherit;font-size:.8em">${esc(r.texte)}</pre>`, { titre: '📈 Suivi bourse', large: true });
+    const voiture = !!A.enVoiture;
+    return `${r.texte}
+
+RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus tels quels (arrondis à l'oral : « environ 1 750 euros », « moins 11 pour cent ») ; ne calcule rien de toi-même si le chiffre est déjà là ; ne récite pas tout${voiture ? ' ; il conduit : une ou deux phrases' : ''}. Le statut et les limites de vente sont ses propres règles : tu peux les rappeler. Tu ne donnes pas de conseil d'achat ou de vente ; pour une analyse poussée, il peut te la demander et tu la passes à question_difficile.${action === 'afficher' ? ' Le détail est affiché à l'écran.' : ''}`;
   }
 
   // ---------- F6 : mes idées (document Google par le script de Timothée ; sinon gardées sur l'appareil) ----------
