@@ -16,7 +16,7 @@ export const MAISON_TOOLS = [
     description: "État actuel de la maison : chaque appareil (lumières, télé, enceinte…) avec sa pièce, s'il est allumé, sa luminosité, son volume, ce qu'il joue. À appeler pour répondre à « qu'est-ce qui est allumé ? », « la télé est allumée ? », ou avant d'agir si tu as un doute.",
     parameters: { type: 'OBJECT', properties: { appareils: { type: 'ARRAY', items: { type: 'STRING' }, description: 'identifiants (light.xxx…) ou noms ; vide = toute la maison' } } } },
   { name: 'maison_commande', behavior: 'BLOCKING',
-    description: "Agit sur UN appareil de la maison. Plusieurs appareils (« les lumières du salon ») : un appel par appareil. Actions : allumer, eteindre, basculer, luminosite (valeur 0 à 100), volume (0 à 100), volume_plus / volume_moins (valeur = nombre de crans, 2 par défaut), muet, son (remettre le son), lecture, pause, stop, suivant, precedent, appli (valeur = Netflix, YouTube, Prime Video ou France TV : allume la télé si besoin et ouvre l'appli), radio (valeur = nom de la station, ex. France Inter, Nostalgie, RTL : la diffuse sur l'enceinte ou sur la télé), source (valeur = entrée), clignoter (valeur = nombre de clignotements, 5 par défaut), temperature (valeur en °C : chauffage ou clim, par exemple celle de la voiture ; l'allume aussi). Chauffage ou clim de la voiture (« chauffe la voiture », « mets la clim à 20 ») : la voiture met jusqu'à une minute à démarrer ; ne promets pas qu'il fait déjà chaud.",
+    description: "Agit sur UN appareil de la maison. Plusieurs appareils (« les lumières du salon ») : un appel par appareil. Actions : allumer, eteindre, basculer, luminosite (valeur 0 à 100), volume (0 à 100), volume_plus / volume_moins (valeur = nombre de crans, 2 par défaut), muet, son (remettre le son), lecture, pause, stop, suivant, precedent, appli (valeur = Netflix, YouTube, Prime Video ou France TV : allume la télé si besoin et ouvre l'appli), radio (valeur = nom de la station, ex. France Inter, Nostalgie, RTL : la diffuse sur l'enceinte ou sur la télé), source (valeur = entrée), clignoter (valeur = nombre de clignotements, 5 par défaut), temperature (valeur en °C : chauffage ou clim, par exemple celle de la voiture ; l'allume aussi). « Chauffe la voiture » (règle de Timothée) : allumer le « Chauffage de la voiture » SANS valeur = chauffage à fond + dégivrages avant et arrière, en un seul appel ; « mets la voiture à 20 » : temperature. La voiture met jusqu'à une minute et peut refuser (clé restée dedans…) : dis « je lance le chauffage, je te dis si la voiture refuse », jamais qu'il fait déjà chaud ; sa réponse te sera donnée en message.",
     parameters: { type: 'OBJECT', properties: {
       appareil: { type: 'STRING', description: "l'identifiant de l'inventaire (light.grande_lumiere_salon…), ou son nom" },
       action: { type: 'STRING', enum: ACTIONS },
@@ -60,6 +60,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function cleanUrl(u) { return String(u || '').trim().replace(/\/+$/, ''); }
 
+// Les refus de la voiture, en français (messages du module MG iSMART).
+export function motVoiture(detail) {
+  const d = String(detail || '');
+  if (/key is detected inside/i.test(d)) return "la voiture refuse : elle détecte la clé à l'intérieur. Il faut sortir la clé de la voiture, puis redemander.";
+  if (/\b401\b|logged out|token|authenticat/i.test(d)) return "le lien avec la voiture est coupé pour un quart d'heure (l'appli MG a été ouverte sur le téléphone) : redemande dans un moment.";
+  if (/door|porte/i.test(d)) return 'la voiture refuse : une porte est ouverte.';
+  if (/battery|soc|power/i.test(d)) return 'la voiture refuse : sa batterie est trop faible.';
+  return `la voiture a refusé (${d.replace(/return code: \d+, message: /, '').slice(0, 120) || 'sans raison donnée'}).`;
+}
+
 export class Maison {
   // pcVivant : () => Promise<bool>, l'ordinateur de la maison répond-il (relais Claude) ? Pour dire la vraie panne.
   constructor({ settings, log = () => {}, pcVivant = async () => false }) { this.settings = settings; this.log = log; this.pcVivant = pcVivant; this.inv = null; this.invAt = 0; this._blink = null; this.okAt = 0; }
@@ -87,6 +97,24 @@ export class Maison {
     try { pc = await Promise.race([Promise.resolve(this.pcVivant()), new Promise((ok) => setTimeout(() => ok(false), 6000))]); } catch (_) {}
     if (pc) return HA_VM;
     return netErr(err) ? HA_INJOIGNABLE : HA_MUET;
+  }
+
+  // ---------- La voiture répond-elle ? ----------
+  // La voiture refuse parfois (11/11/26, 11h09:31 : « The key is detected inside the vehicle ») ou le module est déconnecté
+  // (11h10:45 : appli MG ouverte sur le téléphone) : le module le dit par son entité « command error ». On la guette 80 s.
+  async suiviVoiture(depuis, { chauffage = false, signal } = {}) {
+    const all = await this._fetch('/api/states', { signal });
+    if (!all.ok || !Array.isArray(all.json)) return null;
+    const err = all.json.find((x) => /^event\..*command_error$/.test(x.entity_id)), clim = all.json.find((x) => /^sensor\..*remote_climate_state$/.test(x.entity_id));
+    for (let i = 0; i < 10; i++) {
+      await sleep(i ? 8000 : 4000);
+      if (err) {
+        const x = await this._etatDe(err.entity_id, signal).catch(() => null), t = x && Date.parse(x.state);
+        if (t && t >= depuis) return { ok: false, texte: motVoiture((x.attributes || {}).detail) };
+      }
+      if (chauffage && clim) { const c = await this._etatDe(clim.entity_id, signal).catch(() => null); if (c && c.state && !/^(off|unknown|unavailable)$/.test(c.state)) return { ok: true, texte: 'la voiture confirme : le chauffage est en route.' }; }
+    }
+    return null;
   }
 
   // ---------- Inventaire ----------
@@ -118,7 +146,10 @@ export class Maison {
   async _inv(signal, maxAge = 60000) { if (!this.inv || Date.now() - this.invAt > maxAge) await this.rafraichir(signal); return this.inv || []; }
 
   // Températures : Wilson parle en °C ; Home Assistant peut être réglé en °F.
-  _enC(t) { return t == null ? t : this.uniteF ? Math.round((t - 32) / 1.8) : t; }
+  // e : une entité dont les bornes sont encore en °F alors que Home Assistant est passé en °C (11/11/26, 11h09 : bornes 61 à 82
+  // gardées après le changement d'unité ; Home Assistant attendait pourtant des °C).
+  _enC(t, e) { const f = this.uniteF || !!(e && e.domaine === 'climate' && e.a.min_temp > 40); return t == null ? t : f ? Math.round((t - 32) / 1.8) : t; }
+  _voiture(e) { return /voiture/.test(norm(`${e.nom} ${e.id}`)); }
   _versHA(c) { return this.uniteF ? Math.round(c * 1.8 + 32) : c; }
   _decrire(e, detail = false) {
     const a = e.a, bits = [ETAT[e.etat] || e.etat];
@@ -131,8 +162,8 @@ export class Maison {
     }
     if (e.domaine === 'remote' && a.current_activity) bits.push(`appli ${a.current_activity}`);
     if (e.domaine === 'climate') {
-      if (a.temperature != null) bits.push(`réglé à ${this._enC(a.temperature)} °C`);
-      if (a.current_temperature != null) bits.push(`il fait ${this._enC(a.current_temperature)} °C dedans`);
+      if (a.temperature != null) bits.push(`réglé à ${this._enC(a.temperature, e)} °C`);
+      if (a.current_temperature != null) bits.push(`il fait ${this._enC(a.current_temperature, e)} °C dedans`);
     }
     return bits.join(', ');
   }
@@ -144,7 +175,7 @@ export class Maison {
     }
     if (e.domaine === 'script' || e.domaine === 'scene') return 'allumer (lance)';
     if (e.domaine === 'remote') return 'appli';
-    if (e.domaine === 'climate') return `allumer, éteindre, temperature (${e.a.min_temp != null ? this._enC(e.a.min_temp) + ' à ' + this._enC(e.a.max_temp) + ' °C' : 'en °C'})`;
+    if (e.domaine === 'climate') return `${this._voiture(e) ? 'allumer (sans valeur : à fond + dégivrages)' : 'allumer'}, éteindre, temperature (${e.a.min_temp != null ? this._enC(e.a.min_temp, e) + ' à ' + this._enC(e.a.max_temp, e) + ' °C' : 'en °C'})`;
     return 'allumer, éteindre';
   }
   // Pour la consigne de Wilson : une ligne par appareil.
@@ -229,19 +260,40 @@ export class Maison {
     }
     try {
       // Chauffage ou clim (la voiture par le module MG iSMART de Home Assistant, demande du 11/11/26) : la commande part vers
-      // la voiture, qui met jusqu'à une minute à répondre ; on ne vérifie donc pas l'état tout de suite.
+      // la voiture, qui met jusqu'à une minute à répondre ; l'appli guette ensuite sa réponse (suiviVoiture) et la dit.
+      const voiture = this._voiture(e), suite = voiture ? ' La voiture met jusqu\'à une minute ; je te dirai si elle refuse.' : '';
       if (d === 'climate' && ['allumer', 'eteindre', 'basculer', 'temperature'].includes(action)) {
         const modes = e.a.hvac_modes || [], marche = ['auto', 'heat_cool', 'heat', 'cool'].find((m) => modes.includes(m)) || 'auto';
+        const lo = e.a.min_temp != null ? this._enC(e.a.min_temp, e) : 16, hi = e.a.max_temp != null ? this._enC(e.a.max_temp, e) : 30;
         const t = num(valeur, NaN);
-        if (action === 'eteindre' || (action === 'basculer' && e.etat !== 'off')) { await svc('climate', 'set_hvac_mode', { hvac_mode: 'off' }); return { ok: true, info: `${e.nom} : arrêt demandé.` }; }
+        const degivrages = voiture ? inv.filter((x) => x.domaine === 'switch' && this._voiture(x) && /degivr/.test(norm(x.nom + ' ' + x.id))) : [];
+        const tous = async (svcNom) => { const faits = []; for (const x of degivrages) { await sleep(1500); await svc('switch', svcNom, { entity_id: x.id }); faits.push(x.nom); } return faits; };
+        if (action === 'eteindre' || (action === 'basculer' && e.etat !== 'off')) {
+          await svc('climate', 'set_hvac_mode', { hvac_mode: 'off' });
+          const f = await tous('turn_off');
+          return { ok: true, voiture, info: `${e.nom} : arrêt demandé${f.length ? ` (et ${f.join(', ')})` : ''}.${suite}` };
+        }
+        // Règle de Timothée du 11/11/26, 11h13 : « le matin, quand je lui dis fais chauffer la voiture, il faut mettre le
+        // chauffage à fond et lancer les dégivrages, le reste je m'en fous » : allumer sans température = à fond + dégivrages.
+        if (voiture && action !== 'temperature' && !Number.isFinite(t)) {
+          await svc('climate', 'set_temperature', { temperature: this._versHA(hi), hvac_mode: marche });
+          const f = await tous('turn_on');
+          return { ok: true, voiture, info: `${e.nom} : à fond (${hi} °C) demandé${f.length ? `, ainsi que ${f.join(' et ')}` : ''}.${suite}` };
+        }
         if (Number.isFinite(t)) {
-          const lo = e.a.min_temp != null ? this._enC(e.a.min_temp) : 16, hi = e.a.max_temp != null ? this._enC(e.a.max_temp) : 30, c = Math.max(lo, Math.min(hi, Math.round(t)));
+          const c = Math.max(lo, Math.min(hi, Math.round(t)));
           await svc('climate', 'set_temperature', { temperature: this._versHA(c), hvac_mode: marche });
-          return { ok: true, info: `${e.nom} : mise en marche demandée, à ${c} °C${c !== Math.round(t) ? ` (${lo} à ${hi} °C possibles)` : ''}. La voiture met jusqu'à une minute à démarrer.` };
+          return { ok: true, voiture, info: `${e.nom} : mise en marche demandée, à ${c} °C${c !== Math.round(t) ? ` (${lo} à ${hi} °C possibles)` : ''}.${suite}` };
         }
         if (action === 'temperature') return { ok: false, info: 'Il manque la température : demande-lui combien de degrés.' };
         await svc('climate', 'set_hvac_mode', { hvac_mode: marche });
-        return { ok: true, info: `${e.nom} : mise en marche demandée${e.a.temperature != null ? `, à ${this._enC(e.a.temperature)} °C` : ''}. La voiture met jusqu'à une minute à démarrer.` };
+        return { ok: true, voiture, info: `${e.nom} : mise en marche demandée${e.a.temperature != null ? `, à ${this._enC(e.a.temperature, e)} °C` : ''}.${suite}` };
+      }
+      // Interrupteur de la voiture (dégivrage) : l'état ne change qu'au retour de la voiture (11/11/26, 11h10 : « allumé »
+      // annoncé, puis « éteint » affiché tout de suite) → « demandé », et la réponse de la voiture suivra.
+      if (voiture && d === 'switch' && ['allumer', 'eteindre'].includes(action)) {
+        await svc('switch', action === 'allumer' ? 'turn_on' : 'turn_off');
+        return { ok: true, voiture, info: `${e.nom} : ${action === 'allumer' ? 'mise en marche demandée' : 'arrêt demandé'}.${suite}` };
       }
       switch (action) {
         case 'allumer':

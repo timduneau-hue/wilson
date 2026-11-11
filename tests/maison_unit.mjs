@@ -1,5 +1,5 @@
 // Test de js/maison.js avec un faux Home Assistant (fetch simulé).
-import { Maison, MAISON_TOOL } from '../js/maison.js';
+import { Maison, MAISON_TOOL, motVoiture } from '../js/maison.js';
 Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true });
 let ok = 0, ko = 0; const t = (c, m) => { if (c) ok++; else { ko++; console.log('ÉCHEC : ' + m); } };
 const calls = [];
@@ -54,7 +54,7 @@ t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'deman
   t(inv.some((e) => e.id === 'climate.mg_zs_vehicle_climate') && !inv.some((e) => /charging/.test(e.id)) && inv.some((e) => /defroster/.test(e.id)), 'voiture : chauffage dans l\'inventaire, interrupteur de charge écarté : ' + inv.map((e) => e.id).join(', '));
   t(/chauffage et clim/.test(v.texteInventaire()) && /17 à 33 °C/.test(v.texteInventaire()), 'voiture : consigne « chauffage et clim, temperature (17 à 33 °C) »');
   let r = await v.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'temperature', valeur: '21' });
-  t(r.ok && appels[0][0] === 'climate/set_temperature' && appels[0][1].temperature === 21 && appels[0][1].hvac_mode === 'auto' && /une minute/.test(r.info), 'voiture : « chauffe à 21 » → set_temperature 21, mode auto : ' + JSON.stringify(appels[0]));
+  t(r.ok && appels[0][0] === 'climate/set_temperature' && appels[0][1].temperature === 21 && appels[0][1].hvac_mode === 'auto' && /21 °C/.test(r.info), 'voiture : « chauffe à 21 » → set_temperature 21, mode auto : ' + JSON.stringify(appels[0]));
   r = await v.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'temperature', valeur: '40' });
   t(r.ok && appels[1][1].temperature === 33 && /17 à 33/.test(r.info), 'voiture : 40 °C ramené à 33 (le maximum)');
   r = await v.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'allumer' });
@@ -71,6 +71,34 @@ t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'deman
   const n0 = appels.length;
   r = await w.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'temperature', valeur: '21' });
   t(r.ok && appels[n0][1].temperature === 70 && /21 °C/.test(r.info), 'HA en °F : « 21 degrés » → 70 °F envoyés : ' + JSON.stringify(appels[n0]));
+  // « Chauffe la voiture » (règle du 11/11/26, 11h13) : à fond + dégivrages ; bornes restées en °F alors que HA est en °C
+  const voit = [
+    { entity_id: 'climate.voiture_chauffage', state: 'off', attributes: { friendly_name: 'Chauffage de la voiture', hvac_modes: ['off', 'auto'], min_temp: 61, max_temp: 82, temperature: 72 } },
+    { entity_id: 'switch.voiture_degivrage_avant', state: 'off', attributes: { friendly_name: 'Dégivrage du pare-brise de la voiture' } },
+    { entity_id: 'switch.voiture_degivrage_arriere', state: 'off', attributes: { friendly_name: 'Dégivrage de la lunette arrière de la voiture' } },
+    { entity_id: 'light.salon', state: 'off', attributes: { friendly_name: 'Lumière du salon' } },
+  ];
+  globalThis.fetch = async (url, o) => {
+    if (url.endsWith('/api/config')) return { status: 200, ok: true, json: async () => ({ unit_system: { temperature: '°C' } }) };
+    if (url.endsWith('/api/states')) return { status: 200, ok: true, json: async () => voit };
+    if (url.endsWith('/api/template')) return { status: 200, ok: true, text: async () => voit.map((e) => `${e.entity_id}||False|False`).join('\n') };
+    if (url.includes('/api/services/')) { appels.push([url.split('/api/services/')[1], JSON.parse(o.body)]); return { status: 200, ok: true, json: async () => [] }; }
+    return { status: 404, ok: false, json: async () => ({}) };
+  };
+  const m2 = new Maison({ settings: { haUrl: 'https://ha.exemple.ts.net', haToken: 'bon' } });
+  await m2.rafraichir();
+  t(/16 à 28 °C/.test(m2.texteInventaire()) && /réglé à 22 °C/.test(m2.texteInventaire()) && /à fond \+ dégivrages/.test(m2.texteInventaire()), 'voiture : bornes restées en °F (61-82) lues 16 à 28 °C : ' + m2.texteInventaire());
+  const n1 = appels.length;
+  r = await m2.commande({ appareil: 'climate.voiture_chauffage', action: 'allumer' });
+  const faits = appels.slice(n1).map((a) => a[0] + ' ' + (a[1].entity_id || '') + (a[1].temperature != null ? ' ' + a[1].temperature : ''));
+  t(r.ok && r.voiture && faits[0] === 'climate/set_temperature climate.voiture_chauffage 28' && faits.includes('switch/turn_on switch.voiture_degivrage_avant') && faits.includes('switch/turn_on switch.voiture_degivrage_arriere') && !faits.some((f) => /salon/.test(f)) && /je te dirai si elle refuse/.test(r.info),
+    '« chauffe la voiture » : à fond (28 °C, en °C) + 2 dégivrages : ' + JSON.stringify(faits));
+  const n2 = appels.length;
+  r = await m2.commande({ appareil: 'switch.voiture_degivrage_avant', action: 'allumer' });
+  t(r.ok && r.voiture && /mise en marche demandée/.test(r.info) && !/éteint/.test(r.info), 'dégivrage de la voiture : « demandé », pas « éteint » (11h10) : ' + r.info);
+  r = await m2.commande({ appareil: 'climate.voiture_chauffage', action: 'eteindre' });
+  t(r.ok && appels.slice(n2).some((a) => a[0] === 'climate/set_hvac_mode' && a[1].hvac_mode === 'off') && appels.slice(n2).some((a) => a[0] === 'switch/turn_off'), 'éteindre le chauffage de la voiture coupe aussi les dégivrages');
+  t(/clé à l'intérieur/.test(motVoiture('return code: 8, message: The key is detected inside the vehicle. Please adjust and try again.(64)')) && /appli MG/.test(motVoiture('return code: 401, message: {"code":401}')), 'refus de la voiture traduits (clé dedans, appli MG ouverte)');
   globalThis.fetch = f0;
 }
 console.log(`${ok}/${ok + ko} OK`); process.exit(ko ? 1 : 0);

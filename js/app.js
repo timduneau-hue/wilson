@@ -35,9 +35,9 @@ const appli = () => { try { return window.WilsonAndroid || null; } catch (_) { r
 const pont = (f, ...a) => { try { const A = appli(); return A && typeof A[f] === 'function' ? A[f](...a) : null; } catch (_) { return null; } };
 const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
-const RE_CONSIGNE_FONDEE = /^\[(Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
+const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.37.3';
+const VERSION = '1.37.4';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -1730,6 +1730,9 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   // Un chiffre a une source : le même, à peu près le même s'il arrondit (« environ 12 000 € »), ou un écart, une somme ou
   // un pourcentage de deux chiffres connus (« il t'en manque 31 » = 50 − 19).
   _chiffreVu(n, approx) {
+    // Journal du 11/11/26, 11h08:22 : « il reste 82 % de batterie » (la tablette, d'après sa propre consigne) pris pour un
+    // chiffre inventé, et Wilson a dû dire « je me suis trompé ». La batterie de l'appareil a une source : l'appareil.
+    if (this.battery && Math.abs(Math.round(this.battery.level * 100) - n) <= 1) return true;
     const V = (this._chiffres || (this._chiffres = lireChiffres())).map((x) => x.n);
     if (V.some((v) => Math.abs(v - n) < 1e-6)) return true;
     if (approx && V.some((v) => v > 0 && Math.abs(v - n) / v <= 0.15)) return true;
@@ -2674,7 +2677,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (call.name === 'maison_commande') this.face.setEmotion('reflexion', 15000, 0.5);
     try {
       if (call.name === 'maison_etat') { info = await this.maison.etat(a.appareils || [], ctl.signal); ok = true; }
-      else { const r = await this.maison.commande(a, ctl.signal); info = r.info; ok = r.ok; }
+      else { const r = await this.maison.commande(a, ctl.signal); info = r.info; ok = r.ok; if (r.ok && r.voiture) this._suiviVoiture(a); }
     } catch (e) { if (!this._searches.has(call.id)) return; this.log('Maison : ' + (e.message || e.name)); info = await this.maison.diag(e); }
     if (conv !== this.convId || !this._searches.has(call.id)) return;
     this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
@@ -2698,6 +2701,18 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     const W = (this._ditWilson || []).filter((w) => now - w.t < 90000).pop();
     if (W && /guide|itineraire|gps|y aller|emmene|on y va/.test(VP.plat(W.text)) && VP.estOui(dernier)) return { ok: true, pourquoi: 'oui à sa proposition' };
     return { ok: false, dit: dernier };
+  }
+
+  // La réponse de la voiture (refus, ou chauffage confirmé), jusqu'à 80 s après la commande : dite dans la discussion, ou
+  // à voix haute si elle est finie.
+  async _suiviVoiture(a) {
+    let s = null;
+    try { s = await this.maison.suiviVoiture(Date.now() - 3000, { chauffage: /chauffage/i.test(String(a.appareil || '')) && a.action !== 'eteindre' }); } catch (_) { return; }
+    if (!s) return;
+    this.log(`Voiture : ${s.texte}`, true);
+    const phrase = s.texte[0].toUpperCase() + s.texte.slice(1);
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Nouvelles de la voiture : ${phrase} Dis-le-lui en une phrase, sans rien ajouter.]`);
+    else this._sayAfter(phrase);
   }
 
   async _crmTool(call) {
