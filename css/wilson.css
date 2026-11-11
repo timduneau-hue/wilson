@@ -172,3 +172,12 @@ body.car .badge { top: calc(64px + env(safe-area-inset-top)); right: auto; left:
 .mj { background: rgba(255,255,255,.05); border-radius: 14px; padding: 10px; text-align: center; } .mj-n { font-size: 17px; color: var(--ink-2); } .mj-i { font-size: 40px; }
 .mj-t { font-size: 24px; font-weight: 650; } .mj-t small { color: var(--ink-2); font-weight: 400; } .mj-p { font-size: 16px; color: var(--ink-2); }
 .courses { list-style: none; padding: 0; columns: 2; } .courses li::before { content: '☐ '; } .courses li.fait { color: var(--ink-2); text-decoration: line-through; } .courses li.fait::before { content: '☑ '; }
+
+/* Santé de Wilson (D5) et filtres du journal */
+.sante-i { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.sante-p { flex: 0 0 12px; height: 12px; border-radius: 50%; margin-top: 4px; background: var(--ink-3); }
+.sante-p.ok { background: #9fd8a0; } .sante-p.warn { background: #e8c26a; } .sante-p.ko { background: #f0a0a8; }
+.sante-v { color: var(--ink-2); font-size: 13.5px; }
+.sante-r { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; font-weight: 600; font-size: 14px; background: rgba(255,255,255,0.05); }
+.sante-r.ok { color: #9fd8a0; } .sante-r.warn { color: #e8c26a; } .sante-r.ko { color: #f0a0a8; }
+#log-filtres .btn.on { border-color: var(--ink-2); color: var(--ink); background: rgba(255,255,255,0.08); }

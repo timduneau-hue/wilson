@@ -38,7 +38,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.39.0';
+const VERSION = '1.40.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -210,7 +210,8 @@ class App {
 
   // priv : la ligne contient ce que dit la famille (le journal à distance peut la masquer, voir réglages).
   log(m, priv = false) {
-    const d = new Date(); this.logs.push(`${pad(d.getHours())}h${pad(d.getMinutes())}:${pad(d.getSeconds())}  ${m}`); if (this.logs.length > 200) this.logs.shift();
+    const d = new Date(); this.logs.push(`${pad(d.getHours())}h${pad(d.getMinutes())}:${pad(d.getSeconds())}  ${m}`); (this.logsT = this.logsT || []).push(d.getTime());
+    if (this.logs.length > 200) { this.logs.shift(); this.logsT.shift(); }
     console.log('[Wilson]', m); if (this.settingsOpen && this.ui) this.ui.renderLog();
     if (this.remote) this.remote.line(m, priv);
   }
@@ -225,6 +226,26 @@ class App {
     const bye = () => { if (Date.now() - (this._byeAt || 0) < 2000) return; this._byeAt = Date.now(); this.remote.flush({ beacon: true }); };
     window.addEventListener('pagehide', bye);
     document.addEventListener('visibilitychange', () => { if (document.hidden) bye(); });
+  }
+
+  // D5 : l'écran « santé » des réglages. Une ligne par point : { libelle, valeur, etat } avec etat = ok | warn | ko.
+  santeLignes() {
+    const now = Date.now(), s = this.settings, L = [], b = this.battery, r = this.remote;
+    const min = (t) => Math.round((now - t) / 60000);
+    L.push({ libelle: 'Version', valeur: `${VERSION}${this.swReg && this.swReg.waiting ? ' (une mise à jour attend le redémarrage)' : ''}`, etat: 'ok' });
+    L.push({ libelle: 'Réseau', valeur: this.netWait ? `COUPURE depuis ${Math.round((now - this.netWait.since) / 1000)} s (${this.netWait.why})` : navigator.onLine ? 'en ligne' : 'hors ligne', etat: this.netWait || !navigator.onLine ? 'ko' : 'ok' });
+    if (r && r.on) L.push({ libelle: 'Journal à distance', valeur: r.fails ? `${r.fails} envoi(s) raté(s) de suite` : r.sentAt ? `dernier envoi il y a ${min(r.sentAt)} min` : 'pas encore envoyé', etat: r.fails > 2 ? 'ko' : r.fails || (r.sentAt && min(r.sentAt) > 15) ? 'warn' : 'ok' });
+    else L.push({ libelle: 'Journal à distance', valeur: 'non relié au script', etat: 'warn' });
+    if (r && r.on && this.sync) L.push({ libelle: 'Réglages communs', valeur: this.sync.state || 'pas encore synchronisés', etat: /erreur|impossible|refus/i.test(this.sync.state || '') ? 'ko' : 'ok' });
+    if (this.claude) { const t = this.claude.etatDit(); L.push({ libelle: 'Claude (PC de la maison)', valeur: t, etat: /absent|limite/i.test(t) ? 'warn' : /coupé|pas encore/i.test(t) ? 'warn' : 'ok' }); }
+    const qd = this.quotaUntil && now < this.quotaUntil, qe = this.ecoQuotaUntil && now < this.ecoQuotaUntil;
+    L.push({ libelle: 'Quotas Gemini', valeur: qd || qe ? `en pause : ${[qd ? 'direct (' + (this.quotaMsg || '') + ')' : '', qe ? 'économique (' + (this.ecoQuotaMsg || '') + ')' : ''].filter(Boolean).join(', ')}` : 'pas de pause', etat: qd || qe ? 'warn' : 'ok' });
+    if (b) L.push({ libelle: 'Batterie', valeur: `${Math.round(b.level * 100)} %${b.charging ? ', branchée' : ', NON branchée'}`, etat: !b.charging && b.level < 0.2 ? 'ko' : !b.charging && b.level < 0.5 ? 'warn' : 'ok' });
+    L.push({ libelle: 'Stockage de l\'appareil', valeur: bilanStockage.echecs ? `${bilanStockage.echecs} écriture(s) impossible(s), dernière : ${bilanStockage.derniere}` : 'sans problème', etat: bilanStockage.echecs ? 'ko' : 'ok' });
+    const erreurs = this.logs.filter((l) => /erreur|impossible|échec|refus|indisponible/i.test(l));
+    L.push({ libelle: 'Dernière erreur du journal', valeur: erreurs.length ? erreurs[erreurs.length - 1].slice(0, 160) : 'aucune depuis le démarrage', etat: erreurs.length ? 'warn' : 'ok' });
+    L.push({ libelle: 'Démarré', valeur: `il y a ${min(this.bootAt) < 90 ? min(this.bootAt) + ' min' : Math.round(min(this.bootAt) / 60) + ' h'}`, etat: 'ok' });
+    return L;
   }
 
   // Bilan de la tablette pour l'onglet « État » du journal à distance.

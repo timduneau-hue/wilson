@@ -174,6 +174,8 @@ export class SettingsUI {
 
     $('s-close').onclick = () => this.close();
     $('s-reload').onclick = () => location.reload();
+    document.querySelectorAll('#log-filtres [data-f]').forEach((b) => { b.onclick = () => { this._filtreLog = b.dataset.f; this.renderLog(); }; });
+    $('s-sante-maj').onclick = () => this.renderSante();
     // W14 : retour à la version précédente (gardée par le service worker) ; il faut appuyer deux fois pour éviter un faux geste.
     $('s-previous').onclick = () => {
       const b = $('s-previous');
@@ -262,7 +264,7 @@ export class SettingsUI {
     const v = this.app.vision;
     const gaze = !v ? 'caméra coupée' : v.gazeReady ? `regard prêt (${v.delegate === 'GPU' ? 'carte graphique' : 'processeur'}, ${Math.round(v.stats.ms || 0)} ms)` : v.modelsDone ? 'regard indisponible' : 'regard en chargement';
     $('version').textContent = `Wilson ${this.app.version} · visage ${this.app.drawFps || '—'} images/s · vision : ${v ? v.mode : 'coupée'}, ${gaze} · connexions Gemini aujourd'hui : ${sessionsToday()}`;
-    this.renderMemory(); this.renderLog();
+    this.renderMemory(); this.renderLog(); this.renderSante();
   }
   fillVoices() {
     const vs = this.app.voice.voices(), sel = $('s-ecovoice');
@@ -293,7 +295,25 @@ export class SettingsUI {
     if (r.ok) { $('vis-nom').value = ''; app.famille.synchroniser().catch(() => {}); }
     this.renderVisages();
   }
-  renderLog() { const el = $('log'); el.textContent = this.app.logs.join('\n'); el.scrollTop = el.scrollHeight; }
+  // D5 : le journal peut être filtré (Tout / Erreurs / Dernière heure) ; l'écran « santé » est refait à l'ouverture et sur demande.
+  logFiltre() {
+    const f = this._filtreLog || 'tout', L = this.app.logs, T = this.app.logsT || [], limite = Date.now() - 3600000;
+    if (f === 'erreurs') return L.filter((l) => /erreur|impossible|échec|refus|indisponible|coupure|retard/i.test(l));
+    if (f === 'heure') return L.filter((l, i) => (T[i] || 0) >= limite);
+    return L;
+  }
+  renderLog() {
+    const el = $('log'), l = this.logFiltre();
+    el.textContent = l.length ? l.join('\n') : 'Rien à afficher avec ce filtre.'; el.scrollTop = el.scrollHeight;
+    document.querySelectorAll('#log-filtres [data-f]').forEach((b) => b.classList.toggle('on', b.dataset.f === (this._filtreLog || 'tout')));
+  }
+  renderSante() {
+    const z = $('sante'); if (!z) return;
+    let L = []; try { L = this.app.santeLignes(); } catch (e) { L = [{ libelle: 'Santé', valeur: 'lecture impossible : ' + e.message, etat: 'ko' }]; }
+    const pire = L.some((x) => x.etat === 'ko') ? 'ko' : L.some((x) => x.etat === 'warn') ? 'warn' : 'ok';
+    z.innerHTML = `<p class="sante-r ${pire}">${pire === 'ok' ? 'Tout va bien.' : pire === 'warn' ? 'Quelques points à surveiller.' : 'Un ou plusieurs points demandent de l\'attention.'}</p>` +
+      L.map((x) => `<div class="sante-i"><span class="sante-p ${x.etat}" aria-hidden="true"></span><div><b>${esc(x.libelle)}</b><br><span class="sante-v">${esc(x.valeur)}</span></div></div>`).join('');
+  }
   logStatus(msg, cls) { const el = $('s-logstatus'); el.hidden = !msg; el.className = 'status ' + (cls || ''); el.textContent = msg; }
   // État du CRM : relié (nombre de contacts, brouillons à valider) ou la raison exacte.
   async crmStatus(force) {
