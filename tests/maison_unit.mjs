@@ -61,6 +61,16 @@ t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'deman
   t(r.ok && appels[2][0] === 'climate/set_hvac_mode' && appels[2][1].hvac_mode === 'auto', 'voiture : allumer → mode auto');
   r = await v.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'eteindre' });
   t(r.ok && appels[3][1].hvac_mode === 'off', 'voiture : éteindre → off');
+  // Home Assistant réglé en °F (11/11/26) : Wilson parle en °C et convertit
+  etats[0].attributes = { friendly_name: 'Chauffage de la voiture', hvac_modes: ['off', 'auto'], min_temp: 61, max_temp: 82, temperature: 72 };
+  const f1 = globalThis.fetch;
+  globalThis.fetch = async (url, o) => url.endsWith('/api/config') ? { status: 200, ok: true, json: async () => ({ unit_system: { temperature: '°F' } }) } : f1(url, o);
+  const w = new Maison({ settings: { haUrl: 'https://ha.exemple.ts.net', haToken: 'bon' } });
+  await w.rafraichir();
+  t(w.uniteF && /16 à 28 °C/.test(w.texteInventaire()) && /réglé à 22 °C/.test(w.texteInventaire()), 'HA en °F : la consigne dit « 16 à 28 °C, réglé à 22 °C » : ' + w.texteInventaire());
+  const n0 = appels.length;
+  r = await w.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'temperature', valeur: '21' });
+  t(r.ok && appels[n0][1].temperature === 70 && /21 °C/.test(r.info), 'HA en °F : « 21 degrés » → 70 °F envoyés : ' + JSON.stringify(appels[n0]));
   globalThis.fetch = f0;
 }
 console.log(`${ok}/${ok + ko} OK`); process.exit(ko ? 1 : 0);

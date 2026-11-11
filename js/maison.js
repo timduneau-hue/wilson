@@ -98,6 +98,11 @@ export class Maison {
       this._fetch('/api/template', { method: 'POST', signal, text: true, body: { template:
         "{% set cast = integration_entities('cast') %}{% for s in states if s.domain in ['light','switch','media_player','remote','script','scene','cover','fan','input_boolean','climate'] %}{{ s.entity_id }}|{{ area_name(s.entity_id) or '' }}|{{ is_hidden_entity(s.entity_id) }}|{{ s.entity_id in cast }}\n{% endfor %}" } })]);
     if (!st.ok || !Array.isArray(st.json)) throw Object.assign(new Error('états illisibles (' + st.status + ')'), { status: st.status });
+    // Unité des températures de Home Assistant (11/11/26 : il était réglé en °F, la consigne de la voiture affichait « 72 »).
+    if (!this.unitesAt || Date.now() - this.unitesAt > 3600000) {
+      const c = await this._fetch('/api/config', { signal }).catch(() => null);
+      if (c && c.ok && c.json) { this.uniteF = /F/.test(((c.json.unit_system || {}).temperature) || ''); this.unitesAt = Date.now(); }
+    }
     const meta = {};
     for (const l of String(tp.json || '').split('\n')) { const [id, piece, cache, cast] = l.split('|'); if (id) meta[id.trim()] = { piece: (piece || '').trim(), cache: /true/i.test(cache || ''), cast: /true/i.test(cast || '') }; }
     this.inv = st.json.filter((e) => {
@@ -112,6 +117,9 @@ export class Maison {
   }
   async _inv(signal, maxAge = 60000) { if (!this.inv || Date.now() - this.invAt > maxAge) await this.rafraichir(signal); return this.inv || []; }
 
+  // Températures : Wilson parle en °C ; Home Assistant peut être réglé en °F.
+  _enC(t) { return t == null ? t : this.uniteF ? Math.round((t - 32) / 1.8) : t; }
+  _versHA(c) { return this.uniteF ? Math.round(c * 1.8 + 32) : c; }
   _decrire(e, detail = false) {
     const a = e.a, bits = [ETAT[e.etat] || e.etat];
     if (e.domaine === 'light' && e.etat === 'on' && a.brightness != null) bits.push(`luminosité ${Math.round(a.brightness / 2.55)} %`);
@@ -123,8 +131,8 @@ export class Maison {
     }
     if (e.domaine === 'remote' && a.current_activity) bits.push(`appli ${a.current_activity}`);
     if (e.domaine === 'climate') {
-      if (a.temperature != null) bits.push(`réglé à ${a.temperature} °C`);
-      if (a.current_temperature != null) bits.push(`il fait ${a.current_temperature} °C dedans`);
+      if (a.temperature != null) bits.push(`réglé à ${this._enC(a.temperature)} °C`);
+      if (a.current_temperature != null) bits.push(`il fait ${this._enC(a.current_temperature)} °C dedans`);
     }
     return bits.join(', ');
   }
@@ -136,7 +144,7 @@ export class Maison {
     }
     if (e.domaine === 'script' || e.domaine === 'scene') return 'allumer (lance)';
     if (e.domaine === 'remote') return 'appli';
-    if (e.domaine === 'climate') return `allumer, éteindre, temperature (${e.a.min_temp != null ? e.a.min_temp + ' à ' + e.a.max_temp + ' °C' : 'en °C'})`;
+    if (e.domaine === 'climate') return `allumer, éteindre, temperature (${e.a.min_temp != null ? this._enC(e.a.min_temp) + ' à ' + this._enC(e.a.max_temp) + ' °C' : 'en °C'})`;
     return 'allumer, éteindre';
   }
   // Pour la consigne de Wilson : une ligne par appareil.
@@ -227,13 +235,13 @@ export class Maison {
         const t = num(valeur, NaN);
         if (action === 'eteindre' || (action === 'basculer' && e.etat !== 'off')) { await svc('climate', 'set_hvac_mode', { hvac_mode: 'off' }); return { ok: true, info: `${e.nom} : arrêt demandé.` }; }
         if (Number.isFinite(t)) {
-          const lo = e.a.min_temp != null ? e.a.min_temp : 16, hi = e.a.max_temp != null ? e.a.max_temp : 30, c = Math.max(lo, Math.min(hi, Math.round(t)));
-          await svc('climate', 'set_temperature', { temperature: c, hvac_mode: marche });
+          const lo = e.a.min_temp != null ? this._enC(e.a.min_temp) : 16, hi = e.a.max_temp != null ? this._enC(e.a.max_temp) : 30, c = Math.max(lo, Math.min(hi, Math.round(t)));
+          await svc('climate', 'set_temperature', { temperature: this._versHA(c), hvac_mode: marche });
           return { ok: true, info: `${e.nom} : mise en marche demandée, à ${c} °C${c !== Math.round(t) ? ` (${lo} à ${hi} °C possibles)` : ''}. La voiture met jusqu'à une minute à démarrer.` };
         }
         if (action === 'temperature') return { ok: false, info: 'Il manque la température : demande-lui combien de degrés.' };
         await svc('climate', 'set_hvac_mode', { hvac_mode: marche });
-        return { ok: true, info: `${e.nom} : mise en marche demandée${e.a.temperature != null ? `, à ${e.a.temperature} °C` : ''}. La voiture met jusqu'à une minute à démarrer.` };
+        return { ok: true, info: `${e.nom} : mise en marche demandée${e.a.temperature != null ? `, à ${this._enC(e.a.temperature)} °C` : ''}. La voiture met jusqu'à une minute à démarrer.` };
       }
       switch (action) {
         case 'allumer':
