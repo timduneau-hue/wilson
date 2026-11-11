@@ -214,7 +214,7 @@ function doGet(e) {
     + '<p>Sur chaque appareil (tablette, téléphone) : appui long sur le visage de Wilson → <b>Réglages</b> → <b>Journal à distance</b> → <b>Scanner le QR code</b>, puis montre-lui ce code (l’écran de l’ordinateur, ou une photo sur ton téléphone).</p>'
     + '<p><b>Ce code et cette page donnent accès à Wilson : ne les partage avec personne, et ne garde pas de photo du code.</b></p>'
     + '<div id="qr"></div>'
-    + '<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>'
+    + '<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>'
     + '<script>new QRCode(document.getElementById("qr"), { text: ' + JSON.stringify(url) + ', width: 320, height: 320, correctLevel: QRCode.CorrectLevel.M });</script>'
     + '</body></html>';
   return HtmlService.createHtmlOutput(html).setTitle('Journal de Wilson');

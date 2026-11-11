@@ -18,7 +18,7 @@ android {
     }
 
     // Toujours la même clé (PLAN 9, A8) : une nouvelle version s'installe par-dessus l'ancienne. La clé est créée une seule
-    // fois par GitHub (android/wilson.keystore) et protégée par le secret WILSON_CLE du dépôt : aucun mot de passe ici.
+    // fois par GitHub (secrets WILSON_KEYSTORE_B64 et WILSON_CLE du dépôt, fichier hors dépôt) : aucun mot de passe ici.
     def cle = System.getenv('WILSON_CLE')
     signingConfigs {
         wilson {

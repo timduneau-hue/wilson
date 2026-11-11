@@ -1,0 +1,44 @@
+# Vérification à chaque push et à chaque demande de fusion : syntaxe de tous les scripts, puis tests unitaires node.
+# Si une étape échoue, le workflow est rouge : ne pas publier avant d'avoir corrigé.
+name: Vérifier
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Syntaxe (node --check)
+        shell: bash
+        run: |
+          set -e
+          n=0
+          while IFS= read -r f; do
+            node --check "$f" || { echo "::error file=$f::erreur de syntaxe"; exit 1; }
+            n=$((n+1))
+          done < <(find js pc -type f \( -name '*.js' -o -name '*.mjs' \) -not -path '*/node_modules/*'; echo sw.js)
+          echo "$n fichiers vérifiés"
+
+      - name: Tests unitaires
+        shell: bash
+        working-directory: tests
+        run: |
+          set -e
+          # oreille_unit.mjs exige des voix de synthèse (python3 make_voix.py : espeak-ng, mbrola) : lancé à la main seulement.
+          for t in $(ls *_unit.mjs | grep -v '^oreille_unit.mjs$') apps_script_unit.js; do
+            echo "::group::$t"
+            node "$t"
+            echo "::endgroup::"
+          done

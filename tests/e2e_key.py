@@ -89,7 +89,7 @@ async def main():
         await page.evaluate("wilson._onWakeWord({text:'wilson', conf:0.9})")
         await page.wait_for_function('wilson.state === "conversation"', timeout=10000)
         u = state['urls']
-        check('Repli automatique sur le jeton éphémère', len(u) >= 2 and 'BidiGenerateContent?key=' in u[-2] and 'BidiGenerateContentConstrained?access_token=auth_tokens%2Ftok-1' in u[-1], ' | '.join(x.split('GenerativeService.')[1][:60] for x in u))
+        check("Jeton éphémère essayé d'abord (W4) : la clé n'apparaît pas dans l'adresse", len(u) >= 1 and 'BidiGenerateContentConstrained?access_token=auth_tokens%2Ftok-1' in u[-1] and not any('BidiGenerateContent?key=' in x for x in u), ' | '.join(x.split('GenerativeService.')[1][:60] for x in u))
         check('Jeton demandé avec la clé dans l\'en-tête', state.get('token_key') == GOOD and state['token_body'].get('uses') == 1 and 'expireTime' in state['token_body'], json.dumps(state.get('token_body'))[:120])
         await page.evaluate("wilson.endConversation('test')")
         n = len(state['urls'])

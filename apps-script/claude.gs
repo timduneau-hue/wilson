@@ -46,7 +46,7 @@ function claudeSecret_(secret) {
   if (secret.length < 24) return { ok: false, erreur: 'secret du PC absent ou trop court' };
   var p = PropertiesService.getScriptProperties(), connu = p.getProperty('claude_secret');
   if (!connu) { p.setProperty('claude_secret', secret); return { ok: true, nouveau: true }; }
-  return connu === secret ? { ok: true } : { ok: false, erreur: 'secret du PC refusé (lancer « oublierPC » dans l\'éditeur pour en changer)' };
+  return memes_(connu, secret) ? { ok: true } : { ok: false, erreur: 'secret du PC refusé (lancer « oublierPC » dans l\'éditeur pour en changer)' };
 }
 
 function claudePc_() {

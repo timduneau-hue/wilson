@@ -174,7 +174,7 @@ export class Brain {
   async connect(opts) {
     const key = cleanKey(opts.key);
     const first = (arr, v) => (v != null && arr.includes(v) ? [v, ...arr.filter((x) => x !== v)] : arr);
-    const auths = first(['key', 'token'], this.authMode);
+    const auths = first(['token', 'key'], this.authMode);
     const now = Date.now();
     const all = first([...new Set([opts.model, ...FALLBACK_MODELS])], this.modelUsed);
     const models = [...all.filter((m) => !(this.refused[m] > now)), ...all.filter((m) => this.refused[m] > now)];   // refusés récemment : en dernier
@@ -188,7 +188,7 @@ export class Brain {
           try {
             const url = mode === 'key'
               ? `${WS_ROOT}BidiGenerateContent?key=${encodeURIComponent(key)}`
-              : `${WS_ROOT}BidiGenerateContentConstrained?access_token=${encodeURIComponent(await ephemeralToken(key))}`;
+              : `${WS_ROOT}BidiGenerateContentConstrained?access_token=${encodeURIComponent(await ephemeralToken(key).catch((te) => { te.tokenStep = true; throw te; }))}`;
             const think = /2\.5/.test(model) ? this.think : undefined;
             await this._open(url, { ...opts, model, level, think, proactive: this.proactive });
             const changed = mode !== this.authMode || model !== this.modelUsed || level !== this.level;
@@ -214,6 +214,7 @@ export class Brain {
               break auth;
             }
             if (kind === 'auth') { authErr = e; continue auth; }      // la clé ne passe pas ainsi : autre méthode
+            if (mode === 'token' && e.tokenStep) { last = e; continue auth; }   // le jeton n'a pas pu être obtenu (réseau, service) : on essaie la clé dans l'adresse
             if (kind === 'quota') { e.quota = true; e.model = model; quotaErr = quotaErr || e; this.refused[model] = Date.now() + QUOTA_SKIP_MS; this._save(); break; }   // quota du modèle : modèle de secours, rien d'autre
             if (kind === 'config' && /think/i.test(e.message) && this.think === false) { this.think = null; this._save(); li--; continue; }   // réglage de réflexion refusé : même niveau, sans lui
             if (kind === 'config' && /proactiv/i.test(e.message) && this.proactive === false) { this.proactive = null; this.proRefusAt = Date.now(); this._emit('log', 'Réglage « réponds à tout » refusé par le modèle : réessayé dans 24 h'); this._save(); li--; continue; }   // idem pour « réponds à tout »
