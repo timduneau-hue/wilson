@@ -4,14 +4,14 @@
 // le CRM en lecture seule (crm-mcp.mjs) : aucune commande, aucun fichier, aucune écriture.
 // Lancé tout seul à l'ouverture de session (boucle.cmd, fenêtre cachée) ; Node 18 ou plus, sans bibliothèque.
 
-import { spawn, spawnSync, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 4';
+export const VERSION = 'relais 5';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
 const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
@@ -69,6 +69,68 @@ export function argumentsClaude({ mcp, consigne, modele = 'sonnet', effort = 'hi
     ...(crm ? ['--mcp-config', mcp] : []), '--strict-mcp-config', '--system-prompt', consigne, '--no-session-persistence'];
 }
 
+// ---------- Home Assistant (demande de Timothée du 11/11/26 : « occupe-toi de Home Assistant ») ----------
+// Du 07/11/26, 09h20, au 11/11/26, 09h46 : la machine virtuelle « HomeAssistant » tournait, mais sans adresse réseau
+// (« IPv4 addresses for enp0s3: (No address) » : carte en pont sur le Wi-Fi du PC, adresse jamais reprise) ; rebrancher son
+// câble réseau virtuel l'a remise en route tout de suite. Le relais, qui tourne sur ce PC, la surveille : toutes les 5 min,
+// Home Assistant répond-il ? Sinon (et seulement si le PC lui-même a du réseau), au plus une fois par 30 min : machine
+// arrêtée → démarrée sans fenêtre ; machine en route mais muette deux fois de suite → câble virtuel débranché puis rebranché.
+// Tout est noté dans le journal de Wilson (« Maison (PC) : … »). config.json : "ha": false pour couper, ou
+// { "url": "http://…:8123", "vm": "nom de la machine" }.
+export const HA_VERIF_MS = 5 * 60000, HA_ACTION_MS = 30 * 60000;
+export class GardeHA {
+  constructor({ cfg = {}, journal = () => {}, fetchImpl = globalThis.fetch, vbox, run, maintenant = () => Date.now(), pauseMs = 5000 } = {}) {
+    const c = cfg.ha === false ? null : (cfg.ha || {});
+    this.on = !!c; this.url = String((c && c.url) || 'http://homeassistant.local:8123').replace(/\/+$/, ''); this.vm = (c && c.vm) || '';
+    this.journal = journal; this.fetch = fetchImpl; this.maintenant = maintenant;
+    this.vbox = vbox !== undefined ? vbox : [process.env.VBOX_MSI_INSTALL_PATH && path.join(process.env.VBOX_MSI_INSTALL_PATH, 'VBoxManage.exe'),
+      'C:\\Program Files\\Oracle\\VirtualBox\\VBoxManage.exe'].filter(Boolean).find((x) => { try { return fs.existsSync(x); } catch (_) { return false; } }) || '';
+    this.run = run || ((args) => new Promise((ok) => execFile(this.vbox, args, { timeout: 60000, windowsHide: true }, (e, out, err) => ok({ ok: !e, out: String(out || ''), err: String(err || (e && e.message) || '') }))));
+    this.muet = 0; this.actionAt = 0; this.ip = ''; this.enPanne = 0; this.dit = ''; this.pauseMs = pauseMs;
+  }
+  async repond(url) {
+    try { const r = await this.fetch(url + '/manifest.json', { signal: AbortSignal.timeout(8000) }); return r.status > 0; } catch (_) { return false; }
+  }
+  async vmNom() {
+    if (this.vm) return this.vm;
+    const r = await this.run(['list', 'vms']);
+    const noms = [...r.out.matchAll(/^"(.+)"\s+\{/gm)].map((m) => m[1]);
+    return (this.vm = noms.find((n) => /home ?assistant|haos|hass/i.test(n)) || '');
+  }
+  async enRoute(nom) { const r = await this.run(['list', 'runningvms']); return r.out.split(/\r?\n/).some((l) => l.startsWith(`"${nom}" `)); }
+  // pcEnLigne : le PC joint le script de Wilson (sinon, inutile de toucher à Home Assistant).
+  async verifier({ pcEnLigne = true } = {}) {
+    if (!this.on || !this.vbox) { if (this.on && !this.dit) { this.dit = 'pas de VirtualBox'; this.journal('VirtualBox introuvable sur ce PC : je ne surveille pas Home Assistant'); } return 'coupé'; }
+    let ok = await this.repond(this.url);
+    if (!ok && this.ip) ok = await this.repond(`http://${this.ip}:8123`);
+    if (ok) {
+      if (this.enPanne) this.journal(`Home Assistant répond de nouveau (muet depuis ${Math.round((this.maintenant() - this.enPanne) / 60000)} min)`);
+      this.muet = 0; this.enPanne = 0;
+      if (!this.ip) { try { const d = await import('node:dns'); this.ip = (await d.promises.lookup(new URL(this.url).hostname, { family: 4 })).address; } catch (_) {} }
+      return 'ok';
+    }
+    this.muet++; if (!this.enPanne) this.enPanne = this.maintenant();
+    if (!pcEnLigne) return 'pc hors ligne';
+    const nom = await this.vmNom();
+    if (!nom) { if (this.dit !== 'pas de vm') { this.dit = 'pas de vm'; this.journal('Home Assistant ne répond pas, et je ne trouve pas sa machine virtuelle dans VirtualBox'); } return 'pas de vm'; }
+    if (this.maintenant() - this.actionAt < HA_ACTION_MS) return 'attente';
+    if (!(await this.enRoute(nom))) {
+      this.actionAt = this.maintenant();
+      const r = await this.run(['startvm', nom, '--type', 'headless']);
+      this.journal(r.ok ? `Home Assistant ne répondait pas : sa machine virtuelle « ${nom} » était arrêtée, je l'ai démarrée` : `machine virtuelle « ${nom} » arrêtée, démarrage impossible : ${r.err.slice(0, 160)}`);
+      return r.ok ? 'démarrée' : 'échec';
+    }
+    if (this.muet < 2) return 'muet';
+    this.actionAt = this.maintenant();
+    const a = await this.run(['controlvm', nom, 'setlinkstate1', 'off']);
+    await new Promise((ok) => setTimeout(ok, this.pauseMs));
+    const b = await this.run(['controlvm', nom, 'setlinkstate1', 'on']);
+    this.journal(a.ok && b.ok ? `Home Assistant muet depuis ${Math.round((this.maintenant() - this.enPanne) / 60000)} min alors que sa machine virtuelle tourne : câble réseau virtuel débranché puis rebranché (il reprend une adresse)`
+      : `Home Assistant muet, câble réseau virtuel impossible à rebrancher : ${(a.err || b.err).slice(0, 160)}`);
+    return a.ok && b.ok ? 'câble rebranché' : 'échec';
+  }
+}
+
 // ---------- Le relais ----------
 export class Relais {
   constructor({ dir = DIR, config, fetchImpl = globalThis.fetch, lancer, log } = {}) {
@@ -77,6 +139,8 @@ export class Relais {
     this.fetch = fetchImpl; this.enCours = 0; this.lignes = []; this.stop = false;
     this.lancerClaude = lancer || ((q) => this._claude(q));
     this.log = log || ((m) => this._log(m));
+    this.gardeHA = new GardeHA({ cfg: this.cfg, fetchImpl, journal: (m) => { this.log('maison : ' + m); this.lignes.push({ t: Date.now(), m: 'Maison (PC) : ' + m }); } });
+    this.scriptOkAt = 0;
   }
 
   _log(m) {
@@ -136,8 +200,13 @@ export class Relais {
     let attente = 5000;
     this.journal(`démarré (${VERSION}, ${os.hostname()}, Node ${process.versions.node}, ${this.cfg.modele || 'sonnet'}, effort ${this.cfg.effort || 'high'})`);
     let dernierJournal = Date.now(), derniereMaj = Date.now() - MAJ_MS + 60000;   // 1re vérification une minute après le démarrage
+    let derniereHA = Date.now() - HA_VERIF_MS + 90000, verifHA = null;                // Home Assistant : 1re vérification 1 min 30 après
     while (!this.stop) {
       try {
+        if (!verifHA && Date.now() - derniereHA > HA_VERIF_MS) {
+          derniereHA = Date.now();
+          verifHA = this.gardeHA.verifier({ pcEnLigne: Date.now() - this.scriptOkAt < 3 * 60000 }).catch((e) => this.log('maison : vérification impossible : ' + e.message)).finally(() => { verifHA = null; });
+        }
         if (Date.now() - dernierJournal > 10000) { dernierJournal = Date.now(); await this.viderJournal(); }
         if (!this.enCours && Date.now() - derniereMaj > MAJ_MS && this.majAuto !== false) {
           derniereMaj = Date.now();
@@ -150,7 +219,7 @@ export class Relais {
         const t0 = Date.now();
         const r = await this.post({ action: 'claude_prendre', secret: this.cfg.secret, attente: 25, occupe: this.enCours, version: VERSION }, 45000);
         if (!r.ok) throw new Error(r.erreur || 'refus du script');
-        attente = 5000;
+        attente = 5000; this.scriptOkAt = Date.now();
         if (r.question) this.traiter(r.question);
         else if (Date.now() - t0 < 2000) await pause(2000);                    // le script n'a pas attendu : on ne le harcèle pas
       } catch (e) {

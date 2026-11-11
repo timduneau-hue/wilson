@@ -3,7 +3,7 @@ import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decouper, demande, argumentsClaude, Relais, limiteAtteinte } from '../pc/relais.mjs';
+import { decouper, demande, argumentsClaude, Relais, limiteAtteinte, GardeHA, HA_ACTION_MS } from '../pc/relais.mjs';
 import { OUTILS, appeler, serveur } from '../pc/crm-mcp.mjs';
 
 let ok = 0, ko = 0;
@@ -52,7 +52,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 4 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 5 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -79,8 +79,34 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 4');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 5');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
+
+// ---------- Home Assistant surveillé par le relais (11/11/26 : machine virtuelle sans adresse du 07/11 au 11/11) ----------
+{
+  let t = 1e9, haOk = false, enRoute = true; const cmds = [], notes = [];
+  const G = new GardeHA({ cfg: {}, vbox: 'VBoxManage', pauseMs: 0, maintenant: () => t, journal: (m) => notes.push(m),
+    fetchImpl: async () => { if (!haOk) throw new TypeError('fetch failed'); return { status: 200 }; },
+    run: async (a) => { cmds.push(a.join(' ')); return { ok: true, out: a[1] === 'vms' ? '"HomeAssistant" {1234}\n"Autre" {5678}\n' : a[1] === 'runningvms' ? (enRoute ? '"HomeAssistant" {1234}\n' : '') : '', err: '' }; } });
+  check('HA : répond → rien à faire', (haOk = true, await G.verifier()) === 'ok' && !cmds.length);
+  haOk = false;
+  check('HA : muet une fois, machine en route → on attend (pas d\'action sur un raté)', (await G.verifier()) === 'muet' && !cmds.some((c) => /controlvm|startvm/.test(c)), cmds.join(' | '));
+  t += 5 * 60000;
+  check('HA : muet deux fois → câble réseau virtuel débranché puis rebranché (machine trouvée toute seule)', (await G.verifier()) === 'câble rebranché'
+    && cmds.includes('controlvm HomeAssistant setlinkstate1 off') && cmds.includes('controlvm HomeAssistant setlinkstate1 on') && notes.some((n) => /câble réseau virtuel débranché puis rebranché/.test(n)), cmds.join(' | '));
+  const n0 = cmds.length; t += 5 * 60000;
+  check('HA : au plus une action par 30 min', (await G.verifier()) === 'attente' && cmds.length === n0);
+  t += HA_ACTION_MS; enRoute = false;
+  check('HA : machine arrêtée → démarrée sans fenêtre', (await G.verifier()) === 'démarrée' && cmds.includes('startvm HomeAssistant --type headless') && notes.some((n) => /arrêtée, je l'ai démarrée/.test(n)), cmds.join(' | '));
+  const n1 = cmds.length; t += HA_ACTION_MS;
+  check('HA : PC sans réseau → on ne touche à rien', (await G.verifier({ pcEnLigne: false })) === 'pc hors ligne' && cmds.length === n1);
+  haOk = true;
+  check('HA : de nouveau là → noté au journal', (await G.verifier()) === 'ok' && notes.some((n) => /répond de nouveau/.test(n)));
+  const G2 = new GardeHA({ cfg: { ha: false }, vbox: 'x' });
+  check('HA : « ha »: false dans config.json → pas de surveillance', (await G2.verifier()) === 'coupé');
+  const n3 = []; const G3 = new GardeHA({ cfg: {}, vbox: '', journal: (m) => n3.push(m) });
+  check('HA : pas de VirtualBox sur le PC → dit une fois, rien d\'autre', (await G3.verifier()) === 'coupé' && (await G3.verifier()) === 'coupé' && n3.length === 1);
+}
 
 // ---------- Le CRM en lecture seule ----------
 check('CRM : 6 outils, tous des lectures', OUTILS.length === 6 && OUTILS.every((o) => /^crm_(schema|requete|client|journee|bilan|produit)$/.test(o.action)));
