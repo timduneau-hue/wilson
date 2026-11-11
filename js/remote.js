@@ -15,7 +15,22 @@ export class RemoteLog {
     this.app = app; this.q = []; this.mesures = []; this.timer = null; this.fails = 0; this.sentAt = 0; this.sent = 0;
     setInterval(() => { if (this.on) this.flush(); }, PULSE_MS);   // pouls : l'onglet État dit si la tablette est toujours en vie
   }
-  get url() { return String(this.app.settings.logUrl || '').trim(); }
+  // Copie de secours de l'adresse avec sa clé, sur l'appareil seulement (11/11/26 : la synchronisation l'avait remplacée
+  // par l'ancienne, sans clé) : si l'adresse des réglages perd sa clé mais vise le même script, la copie la remplace.
+  get url() {
+    const u = String(this.app.settings.logUrl || '').trim(), K = 'wilson.scriptCle';
+    try {
+      if (avecCle(u)) { if (this._cle !== u) { this._cle = u; localStorage.setItem(K, u); } return u; }
+      const b = this._cle || localStorage.getItem(K) || '';
+      if (b && u && b.split('?')[0].replace(/\/$/, '') === u.split('?')[0].replace(/\/$/, '')) {
+        this.app.settings.logUrl = b; this._cle = b;
+        if (this.app.saveSettingsQuiet) this.app.saveSettingsQuiet();
+        if (this.app.log) setTimeout(() => this.app.log('Adresse du script : la clé avait disparu des réglages, je l\'ai remise (copie gardée sur l\'appareil)'), 0);
+        return b;
+      }
+    } catch (_) {}
+    return u;
+  }
   get on() { return SCRIPT_URL.test(this.url); }
 
   // priv : la ligne contient ce que la famille a dit (masquée si « Envoyer aussi les phrases échangées » est décoché).

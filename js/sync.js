@@ -5,11 +5,16 @@
 // Propres à chaque appareil : calibrage et sens du regard (position de la caméra), voix installées sur l'appareil.
 // Oreille du mode voiture : sa sensibilité dépend du micro de l'appareil (ses empreintes restent aussi sur l'appareil).
 export const LOCAL_ONLY = ['gazeCalib', 'mirror', 'ecoVoice', 'v', 'oreilleSens'];
+// L'adresse du script (logUrl), avec sa clé secrète, ne passe JAMAIS par la synchronisation : journal du 11/11/26,
+// 08h41-08h42, la tablette puis le téléphone scannent le nouveau QR code (adresse avec la clé), et aussitôt la
+// synchronisation leur remet l'ancienne adresse des réglages communs (sans la clé) → « clé refusée », plus rien ne passait
+// (CRM, journal, mémoire, Claude). Elle reste dans le lien de copie (« #reglages=… », geste volontaire de Timothée).
+export const HORS_SYNCHRO = [...LOCAL_ONLY, 'logUrl'];
 const PULL_MS = 10 * 60000;
 
-export function shareable(s) {
+export function shareable(s, exclus = LOCAL_ONLY) {
   const o = {};
-  for (const k of Object.keys(s)) if (!LOCAL_ONLY.includes(k)) o[k] = s[k];
+  for (const k of Object.keys(s)) if (!exclus.includes(k)) o[k] = s[k];
   return o;
 }
 
@@ -33,10 +38,10 @@ export function takeSettingsFromHash() {
 }
 
 // Applique des réglages venus d'ailleurs sur les réglages locaux ; renvoie la liste des clés changées.
-export function mergeInto(local, remote) {
+export function mergeInto(local, remote, exclus = LOCAL_ONLY) {
   const changed = [];
   for (const k of Object.keys(remote)) {
-    if (k === '_t' || LOCAL_ONLY.includes(k)) continue;
+    if (k === '_t' || exclus.includes(k)) continue;
     if (JSON.stringify(local[k]) !== JSON.stringify(remote[k])) { local[k] = remote[k]; changed.push(k); }
   }
   local._t = remote._t || local._t;
@@ -59,7 +64,7 @@ export class SettingsSync {
     if (!this.on) return false;
     const s = this.app.settings;
     try {
-      const r = await this.app.remote.ask({ action: 'reglages_ecrire', t: s._t || 1, reglages: shareable(s) });
+      const r = await this.app.remote.ask({ action: 'reglages_ecrire', t: s._t || 1, reglages: shareable(s, HORS_SYNCHRO) });
       if (r && r.ok) { this._ok(r.applique ? 'envoyés' : 'déjà à jour'); return true; }
       return this._fail(r);
     } catch (e) { return this._fail(null, e); }
@@ -74,8 +79,8 @@ export class SettingsSync {
       if (!r || !r.ok) return this._fail(r);
       const remote = r.reglages, rt = +r.t || 0, lt = +s._t || 0;
       if (!remote || !rt) { this._ok('premier envoi'); return this.push(); }   // rien de commun encore : cet appareil fait référence
-      if (rt > lt || (adopt && JSON.stringify(shareable({ ...s, _t: 0 })) !== JSON.stringify(shareable({ ...s, ...remote, _t: 0 })))) {
-        const changed = mergeInto(s, { ...remote, _t: rt });
+      if (rt > lt || (adopt && JSON.stringify(shareable({ ...s, _t: 0 }, HORS_SYNCHRO)) !== JSON.stringify(shareable({ ...s, ...remote, logUrl: s.logUrl, _t: 0 }, HORS_SYNCHRO)))) {
+        const changed = mergeInto(s, { ...remote, _t: rt }, HORS_SYNCHRO);
         this.app.saveSettingsQuiet();
         if (changed.length) {
           this.app.log(`Réglages mis à jour depuis un autre appareil : ${changed.filter((k) => k !== 'apiKey').join(', ') || 'clé'}${changed.includes('apiKey') ? ' (clé comprise)' : ''}`);

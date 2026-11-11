@@ -73,5 +73,13 @@ const r5 = new Date(C.repriseLimite('limit · resets 5:30pm', new Date(2026, 10,
 check('Reprise : « 5:30pm » → 17 h 30 le jour même', r5.getDate() === 10 && r5.getHours() === 17 && r5.getMinutes() === 30, r5.toString());
 check('Phrase dite : « Claude a atteint sa limite d\'utilisation »', /limite d'utilisation/.test(C.phraseIndispo('limite')));
 
+// Réglages communs : l'adresse du script (avec sa clé) ne se partage jamais (11/11/26, 08h42 : remplacée par l'ancienne)
+const S = await import('../js/sync.js');
+const local = { apiKey: 'A', logUrl: 'https://script.google.com/macros/s/AKfycbTEST/exec?k=0123456789abcdef0123456789abcdef', crm: true, _t: 5 };
+const chg = S.mergeInto(local, { apiKey: 'A', logUrl: 'https://script.google.com/macros/s/AKfycbTEST/exec', crm: false, _t: 9 }, S.HORS_SYNCHRO);
+check('Synchronisation : l\'adresse du script avec sa clé n\'est jamais remplacée par celle des réglages communs', /\?k=/.test(local.logUrl) && !chg.includes('logUrl') && local.crm === false, JSON.stringify(local));
+check('… ni envoyée aux autres appareils par la synchronisation', !('logUrl' in S.shareable(local, S.HORS_SYNCHRO)));
+check('… mais gardée dans le lien de copie des réglages (geste volontaire)', 'logUrl' in S.shareable(local));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);
