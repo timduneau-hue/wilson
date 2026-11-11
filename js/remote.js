@@ -4,8 +4,10 @@
 //  - mesures de délais : une ligne par réponse (onglet « Délais ») ;
 //  - bilan de la tablette (version, état, vision, batterie…) : onglet « État », rafraîchi au moins toutes les 10 min.
 // L'adresse du script est saisie ou scannée (QR code) sur la tablette et reste dessus, comme la clé Gemini.
+// Depuis le 11/11/26, elle porte la clé secrète du script (…/exec?k=…) : sans elle, le script refuse tout (sécurité).
 
-export const SCRIPT_URL = /^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[\w-]{20,}\/exec\/?$/;
+export const SCRIPT_URL = /^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[\w-]{20,}\/exec\/?(\?k=[\w-]{24,})?$/;
+export const avecCle = (url) => /\?k=[\w-]{24,}$/.test(String(url || '').trim());
 const FLUSH_MS = 30000, PULSE_MS = 10 * 60000, MAXQ = 600, MAXM = 200;
 
 export class RemoteLog {
@@ -71,6 +73,16 @@ RemoteLog.prototype.ask = async function (payload, signal) {
   if (!this.on) throw new Error('script non configuré');
   const r = await fetch(this.url, { method: 'POST', cache: 'no-store', signal, headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
   const txt = await r.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch (_) {}
+  if (j) {
+    // Clé absente ou changée : on le dit dans le journal (au plus une fois toutes les 10 min), l'appelant reçoit l'erreur.
+    if (j.ok === false && /^clé /.test(String(j.erreur || '')) && Date.now() - (this._cleDit || 0) > 600000) {
+      this._cleDit = Date.now();
+      try { this.app.log('Script : ' + j.erreur); } catch (_) {}
+    }
+    return j;
+  }
   try { return JSON.parse(txt); } catch (_) { throw new Error(/^ok$/i.test(txt.trim()) ? 'le script déployé ne sait pas encore chercher (ancienne version)' : `réponse illisible du script (${r.status})`); }
 };
 

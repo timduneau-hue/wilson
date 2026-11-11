@@ -13,6 +13,8 @@
 //  - claude_etat (Wilson) : le PC est-il là ?
 // La file est dans le cache du script (6 h au plus) : rien n'est écrit dans la feuille. Le secret du PC est gardé dans les
 // propriétés du script la première fois qu'il se présente ; pour en changer, lancer « oublierPC » dans l'éditeur.
+// Depuis le 11/11/26, cette première présentation doit passer par l'adresse avec la clé du script (…/exec?k=…, voir journal.gs) :
+// ensuite, le relais passe avec son seul secret, pour claude_prendre, claude_rendre, claude_etat et le CRM en lecture seule.
 
 var CLAUDE_VIVANT_MS = 60000;     // PC vu il y a plus d'une minute : absent
 var CLAUDE_TTL = 21600;           // 6 h dans le cache

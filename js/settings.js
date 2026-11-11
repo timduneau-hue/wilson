@@ -2,7 +2,7 @@
 
 import { EXPRESSIONS, STYLES } from './face.js';
 import { checkKey, cleanKey, sessionsToday } from './brain.js';
-import { SCRIPT_URL, scanQR, deviceName } from './remote.js';
+import { SCRIPT_URL, avecCle, scanQR, deviceName } from './remote.js';
 import { settingsLink } from './sync.js';
 
 const AISTUDIO = '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>';
@@ -123,7 +123,8 @@ export class SettingsUI {
       const v = $('s-logurl').value.trim();
       if (v && !SCRIPT_URL.test(v)) { this.logStatus('Ce n\'est pas l\'adresse d\'un script Apps Script déployé (elle commence par https://script.google.com/macros/s/ et finit par /exec).', 'err'); return; }
       this.s.logUrl = v; saveSettings(this.s); app.applySettings('logUrl');
-      this.logStatus(v ? 'Adresse enregistrée ✓ — le journal part maintenant toutes les 30 s.' : 'Journal à distance coupé.', v ? 'ok' : '');
+      this.logStatus(!v ? 'Journal à distance coupé.' : avecCle(v) ? 'Adresse et clé enregistrées ✓ — le journal part maintenant toutes les 30 s.'
+        : 'Adresse enregistrée, mais sans la clé (…/exec?k=…) : le script la refusera. Scanne plutôt le QR code.', v ? (avecCle(v) ? 'ok' : 'err') : '');
     });
     // Mes appareils : copie de tous les réglages vers un autre appareil (QR code ou lien).
     $('t-copy').onclick = () => {
@@ -161,7 +162,8 @@ export class SettingsUI {
         if (url) {
           this.s.logUrl = url; saveSettings(this.s); $('s-logurl').value = url; app.applySettings('logUrl');
           app.face.setEmotion('joie', 2000);
-          this.logStatus('QR code lu ✓ — le journal part maintenant toutes les 30 s.', 'ok');
+          this.logStatus(avecCle(url) ? 'QR code lu, clé comprise ✓ — le journal part maintenant toutes les 30 s.'
+            : 'QR code lu, mais sans la clé : c\'est l\'ancienne page. Ouvre le lien donné par « lienQR » dans l\'éditeur du script.', avecCle(url) ? 'ok' : 'err');
         } else this.logStatus('', '');
       } catch (e) { this.logStatus('Lecture impossible : ' + e.message + '.', 'err'); }
       this._scan = null; cv.hidden = true; $('t-logscan').textContent = 'Scanner le QR code';

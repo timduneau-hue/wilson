@@ -80,11 +80,13 @@ c = await appeler('crm_fiche_client', { client: 'inconnu' }, { script: 'S', fetc
 check('CRM : refus du CRM rendu comme une erreur lisible', c.isError === true && /introuvable/.test(c.content[0].text));
 c = await appeler('crm_tache', { texte: 'x' }, { script: 'S', fetchImpl: fauxCRM });
 check('CRM : outil inconnu refusé, rien envoyé', c.isError === true && vus.length === 2);
+c = await appeler('crm_bilan', {}, { script: 'S', secret: 'x'.repeat(40), fetchImpl: fauxCRM });
+check('CRM : le secret du relais part avec la question (le script exige clé ou secret, 11/11/26)', !c.isError && vus[vus.length - 1].secret === 'x'.repeat(40) && !('secret' in vus[0]));
 
 // Protocole MCP (lignes JSON-RPC).
 const entree = new PassThrough(), sortie = new PassThrough(); let lu = '';
 sortie.on('data', (b) => { lu += b; });
-serveur({ entree, sortie, script: 'S', fetchImpl: fauxCRM });
+serveur({ entree, sortie, script: 'S', secret: 's'.repeat(40), fetchImpl: fauxCRM });
 const env = (m) => entree.write(JSON.stringify(m) + '\n');
 env({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: 'x' } } });
 env({ jsonrpc: '2.0', method: 'notifications/initialized' });
@@ -96,7 +98,7 @@ const reps = lu.trim().split('\n').map((l) => JSON.parse(l));
 check('MCP : initialisation', reps[0].id === 1 && reps[0].result.protocolVersion === '2025-06-18' && reps[0].result.capabilities.tools);
 check('MCP : pas de réponse à une notification', reps.length === 4);
 check('MCP : liste des outils, marqués lecture seule', reps[1].result.tools.length === 6 && reps[1].result.tools.every((t) => t.annotations.readOnlyHint && t.inputSchema));
-check('MCP : appel d\'un outil', reps.find((x) => x.id === 3).result.content[0].text === 'résultat de crm_bilan');
+check('MCP : appel d\'un outil, avec le secret du relais', reps.find((x) => x.id === 3).result.content[0].text === 'résultat de crm_bilan' && vus[vus.length - 1].secret === 's'.repeat(40));
 check('MCP : méthode inconnue → erreur propre', reps.find((x) => x.id === 4).error.code === -32601);
 
 

@@ -65,7 +65,7 @@ const ctx = {
   Session: { getEffectiveUser: () => ({ getEmail: () => 'moi@exemple.fr' }) },
   MailApp: { sendEmail: (o) => mails.push(o) },
   CalendarApp: { getCalendarsByName: (n) => (n === 'Famille' ? [cal] : []), getAllOwnedCalendars: () => [perso, cal, anniv], GuestStatus: { NO: 'NO', YES: 'YES', OWNER: 'OWNER' } },
-  Utilities: { sleep: (ms) => { dormi += ms; fauxTemps += ms; }, formatDate: (d, tz, f) => (f === 'yyyy-MM-dd' ? '2026-11-04' : f === "HH'h'mm" ? '14h12' : '23/10/26 15h30:00'), base64Decode: (b) => Buffer.from(b, 'base64'), newBlob: (bytes, type, name) => ({ bytes, type, name }) },
+  Utilities: { getUuid: () => require('crypto').randomUUID(), sleep: (ms) => { dormi += ms; fauxTemps += ms; }, formatDate: (d, tz, f) => (f === 'yyyy-MM-dd' ? '2026-11-04' : f === "HH'h'mm" ? '14h12' : '23/10/26 15h30:00'), base64Decode: (b) => Buffer.from(b, 'base64'), newBlob: (bytes, type, name) => ({ bytes, type, name }) },
   ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' }), getOAuthToken: () => 'JETON-DE-TIMOTHEE' },
   DriveApp: { getRootFolder: () => ({ getName: () => 'Mon Drive' }) },
   HtmlService: { createHtmlOutput: (h) => ({ html: h, setTitle(t) { this.title = t; return this; } }) },
@@ -76,7 +76,21 @@ vm.runInContext(code, ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'famille.gs'), 'utf8'), ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'claude.gs'), 'utf8'), ctx);   // questions difficiles pour Claude (PLAN 10)   // messages, garde, alertes (PLAN 7 sexies)
 
-const post = (o) => ctx.doPost({ postData: { contents: JSON.stringify(o) } });
+// ---------- Clé secrète du script (11/11/26) : sans elle, rien n'est lu ni écrit ----------
+const rien = (r) => { try { const j = JSON.parse(r.getContent()); return j.ok === false && /clé/.test(j.erreur); } catch (_) { return false; } };
+let r0 = ctx.doPost({ postData: { contents: JSON.stringify({ version: '1', lignes: [{ t: 1, m: 'intrus' }] }) } });
+check('Clé : pas encore créée → tout est refusé, avec la marche à suivre', rien(r0) && /nouvelleCle/.test(JSON.parse(r0.getContent()).erreur) && !opened && sheets['Journal'].getLastRow() === 1);
+check('Clé : pas encore créée → l\'adresse seule n\'affiche que « Accès réservé »', /Accès réservé/.test(ctx.doGet({ parameter: {} }).html) && !/QRCode/.test(ctx.doGet({ parameter: {} }).html));
+vm.runInContext('nouvelleCle()', ctx);
+const CLE = props.cle_wilson;
+check('Clé : « nouvelleCle » la crée (64 caractères) et donne le lien de la page au QR code', /^[0-9a-f]{64}$/.test(CLE) && logged.some((l) => String(l).endsWith('/exec?k=' + CLE)));
+const postSans = (o, parameter = {}) => ctx.doPost({ parameter, postData: { contents: JSON.stringify(o) } });
+check('Clé : journal sans clé → refusé, rien d\'écrit', rien(postSans({ version: '1', lignes: [{ t: 1, m: 'intrus' }] })) && sheets['Journal'].getLastRow() === 1);
+check('Clé : mauvaise clé → refusée (réglages, mémoire, CRM, questions)', ['reglages_lire', 'mem_lire', 'q_lire', 'crm_client', 'claude_demander', 'alerte'].every((a) => rien(postSans({ action: a }, { k: CLE.slice(0, -1) + 'x' }))));
+check('Clé : clé dans le corps acceptée aussi', !rien(postSans({ action: 'reglages_lire', k: CLE })));
+check('Clé : requête illisible refusée sans planter', JSON.parse(ctx.doPost({ parameter: { k: CLE }, postData: { contents: '{pas du json' } }).getContent()).ok === false);
+check('Clé : l\'adresse sans la clé → « Accès réservé »', /Accès réservé/.test(ctx.doGet({ parameter: { k: 'mauvaise' } }).html));
+const post = (o) => ctx.doPost({ parameter: { k: CLE }, postData: { contents: JSON.stringify(o) } });
 const t0 = Date.parse('2026-10-23T13:00:00Z');
 let r = post({ version: '1.8.0', appareil: 'tablette du salon', lignes: [{ t: t0, m: 'ligne 1' }, { t: t0 + 1000, m: 'ligne 2' }],
   mesures: [{ t: t0 + 2000, envoi: 0.25, google: 0.93, phrase1: 1.21, voix: 1.6, complet: 2.04, modele: 'gemini-3.5-flash-lite', reflexion: 'minimal', relance: false, recherche: null, anticipe: true, phrase: 2.3 }],
@@ -105,8 +119,12 @@ check('Purge des plus anciennes au-delà du maximum', sheets['Journal'].getLastR
 vm.runInContext("MAX['Journal'] = 50;", ctx);
 for (let k = 0; k < 8; k++) post({ version: '1', lignes: big });
 check('… la feuille ne grossit pas sans fin', sheets['Journal'].getLastRow() <= 51 + 500 + 80, `${sheets['Journal'].getLastRow()} lignes`);
-const g = ctx.doGet();
-check('Page de contrôle avec QR code de l\'adresse', /QRCode/.test(g.html) && g.html.includes('AKfycbTESTTESTTESTTESTTEST/exec') && g.title === 'Journal de Wilson');
+const g = ctx.doGet({ parameter: { k: CLE } });
+check('Page de contrôle (avec la clé) : QR code de l\'adresse avec la clé, mise en garde', /QRCode/.test(g.html) && g.html.includes('AKfycbTESTTESTTESTTESTTEST/exec?k=' + CLE) && g.title === 'Journal de Wilson' && /ne les partage avec personne/.test(g.html));
+vm.runInContext("ScriptApp.getService = () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbDEVDEVDEVDEVDEVDEVDEV/dev' });", ctx);
+const gDev = ctx.doGet({ parameter: { k: CLE } }); const nL = logged.length; vm.runInContext('lienQR()', ctx);
+check('Clé : adresse d\'essai (…/dev) → pas de QR code inutilisable, explication ; lienQR dit de prendre l\'adresse en /exec', !/QRCode/.test(gDev.html) && /finit par \/exec/.test(gDev.html) && /finit par \/exec\) et ajoute à la fin : \?k=/.test(String(logged[nL])));
+vm.runInContext("ScriptApp.getService = () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTEST/exec' });", ctx);
 ctx.essai();
 check('Fonction essai', J[1][2].startsWith('Essai du journal'));
 
@@ -139,8 +157,8 @@ check('Réglages : le plus récent gagne', JSON.parse(post({ action: 'reglages_l
 check('Réglages : rien dans la feuille (propriétés du script)', sheets['Journal'].data.every((r) => !JSON.stringify(r).includes('Zephyr')));
 const u = JSON.parse(post({ action: 'truc' }).text);
 check('Action inconnue : erreur lisible', u.ok === false && /action inconnue/.test(u.erreur));
-ctx.essaiRecherche();
-check('Fonction essaiRecherche', logged.length === 1);
+const nLog = logged.length; ctx.essaiRecherche();
+check('Fonction essaiRecherche', logged.length === nLog + 1);
 
 // CRM à la voix : relais vers l'application Web du CRM, avec le jeton de Timothée
 fetched.length = 0;
@@ -319,8 +337,17 @@ fauxTemps += 61000;
 check('Claude : PC pas vu depuis plus d\'une minute → absent', C({ action: 'claude_etat' }).pc.vivant === false && C({ action: 'claude_etat' }).pc.vu >= 61);
 check('Claude : question inconnue', C({ action: 'claude_resultat', id: 'zzz' }).ok === false && C({ action: 'claude_demander', id: '', question: 'x' }).ok === false);
 check('Claude : verrou toujours rendu', locked === 0);
+// Le relais du PC passe avec son seul secret (sans la clé), mais seulement pour ses actions.
+const P = (o) => JSON.parse(postSans(o).getContent());
+check('Clé : le relais passe avec son secret pour prendre, rendre, l\'état du PC', P({ action: 'claude_prendre', secret: SECRET, max: 0 }).ok === true && P({ action: 'claude_etat', secret: SECRET }).ok === true);
+check('Clé : … et pour le CRM en lecture seule', !/clé/.test(String(P({ action: 'crm_client', client: 'Gaudin', secret: SECRET }).erreur || '')));
+check('Clé : le secret du PC n\'ouvre rien d\'autre (réglages, mémoire, alertes, journal, questions)', ['reglages_lire', 'reglages_ecrire', 'mem_lire', 'alerte', 'claude_demander', 'q_lire'].every((a) => rien(postSans({ action: a, secret: SECRET }))) && rien(postSans({ version: '1', lignes: [{ t: 1, m: 'x' }], secret: SECRET })));
+check('Clé : un faux secret du PC est refusé', rien(postSans({ action: 'claude_prendre', secret: SECRET.replace(/.$/, 'z'), max: 0 })));
 vm.runInContext('oublierPC()', ctx);
 check('Claude : oublierPC efface le secret', !('claude_secret' in props));
+check('Clé : PC oublié → un nouveau relais ne peut pas se déclarer sans la clé', rien(postSans({ action: 'claude_prendre', secret: 'y'.repeat(40), max: 0 })) && !('claude_secret' in props));
+const vieille = CLE; vm.runInContext('nouvelleCle()', ctx);
+check('Clé : « nouvelleCle » change la clé, l\'ancienne ne marche plus', props.cle_wilson !== vieille && rien(postSans({ action: 'reglages_lire' }, { k: vieille })) && !rien(postSans({ action: 'reglages_lire' }, { k: props.cle_wilson })));
 }
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);

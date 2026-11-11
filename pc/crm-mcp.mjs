@@ -43,13 +43,14 @@ export const OUTILS = [
     payload: (a) => ({ produit: String(a.produit || ''), question: a.question === 'infos' ? 'infos' : 'qui_achete' }) },
 ];
 
-export async function appeler(nom, args, { script, fetchImpl = globalThis.fetch } = {}) {
+// secret : celui du relais (config.json) ; le script de Wilson exige une clé ou ce secret depuis le 11/11/26.
+export async function appeler(nom, args, { script, secret, fetchImpl = globalThis.fetch } = {}) {
   const o = OUTILS.find((x) => x.name === nom);
   if (!o) return { isError: true, content: [{ type: 'text', text: `outil inconnu : ${nom}` }] };
   if (!/^crm_(schema|requete|client|journee|bilan|produit)$/.test(o.action)) throw new Error('lecture seule');   // garde-fou
   try {
     const r = await fetchImpl(script, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: o.action, ...(o.payload ? o.payload(args || {}) : {}) }), signal: AbortSignal.timeout(90000) });
+      body: JSON.stringify({ action: o.action, ...(o.payload ? o.payload(args || {}) : {}), ...(secret ? { secret } : {}) }), signal: AbortSignal.timeout(90000) });
     const j = JSON.parse(await r.text());
     if (!j.ok) return { isError: true, content: [{ type: 'text', text: `Le CRM a refusé : ${j.erreur || 'erreur'}` }] };
     return { content: [{ type: 'text', text: String(j.texte || JSON.stringify(j)).slice(0, 60000) }] };
@@ -58,7 +59,7 @@ export async function appeler(nom, args, { script, fetchImpl = globalThis.fetch 
   }
 }
 
-export function serveur({ entree = process.stdin, sortie = process.stdout, script, fetchImpl } = {}) {
+export function serveur({ entree = process.stdin, sortie = process.stdout, script, secret, fetchImpl } = {}) {
   const ecrire = (o) => sortie.write(JSON.stringify(o) + '\n');
   const rl = readline.createInterface({ input: entree });
   rl.on('line', async (ligne) => {
@@ -68,7 +69,7 @@ export function serveur({ entree = process.stdin, sortie = process.stdout, scrip
     if (m.method === 'initialize') return repondre({ protocolVersion: (m.params && m.params.protocolVersion) || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'crm-wilson', version: '1' } });
     if (m.method === 'ping') return repondre({});
     if (m.method === 'tools/list') return repondre({ tools: OUTILS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema, annotations: { readOnlyHint: true } })) });
-    if (m.method === 'tools/call') return repondre(await appeler(m.params && m.params.name, m.params && m.params.arguments, { script, fetchImpl }));
+    if (m.method === 'tools/call') return repondre(await appeler(m.params && m.params.name, m.params && m.params.arguments, { script, secret, fetchImpl }));
     ecrire({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'méthode inconnue : ' + m.method } });
   });
   return rl;
@@ -76,5 +77,5 @@ export function serveur({ entree = process.stdin, sortie = process.stdout, scrip
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cfg = JSON.parse(fs.readFileSync(path.join(DIR, 'config.json'), 'utf8'));
-  serveur({ script: cfg.script });
+  serveur({ script: cfg.script, secret: cfg.secret });
 }

@@ -9,7 +9,11 @@
 //     la mémoire de Wilson (onglet « Mémoire ») et les questions de Claude à Timothée (onglet « Questions ») ;
 //  6. les questions difficiles (fichier claude.gs) : file d'attente entre Wilson et le relais Claude du PC de la maison.
 // Déploiement : Déployer → Nouveau déploiement → Application Web → Exécuter en tant que « moi », accès « Tout le monde ».
-// Ouvrir ensuite l'adresse du déploiement : la page affiche un QR code que Wilson scanne (Réglages → Journal à distance).
+// Sécurité (11/11/26) : « Tout le monde » est obligatoire (la tablette n'a pas de compte Google), donc le script exige une CLÉ
+// SECRÈTE : elle fait partie de l'adresse que Wilson scanne (…/exec?k=…). Sans elle, rien n'est lu ni écrit, et l'adresse seule
+// n'affiche plus que « Accès réservé ». Lancer « nouvelleCle » dans l'éditeur : il crée la clé (ou la change) et donne le lien
+// de la page au QR code, à montrer à Wilson sur chaque appareil. « lienQR » redonne ce lien sans changer la clé.
+// Le relais du PC (claude_prendre, claude_rendre et le CRM en lecture seule) passe aussi avec son propre secret.
 
 var FEUILLE = 'COLLE_ICI_L_ID_DE_LA_FEUILLE';   // l'identifiant de « Wilson — journal » (dans son adresse, entre /d/ et /edit)
 var MAX = { 'Journal': 20000, 'Délais': 5000 };   // au-delà, les lignes les plus anciennes sont effacées
@@ -18,7 +22,12 @@ var TAVILY_CLE = 'COLLE_ICI_TA_CLE_TAVILY';      // ta clé Tavily (app.tavily.c
 var CRM_URL = 'COLLE_ICI_L_ADRESSE_DE_TON_CRM';   // l'adresse de ton CRM, celle que tu ouvres d'habitude (finit par /exec)
 
 function doPost(e) {
-  var d = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+  var d = {};
+  try { d = JSON.parse((e && e.postData && e.postData.contents) || '{}') || {}; } catch (err) { return json_({ ok: false, erreur: 'requête illisible' }); }
+  if (!accesOk_(e, d)) {
+    return json_({ ok: false, erreur: cleScript_() ? 'clé refusée : rescanne le QR code du script (Réglages → Journal à distance)'
+      : 'clé du script pas encore créée : lance « nouvelleCle » dans l\'éditeur du script' });
+  }
   if (d.action) {
     try {
       if (d.action === 'chercher') return chercher_(d);
@@ -145,15 +154,64 @@ function essaiRecherche() {
 
 function num_(x) { return typeof x === 'number' && isFinite(x) ? Math.round(x * 10) / 10 : ''; }
 
-// Ouvrir l'adresse du déploiement : vérifie que tout marche et affiche le QR code à montrer à Wilson.
-function doGet() {
-  var url = ScriptApp.getService().getUrl();
+// ---------- Clé secrète du script (11/11/26) ----------
+// La clé est dans les propriétés du script (jamais dans le code ni dans le dépôt). Elle arrive dans l'adresse (?k=…) ou,
+// à défaut, dans la requête (champ k). Le relais du PC peut aussi passer avec son secret, pour ses seules actions.
+var ACTIONS_DU_PC = /^(claude_prendre|claude_rendre|claude_etat|crm_(schema|requete|client|journee|bilan|produit))$/;
+function cleScript_() { return PropertiesService.getScriptProperties().getProperty('cle_wilson') || ''; }
+function memes_(a, b) {   // comparaison en temps constant
+  a = String(a || ''); b = String(b || '');
+  if (!a || a.length !== b.length) return false;
+  var x = 0; for (var i = 0; i < a.length; i++) x |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return x === 0;
+}
+function accesOk_(e, d) {
+  var cle = cleScript_(), k = (e && e.parameter && e.parameter.k) || (d && d.k) || '';
+  if (cle.length >= 24 && memes_(k, cle)) return true;
+  var pc = PropertiesService.getScriptProperties().getProperty('claude_secret') || '', s = String((d && d.secret) || '');
+  return pc.length >= 24 && ACTIONS_DU_PC.test(String((d && d.action) || '')) && memes_(s, pc);
+}
+// À lancer dans l'éditeur : crée (ou change) la clé ; l'ancienne ne marche plus. Le lien est dans « Journal d'exécution ».
+function nouvelleCle() {
+  var cle = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  PropertiesService.getScriptProperties().setProperty('cle_wilson', cle);
+  Logger.log('Nouvelle clé créée : l\'ancienne ne marche plus. Ouvre ce lien et montre le QR code à Wilson sur chaque appareil '
+    + '(Réglages → Journal à distance → Scanner le QR code) :');
+  lienQR();
+}
+// À lancer dans l'éditeur : redonne le lien de la page au QR code, sans changer la clé. Ce lien ne se partage pas.
+function lienQR() {
+  var cle = cleScript_();
+  if (!cle) { Logger.log('Pas encore de clé : lance « nouvelleCle ».'); return ''; }
+  var base = ScriptApp.getService().getUrl() || '';
+  // Depuis l'éditeur, Google donne souvent l'adresse d'essai (…/dev), que la tablette ne peut pas ouvrir : il faut celle en …/exec.
+  if (/\/exec$/.test(base)) { Logger.log(base + '?k=' + cle); return base + '?k=' + cle; }
+  Logger.log('Prends l\'adresse du déploiement (Déployer → Gérer les déploiements → Application Web, elle finit par /exec) et ajoute à la fin : ?k=' + cle);
+  return '';
+}
+
+// Avec la clé dans l'adresse (lien donné par « nouvelleCle » ou « lienQR ») : affiche le QR code à montrer à Wilson.
+// Sans la clé : « Accès réservé », rien d'autre.
+function doGet(e) {
+  var cle = cleScript_(), k = (e && e.parameter && e.parameter.k) || '';
+  if (cle.length < 24 || !memes_(k, cle)) {
+    return HtmlService.createHtmlOutput('<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">'
+      + '<p style="font-family:system-ui,sans-serif;padding:24px;color:#444">Accès réservé.</p>').setTitle('Wilson');
+  }
+  var base = ScriptApp.getService().getUrl() || '';
+  if (!/\/exec$/.test(base)) {   // adresse d'essai (…/dev) : le QR code ne marcherait pas sur la tablette
+    return HtmlService.createHtmlOutput('<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">'
+      + '<p style="font-family:system-ui,sans-serif;padding:24px;color:#444">Ouvre plutôt l\'adresse du déploiement (elle finit par /exec), suivie de ?k=… : '
+      + 'c\'est elle que Wilson doit garder.</p>').setTitle('Wilson');
+  }
+  var url = base + '?k=' + cle;
   var html = '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">'
     + '<style>body{font-family:system-ui,sans-serif;text-align:center;padding:24px;color:#222}#qr{display:inline-block;padding:18px;background:#fff;border:1px solid #ddd;border-radius:12px}'
     + 'p{max-width:560px;margin:12px auto;line-height:1.45}small{color:#777;word-break:break-all}</style></head><body>'
     + '<h2>Journal de Wilson : prêt ✓</h2>'
-    + '<p>Sur la tablette : appui long sur le visage de Wilson → <b>Réglages</b> → <b>Journal à distance</b> → <b>Scanner le QR code</b>, puis montre-lui ce code (l’écran de l’ordinateur, ou une photo sur ton téléphone).</p>'
-    + '<div id="qr"></div><p><small>' + url + '</small></p>'
+    + '<p>Sur chaque appareil (tablette, téléphone) : appui long sur le visage de Wilson → <b>Réglages</b> → <b>Journal à distance</b> → <b>Scanner le QR code</b>, puis montre-lui ce code (l’écran de l’ordinateur, ou une photo sur ton téléphone).</p>'
+    + '<p><b>Ce code et cette page donnent accès à Wilson : ne les partage avec personne, et ne garde pas de photo du code.</b></p>'
+    + '<div id="qr"></div>'
     + '<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>'
     + '<script>new QRCode(document.getElementById("qr"), { text: ' + JSON.stringify(url) + ', width: 320, height: 320, correctLevel: QRCode.CorrectLevel.M });</script>'
     + '</body></html>';
@@ -162,5 +220,5 @@ function doGet() {
 
 // Essai depuis l'éditeur : sélectionne « essai » puis « Exécuter » → une ligne apparaît dans l'onglet Journal.
 function essai() {
-  doPost({ postData: { contents: JSON.stringify({ version: 'essai', lignes: [{ t: Date.now(), m: 'Essai du journal depuis l\'éditeur Apps Script ✓' }] }) } });
+  doPost({ parameter: { k: cleScript_() }, postData: { contents: JSON.stringify({ version: 'essai', lignes: [{ t: Date.now(), m: 'Essai du journal depuis l\'éditeur Apps Script ✓' }] }) } });
 }

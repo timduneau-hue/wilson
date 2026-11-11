@@ -8,6 +8,7 @@ def check(name, ok, detail=''):
     results.append(bool(ok)); print(('✅' if ok else '❌'), name, detail, flush=True)
 
 URL = 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTESTTESTTEST/exec'
+URL_CLE = URL + '?k=' + 'cleDeTest0123456789_-abcdefghijklmnop'   # adresse avec la clé secrète du script (11/11/26)
 FAKE_TTS = """
 (() => {
   const spoken = []; window.__spoken = spoken;
@@ -54,6 +55,9 @@ async def main():
             if st['fail']:
                 await route.abort('internetdisconnected'); return
             d = json.loads(req.post_data)
+            st.setdefault('urls', []).append(req.url)
+            if 'action' in d and st.get('refus'):         # script protégé, clé absente ou fausse
+                await route.fulfill(status=200, content_type='application/json', body=json.dumps({'ok': False, 'erreur': 'clé refusée : rescanne le QR code du script (Réglages → Journal à distance)'}, ensure_ascii=False)); return
             if 'action' in d:                           # recherche, réglages communs : pas des envois du journal
                 await route.fulfill(status=200, content_type='text/plain', body='ok'); return
             st['posts'].append(d)
@@ -146,10 +150,24 @@ async def main():
         await page.evaluate("document.getElementById('t-logscan').click()")
         await page.wait_for_timeout(500)
         prev = await page.evaluate("!document.getElementById('logscan').hidden")
-        await page.evaluate(f"window.__qr = '{URL}'")
+        await page.evaluate(f"window.__qr = '{URL_CLE}'")
         await page.wait_for_function("document.getElementById('s-logstatus').textContent.includes('QR code lu')", timeout=5000)
         saved = await page.evaluate("JSON.parse(localStorage.getItem('wilson.settings')).logUrl")
-        check('QR code scanné : aperçu caméra, adresse enregistrée sur la tablette', prev and saved == URL and await page.inner_text('#s-logurl') == '' and await page.input_value('#s-logurl') == URL)
+        check('QR code scanné : aperçu caméra, adresse avec sa clé enregistrée sur la tablette', prev and saved == URL_CLE and await page.inner_text('#s-logurl') == '' and await page.input_value('#s-logurl') == URL_CLE
+              and 'clé comprise' in await page.inner_text('#s-logstatus'))
+        await page.wait_for_timeout(600)
+        check('Clé du script : les envois partent vers l\'adresse avec la clé (…/exec?k=…)', st['urls'] and st['urls'][-1] == URL_CLE, (st.get('urls') or [''])[-1][-60:])
+        await page.fill('#s-logurl', URL); await page.dispatch_event('#s-logurl', 'change')
+        t = await page.inner_text('#s-logstatus')
+        check('Clé du script : adresse collée sans la clé → acceptée mais signalée', 'sans la clé' in t and await page.evaluate('wilson.remote.on'), t[:90])
+        await page.fill('#s-logurl', URL_CLE); await page.dispatch_event('#s-logurl', 'change')
+        check('Clé du script : adresse collée avec la clé → acceptée', 'clé enregistrées' in await page.inner_text('#s-logstatus') and await page.evaluate('wilson.settings.logUrl') == URL_CLE)
+        st['refus'] = True
+        r = await page.evaluate("wilson.remote.ask({ action: 'reglages_lire' })")
+        st['refus'] = False
+        n = len(st['posts']); await page.evaluate('wilson.remote.flush()'); await page.wait_for_timeout(400)
+        msgs = [l['m'] for p_ in st['posts'][n:] for l in p_['lignes']]
+        check('Clé du script : refus du script remonté à l\'appelant et noté dans le journal', r.get('ok') is False and any(m.startswith('Script : clé refusée') for m in msgs), str(msgs)[:160])
         stt = await page.inner_text('#s-logstatus')
         await page.evaluate("document.getElementById('s-close').click(); wilson.ui.open()")
         stt2 = await page.inner_text('#s-logstatus')
@@ -166,7 +184,7 @@ async def main():
         await page.evaluate("sessionStorage.setItem('keep', '1'); wilson.log('juste avant le rechargement')")
         await page.reload(); await page.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000); await page.wait_for_timeout(800)
         bc = await page.evaluate("({n: +(sessionStorage.getItem('beacons') || 0), u: sessionStorage.getItem('beaconUrl'), s: +(sessionStorage.getItem('beaconSize') || 0)})")
-        check('Rechargement : ce qui attend part par « beacon » (envoi garanti par le navigateur)', bc['n'] >= 1 and bc['u'] == URL and bc['s'] > 100, str(bc))
+        check('Rechargement : ce qui attend part par « beacon » (envoi garanti par le navigateur), avec la clé', bc['n'] >= 1 and bc['u'] == URL_CLE and bc['s'] > 100, str(bc))
 
         errs = [l for l in logs if 'PAGEERROR' in l and 'de test' not in l]
         check('Aucune autre erreur JavaScript', not errs, '; '.join(errs)[:300])

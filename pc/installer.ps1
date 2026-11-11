@@ -17,10 +17,10 @@ function RafraichirPath { $env:Path = [Environment]::GetEnvironmentVariable('Pat
 Write-Host 'Wilson : installation du relais Claude (questions difficiles)' -ForegroundColor Yellow
 
 $script = $env:WILSON_SCRIPT
-if (-not $script -or $script -notmatch '^https://script\.google\.com/macros/s/[\w-]+/exec$') {
-  $script = (Read-Host "Colle l'adresse du script de Wilson (elle finit par /exec)").Trim()
+if (-not $script -or $script -notmatch '^https://script\.google\.com/macros/s/[\w-]+/exec(\?k=[\w-]{24,})?$') {
+  $script = (Read-Host "Colle l'adresse du script de Wilson avec sa clé (lien donné par « lienQR » dans l'éditeur : …/exec?k=…)").Trim()
 }
-if ($script -notmatch '^https://script\.google\.com/macros/s/[\w-]+/exec$') { throw "Adresse du script invalide : $script" }
+if ($script -notmatch '^https://script\.google\.com/macros/s/[\w-]+/exec(\?k=[\w-]{24,})?$') { throw "Adresse du script invalide : $script" }
 
 Etape '1/7 Dossier du relais'
 New-Item -ItemType Directory -Force -Path $dir, (Join-Path $dir 'travail') -ErrorAction Stop | Out-Null
@@ -96,7 +96,7 @@ Start-Process wscript.exe -ArgumentList "`"$(Join-Path $dir 'demarrer.vbs')`""
 $vu = $false
 for ($i = 0; $i -lt 20 -and -not $vu; $i++) {
   Start-Sleep -Seconds 3
-  try { $r = Invoke-RestMethod -Method Post -Uri $script -ContentType 'text/plain;charset=utf-8' -Body '{"action":"claude_etat"}'; $vu = [bool]$r.pc.vivant } catch {}
+  try { $r = Invoke-RestMethod -Method Post -Uri $script -ContentType 'text/plain;charset=utf-8' -Body (@{ action = 'claude_etat'; secret = $secret } | ConvertTo-Json -Compress); $vu = [bool]$r.pc.vivant } catch {}
 }
 if ($vu) { Ok 'Wilson voit le PC' } else { Write-Host "   Wilson ne voit pas encore le PC : regarde $dir\relais.log" -ForegroundColor Red }
 Write-Host '   Essai de Claude (une minute environ)…'
