@@ -8,11 +8,11 @@ un visage animé qui voit quand on le regarde, écoute, répond et se souvient.
 - **Parler** : le regarder et lui parler (inutile de dire son nom) — ou toucher le visage.
 - **Le couper** : toucher l'écran.
 - **En voiture** (téléphone) : bouton voiture en haut à gauche, ou tout seul en roulant ; Wilson se réveille quand on dit « Wilson ».
-- **CRM** (facultatif) : questions sur les clients, appels, tâches et brouillons, par le script du propriétaire (voir PLAN.md, 2 quater).
+- **CRM** (facultatif) : questions sur les clients, appels, tâches et brouillons, par le script du propriétaire (voir la documentation privée).
 - **La famille** : « Wilson, apprends mon visage, je suis Louis » (ou Réglages → Famille et garde) ; « dis à Louis que… » :
-  Wilson le lui dit quand il le regarde. « On part, surveille la maison » : garde (sons, visage inconnu → e-mail). Voir PLAN.md, 7 sexies.
+  Wilson le lui dit quand il le regarde. « On part, surveille la maison » : garde (sons, visage inconnu → e-mail). Voir la documentation privée.
 
-Fonctionnement et règles : voir [PLAN.md](PLAN.md).
+Fonctionnement et règles : voir la documentation du propriétaire (dépôt privé, non publiée ici).
 
 ## Confidentialité
 - En veille, tout reste sur la tablette : la détection du regard est locale (MediaPipe).
