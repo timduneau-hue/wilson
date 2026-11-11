@@ -2,6 +2,8 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
+<!-- Politique de sécurité de contenu (PLAN-AMELIORATIONS W8) : aucun script venu d'ailleurs, ni code évalué, ni plugin. connect-src reste large car les adresses de Home Assistant, du script Google et des radios se règlent dans l'appli. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: data: https: http:; font-src 'self' data:; connect-src 'self' https: wss: http: ws: data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#000000">
 <meta name="mobile-web-app-capable" content="yes">
