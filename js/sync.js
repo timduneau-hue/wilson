@@ -23,12 +23,72 @@ export function shareable(s, exclus = LOCAL_ONLY) {
 const b64u = (str) => { const b = new TextEncoder().encode(str); let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
 const unb64u = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; const bin = atob(s); return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))); };
 
-// Lien de copie des réglages (adresse de l'appli + « #reglages=… »). Seuls les réglages différents de ceux d'origine y
-// figurent : QR code moins dense, plus facile à scanner. À l'import, les autres reprennent leur valeur d'origine.
-export function settingsLink(s, defaults = {}, base = location.origin + location.pathname) {
+// Réglages à mettre dans un lien : seuls ceux qui diffèrent des réglages d'origine (QR code moins dense, plus facile à
+// scanner). À l'import, les autres reprennent leur valeur d'origine.
+function reglagesDuLien(s, defaults) {
   const o = {};
   for (const [k, v] of Object.entries(shareable(s))) if (JSON.stringify(v) !== JSON.stringify(defaults[k])) o[k] = v;
-  return `${base}#reglages=${b64u(JSON.stringify({ ...o, _t: s._t || Date.now() }))}`;
+  return { ...o, _t: s._t || Date.now() };
+}
+// Ancien lien, en clair (« #reglages=… ») : encore lu à l'arrivée, plus produit par l'appli depuis le W10.
+export function settingsLink(s, defaults = {}, base = location.origin + location.pathname) {
+  return `${base}#reglages=${b64u(JSON.stringify(reglagesDuLien(s, defaults)))}`;
+}
+
+// Lien chiffré (PLAN-AMELIORATIONS W10) : « #reglages2=… ». Les réglages (clé Gemini, adresse du script avec sa clé, jeton Home
+// Assistant) sont chiffrés en AES-GCM avec une clé tirée d'un code à 4 chiffres (PBKDF2). Le code s'affiche sur l'appareil qui
+// montre le QR code et se saisit sur celui qui le reçoit : un lien ou une photo du QR code, seuls, ne livrent plus rien.
+// Limite assumée : 4 chiffres = 10 000 possibilités ; cela protège d'une fuite par hasard (lien transféré, photo), pas d'un
+// attaquant qui s'y met sérieusement avec le lien en main.
+const ITER_CODE = 200000;
+const bytesB64u = (u8) => { let s = ''; for (const x of u8) s += String.fromCharCode(x); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const b64uBytes = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); };
+async function cleDepuisCode(code, salt) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(String(code)), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: ITER_CODE, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+export function nouveauCodeCopie() { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(a[0] % 10000).padStart(4, '0'); }
+export async function settingsLinkChiffre(s, defaults, code, base = location.origin + location.pathname) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await cleDepuisCode(code, salt), new TextEncoder().encode(JSON.stringify(reglagesDuLien(s, defaults)))));
+  const out = new Uint8Array(1 + 16 + 12 + ct.length); out[0] = 1; out.set(salt, 1); out.set(iv, 17); out.set(ct, 29);
+  return `${base}#reglages2=${bytesB64u(out)}`;
+}
+// Renvoie les réglages, ou lève une erreur si le code est faux (l'authentification GCM échoue) ou le lien abîmé.
+export async function dechiffrerReglages(payload, code) {
+  const b = b64uBytes(payload); if (b[0] !== 1 || b.length < 30) throw new Error('lien illisible');
+  const clair = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(17, 29) }, await cleDepuisCode(code, b.slice(1, 17)), b.slice(29));
+  const o = JSON.parse(new TextDecoder().decode(clair));
+  if (!o || typeof o !== 'object' || !o.apiKey) throw new Error('réglages illisibles');
+  return o;
+}
+export function lienChiffreDansAdresse() { const m = /[#&]reglages2=([\w-]+)/.exec(location.hash || ''); return m ? m[1] : null; }
+// Au démarrage : si l'adresse porte un lien chiffré, demande le code (fenêtre #codecopie) et rend les réglages, ou null.
+export function importerLienChiffre() {
+  const payload = lienChiffreDansAdresse(); if (!payload) return Promise.resolve(null);
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+  const $ = (id) => document.getElementById(id);
+  const sec = $('codecopie'); if (!sec) return Promise.resolve(null);
+  return new Promise((fini) => {
+    let essais = 0;
+    const statut = (m) => { $('cc-status').hidden = !m; $('cc-status').textContent = m; };
+    const fermer = (r) => { sec.hidden = true; $('cc-go').onclick = $('cc-cancel').onclick = $('cc-code').onkeydown = null; fini(r); };
+    $('cc-code').value = ''; statut(''); sec.hidden = false; setTimeout(() => $('cc-code').focus(), 50);
+    const valider = async () => {
+      const code = $('cc-code').value.trim();
+      if (!/^\d{4}$/.test(code)) { statut('Le code a 4 chiffres.'); return; }
+      $('cc-go').disabled = true; statut('Vérification…');
+      try { fermer(await dechiffrerReglages(payload, code)); }
+      catch (_) {
+        $('cc-go').disabled = false; $('cc-code').value = '';
+        if (++essais >= 5) { statut(''); fermer(null); return; }
+        const reste = 5 - essais;
+        statut('Code incorrect (' + reste + ' essai' + (reste > 1 ? 's' : '') + ' restant' + (reste > 1 ? 's' : '') + ').');
+      }
+    };
+    $('cc-go').onclick = valider; $('cc-cancel').onclick = () => fermer(null);
+    $('cc-code').onkeydown = (e) => { if (e.key === 'Enter') valider(); };
+  });
 }
 
 // Réglages portés par l'adresse (puis effacés de l'adresse). null s'il n'y en a pas ou s'ils sont illisibles.

@@ -80,6 +80,20 @@ const chg = S.mergeInto(local, { apiKey: 'A', logUrl: 'https://script.google.com
 check('Synchronisation : l\'adresse du script avec sa clé n\'est jamais remplacée par celle des réglages communs', /\?k=/.test(local.logUrl) && !chg.includes('logUrl') && local.crm === false, JSON.stringify(local));
 check('… ni envoyée aux autres appareils par la synchronisation', !('logUrl' in S.shareable(local, S.HORS_SYNCHRO)));
 check('… mais gardée dans le lien de copie des réglages (geste volontaire)', 'logUrl' in S.shareable(local));
+{ // W10 : lien de copie chiffré par un code à 4 chiffres
+  const reg = { apiKey: 'AIzaSECRETSECRETSECRET', logUrl: 'https://script.google.com/macros/s/AKfycbX/exec?k=CLESECRETE', haToken: 'jeton-ha', voice: 'Charon', _t: 5 };
+  const code = S.nouveauCodeCopie(), BASE = 'https://exemple.github.io/wilson/';
+  check('W10 : code de copie à 4 chiffres', /^\d{4}$/.test(code) && new Set(Array.from({ length: 30 }, () => S.nouveauCodeCopie())).size > 5);
+  const lien = await S.settingsLinkChiffre(reg, { voice: 'Aoede' }, code, BASE);
+  check('W10 : le lien chiffré commence par #reglages2= et ne montre ni clé, ni adresse, ni jeton', lien.startsWith(BASE + '#reglages2=') && !/AIza|SECRET|CLESECRETE|jeton-ha|Charon/.test(lien));
+  const lu = await S.dechiffrerReglages(lien.split('#reglages2=')[1], code);
+  check('W10 : avec le bon code, tout revient (clé, adresse du script, jeton Home Assistant, voix)', lu.apiKey === reg.apiKey && lu.logUrl === reg.logUrl && lu.haToken === 'jeton-ha' && lu.voice === 'Charon' && lu._t === 5);
+  const faux = code === '0000' ? '1111' : '0000';
+  check('W10 : avec un mauvais code → refusé', await S.dechiffrerReglages(lien.split('#reglages2=')[1], faux).then(() => false, () => true));
+  const p = lien.split('#reglages2=')[1], alt = p.slice(0, -4) + (p.slice(-4) === 'AAAA' ? 'BBBB' : 'AAAA');
+  check('W10 : lien abîmé ou modifié → refusé', await S.dechiffrerReglages(alt, code).then(() => false, () => true) && await S.dechiffrerReglages('abc', code).then(() => false, () => true));
+  const lien2 = await S.settingsLinkChiffre(reg, {}, code, BASE);
+  check('W10 : deux liens du même contenu sont différents (sel et vecteur aléatoires)', lien2 !== lien); }
 { const m = { haUrl: 'https://ha.exemple.ts.net', haToken: 'secret', voice: 'Aoede', _t: 1 };
   check('W9 : l’adresse et le jeton Home Assistant ne partent pas par la synchronisation', !('haToken' in S.shareable(m, S.HORS_SYNCHRO)) && !('haUrl' in S.shareable(m, S.HORS_SYNCHRO)) && 'voice' in S.shareable(m, S.HORS_SYNCHRO));
   const l2 = { haToken: 'local', voice: 'x' }; S.mergeInto(l2, { haToken: 'distant', haUrl: 'https://autre', voice: 'Aoede', _t: 2 }, S.HORS_SYNCHRO);

@@ -9,7 +9,7 @@ import { Vision } from './vision.js';
 import { Memory } from './memory.js';
 import { Sensors } from './sensors.js';
 import { loadSettings, saveSettings, SettingsUI, DEFAULTS } from './settings.js';
-import { SettingsSync, LOCAL_ONLY, takeSettingsFromHash, mergeInto, shareable } from './sync.js';
+import { SettingsSync, LOCAL_ONLY, takeSettingsFromHash, importerLienChiffre, mergeInto, shareable } from './sync.js';
 import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog, deviceName } from './remote.js';
@@ -118,7 +118,7 @@ const dureeTexte = (ms) => (ms < 90000 ? `${Math.max(1, Math.round(ms / 1000))} 
 class App {
   constructor() {
     this.version = VERSION; this.logs = []; this.bootAt = Date.now();
-    const imported = takeSettingsFromHash();     // « …#reglages=… » : réglages copiés depuis un autre appareil (PLAN 2 ter)
+    const imported = IMPORT_CHIFFRE || takeSettingsFromHash();     // « …#reglages=… » : réglages copiés depuis un autre appareil (PLAN 2 ter)
     this.settings = loadSettings();
     if (imported) {   // réglages absents du lien = valeur d'origine
       mergeInto(this.settings, { ...shareable(DEFAULTS), ...imported }); this.settings._t = imported._t || Date.now(); saveSettings(this.settings); this._imported = true;
@@ -3506,6 +3506,7 @@ function concat(list) {
   return out;
 }
 
+const IMPORT_CHIFFRE = await importerLienChiffre();   // lien de copie chiffré (W10) : demande le code avant de démarrer
 const app = new App();
 window.wilson = app;
 app.boot();

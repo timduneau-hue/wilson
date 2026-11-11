@@ -56,13 +56,15 @@ async def main():
             await asyncio.sleep(0.1)
         check('Téléphone : 1er appareil relié, ses réglages deviennent la référence', store['reglages'] and store['reglages']['voice'] == 'Charon' and 'gazeCalib' not in store['reglages'] and 'mirror' not in store['reglages'], str(store['calls']))
 
-        # --- Copier les réglages : QR code + lien + partage.
+        # --- Copier les réglages : QR code + lien chiffré (W10) + code à 4 chiffres + partage.
         await phone.evaluate('wilson.ui.open()')
         await phone.click('#t-copy'); await phone.wait_for_timeout(300)
         qr = await phone.evaluate("(() => { const c = document.getElementById('copy-qr'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let k = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 50) k++; return { w: c.width, dark: k / (d.length / 4), shown: !document.getElementById('copy-box').hidden }; })()")
         link = await phone.evaluate('wilson.ui._link')
+        code = await phone.inner_text('#copy-code')
+        check('Code de copie à 4 chiffres affiché à côté du QR code', len(code) == 4 and code.isdigit(), code)
         check('QR code de copie affiché', qr['shown'] and qr['w'] >= 200 and 0.2 < qr['dark'] < 0.7, str(qr))
-        check('Lien : adresse de Wilson + réglages après « # » (jamais envoyés à GitHub)', link.startswith('http://127.0.0.1:8765/index.html#reglages=') and len(link) < 1500, f"{len(link)} caractères")
+        check('Lien : adresse de Wilson + réglages après « # » (jamais envoyés à GitHub)', link.startswith('http://127.0.0.1:8765/index.html#reglages2=') and len(link) < 1500, f"{len(link)} caractères")
         await phone.click('#t-share'); await phone.wait_for_timeout(200)
         sh = await phone.evaluate('window.__shared')
         check('Bouton « Partager le lien »', sh and sh['url'] == link)
@@ -72,6 +74,11 @@ async def main():
         # --- Tablette neuve (rien de réglé) : on ouvre le lien → tout est copié, sauf ce qui est propre à l'appareil.
         _, tab, tlogs = await device(None, 'tablette')
         await tab.goto(link)
+        await tab.wait_for_selector('#codecopie:not([hidden])', timeout=10000)
+        await tab.fill('#cc-code', '0000' if code != '0000' else '1111'); await tab.click('#cc-go')
+        await tab.wait_for_selector('#cc-status:not([hidden])', timeout=10000)
+        check('Tablette : mauvais code → refusé, on peut réessayer', 'incorrect' in await tab.inner_text('#cc-status'))
+        await tab.fill('#cc-code', code); await tab.click('#cc-go')
         await tab.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
         st = await tab.evaluate("({s: wilson.settings, url: location.href, welcome: !document.getElementById('welcome').hidden, badge: document.getElementById('badge').textContent})")
         s = st['s']

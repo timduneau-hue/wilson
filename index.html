@@ -51,6 +51,17 @@
   </div>
 </section>
 
+<!-- Code de copie (PLAN-AMELIORATIONS W10) : demandé quand un lien « #reglages2=… » chiffré est ouvert -->
+<section id="codecopie" class="sheet" hidden>
+  <div class="sheet-card">
+    <h1>Code de copie</h1>
+    <p class="lead">Code de copie : entre les 4 chiffres affichés sur l'autre appareil</p>
+    <input id="cc-code" class="field" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" spellcheck="false">
+    <p id="cc-status" class="status" hidden></p>
+    <div class="buttons wrap"><button id="cc-go" class="btn primary">Valider</button><button id="cc-cancel" class="btn">Annuler</button></div>
+  </div>
+</section>
+
 <!-- Réglages : appui long de 1,5 s sur l'écran -->
 <section id="settings" class="sheet" hidden>
   <div class="sheet-card wide">
@@ -73,6 +84,7 @@
         <div class="buttons wrap"><button id="t-copy" class="btn primary">Copier mes réglages sur un autre appareil</button></div>
         <div id="copy-box" class="copybox" hidden>
           <canvas id="copy-qr" class="qr" width="300" height="300"></canvas>
+          <p class="lead">Code de copie : <b id="copy-code"></b></p>
           <p class="fine">Sur l'autre appareil : scanne ce code avec l'<b>appareil photo</b> (ou Google Lens), ou envoie-toi le lien et ouvre-le.</p>
           <div class="buttons wrap"><button id="t-share" class="btn">Partager le lien</button><button id="t-copylink" class="btn">Copier le lien</button></div>
           <p class="fine">Le lien contient ta clé Google : ne l'envoie qu'à toi-même.</p>

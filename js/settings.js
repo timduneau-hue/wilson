@@ -3,7 +3,7 @@
 import { EXPRESSIONS, STYLES } from './face.js';
 import { checkKey, cleanKey, sessionsToday } from './brain.js';
 import { SCRIPT_URL, avecCle, scanQR, deviceName } from './remote.js';
-import { settingsLink } from './sync.js';
+import { settingsLinkChiffre, nouveauCodeCopie } from './sync.js';
 
 const AISTUDIO = '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>';
 // Message clair selon le résultat de la vérification de la clé.
@@ -127,10 +127,12 @@ export class SettingsUI {
         : 'Adresse enregistrée, mais sans la clé (…/exec?k=…) : le script la refusera. Scanne plutôt le QR code.', v ? (avecCle(v) ? 'ok' : 'err') : '');
     });
     // Mes appareils : copie de tous les réglages vers un autre appareil (QR code ou lien).
-    $('t-copy').onclick = () => {
+    $('t-copy').onclick = async () => {
       const box = $('copy-box'); box.hidden = !box.hidden;
       if (box.hidden) return;
-      this._link = settingsLink(this.s, DEFAULTS);
+      const code = nouveauCodeCopie();   // W10 : lien chiffré par un code à 4 chiffres, saisi sur l'autre appareil
+      this._link = await settingsLinkChiffre(this.s, DEFAULTS, code);
+      $('copy-code').textContent = code;
       drawQR($('copy-qr'), this._link);
       $('t-share').hidden = !navigator.share;
       app.log('Lien de copie des réglages affiché');
