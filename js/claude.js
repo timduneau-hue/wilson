@@ -56,12 +56,19 @@ export class ClaudePC {
     if (!this.on) return null;
     if (!force && this.pc && Date.now() - this.pcAt < VU_MS) return this.pc;
     const r = await this._ask({ action: 'claude_etat' }, signal, 20000);
-    if (r && r.ok) { this.pc = r.pc; this.pcAt = Date.now(); }
+    if (r && r.ok) { this._noterPc(r.pc); }
     return this.pc;
+  }
+  // W16 : le relais a signalé la limite d'utilisation au script : on le sait sans avoir posé la question.
+  _noterPc(pc) {
+    this.pc = pc; this.pcAt = Date.now();
+    if (pc && pc.limite && pc.limite.jusqua > Date.now()) this.limiteJusqua = pc.limite.jusqua;
+    else if (pc && pc.vivant && !pc.limite && +((/relais (\d+)/.exec(pc.version || '') || [])[1]) >= 6) this.limiteJusqua = 0;   // reprise : le relais (version 6 ou plus) ne la signale plus
   }
   // Pour l'onglet État du journal.
   etatDit() {
     if (!this.on) return 'coupé';
+    if (this.limiteJusqua && Date.now() < this.limiteJusqua) return `limite d'utilisation de Claude atteinte, reprise à ${new Date(this.limiteJusqua).getHours()}h${String(new Date(this.limiteJusqua).getMinutes()).padStart(2, '0')}`;
     if (!this.pc) return 'pas encore vérifié';
     return this.pc.vivant ? `PC présent (vu il y a ${this.pc.vu} s${this.pc.occupe ? `, ${this.pc.occupe} question(s) en cours` : ''})` : `PC absent${this.pc.vu != null ? ` (vu il y a ${Math.round(this.pc.vu / 60)} min)` : ' (jamais vu : relais pas installé ?)'}`;
   }
@@ -87,7 +94,8 @@ export class ClaudePC {
       if (r && /action inconnue/.test(r.erreur || '')) { this.pc = { vivant: false, vu: null }; this.pcAt = Date.now(); }   // script pas encore en version 9
       return { ok: false, raison: 'script', message: (r && r.erreur) || 'réponse vide du script' };
     }
-    if (r.pc) { this.pc = r.pc; this.pcAt = Date.now(); }
+    if (r.pc) this._noterPc(r.pc);
+    if (!r.accepte && r.limite) return this._limite(`limite d'utilisation de Claude atteinte : ${r.limite.texte || ''}`, r.limite.jusqua);   // W16 : le relais l'a signalée
     if (!r.accepte) return { ok: false, raison: 'absent', message: r.pc && r.pc.vu != null ? `vu il y a ${Math.round(r.pc.vu / 60)} min` : 'jamais vu' };
     let etat = r.etat || 'attente', pris = false;
     const annuler = () => this._ask({ action: 'claude_annuler', id }, null, 15000).catch(() => {});
@@ -103,7 +111,7 @@ export class ClaudePC {
         await pause(3000, signal); continue;                                   // réseau coupé : on attend qu'il revienne
       }
       if (!s || !s.ok) return { ok: false, raison: 'script', message: (s && s.erreur) || 'réponse vide du script' };
-      if (s.pc) { this.pc = s.pc; this.pcAt = Date.now(); }
+      if (s.pc) this._noterPc(s.pc);
       etat = s.etat;
       if (!pris && (etat === 'en_cours' || etat === 'faite')) { pris = true; if (onPris) onPris(s.pris); }
       if (etat === 'faite' && limiteAtteinte(s.dire)) return this._limite(s.dire);         // ancien relais (avant « relais 4 »)
@@ -113,8 +121,8 @@ export class ClaudePC {
       if (etat === 'annulee') return { ok: false, raison: 'erreur', message: 'question annulée' };
     }
   }
-  _limite(texte) {
-    this.limiteJusqua = repriseLimite(texte);
+  _limite(texte, jusqua) {
+    this.limiteJusqua = jusqua || repriseLimite(texte);
     const h = new Date(this.limiteJusqua);
     return { ok: false, raison: 'limite', message: `limite d'utilisation atteinte (« ${String(texte).trim().slice(0, 120)} »), plus de question à Claude avant ${h.getHours()}h${String(h.getMinutes()).padStart(2, '0')}` };
   }

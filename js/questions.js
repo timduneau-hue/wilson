@@ -5,11 +5,12 @@
 // la réponse à côté de la question (outil repondre_question en direct ; sinon la passe de mémoire la retrouve dans l'échange).
 // La réponse sert à Claude pour la mise à jour suivante. Sans réponse, la même question revient au plus toutes les 3 heures.
 
+import { ecrireLocal } from './stockage.js';
 const K = 'wilson.questions', K_POSEES = 'wilson.questions.posees', K_ATT = 'wilson.questions.attente';
 export const PROPRIO = 'Timothée';
 const ECART_MS = 3 * 3600000, LIRE_MS = 30 * 60000;
 const lire = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch (_) { return d; } };
-const ecrire = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
+const ecrire = ecrireLocal;   // W18 : un échec est noté au journal (js/stockage.js)
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 const STOP = new Set('le la les de du des un une et a au aux en est son sa ses mon ma mes ton ta tes il elle on qui que je tu nous vous ils elles ce cette pour par sur dans avec pas quand quoi comment est-ce'.split(' '));
 const mots = (s) => norm(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w));

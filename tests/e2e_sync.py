@@ -28,8 +28,9 @@ async def main():
             store['calls'].append(a)
             if a == 'reglages_lire': body = {'ok': True, 'reglages': store['reglages'], 't': store['t']}
             elif a == 'reglages_ecrire':
-                if store['reglages'] is not None and store['t'] >= d['t']: body = {'ok': True, 'applique': False, 't': store['t']}
-                else: store['reglages'], store['t'] = d['reglages'], d['t']; body = {'ok': True, 'applique': True, 't': d['t']}
+                # W19 : l'heure est donnée par le script (le « t » de l'appareil est ignoré), le dernier envoi reçu l'emporte
+                import time
+                store['reglages'], store['t'] = d['reglages'], max(int(time.time() * 1000), store['t'] + 1); body = {'ok': True, 'applique': True, 't': store['t']}
             else:
                 await route.fulfill(status=200, headers=H, body='ok'); return
             await route.fulfill(status=200, content_type='application/json', headers=H, body=json.dumps(body, ensure_ascii=False))

@@ -8,13 +8,14 @@
 //    ou sans script à jour, Wilson s'en sert et envoie ce qui attend dès que possible ;
 //  - remplace les anciennes rubriques « Souvenirs » et « Qui vit ici » des réglages (reprises une fois, origine « ancien »).
 
+import { ecrireLocal } from './stockage.js';
 const K = 'wilson.memoire', K_ATT = 'wilson.memoire.attente', K_MIGRE = 'wilson.memoire.migre', K_VIEUX = 'wilson.facts';
 export const CATEGORIES = ['consignes', 'famille', 'santé', 'dates', 'goûts', 'habitudes', 'maison', 'projets', 'travail', 'autre'];
 const SYNC_MS = 20 * 60000;       // relecture de la feuille (Timothée a pu y corriger une ligne)
 const MAX_LOCAL = 400, MAX_AJOUTS = 4, CONSIGNE_MAX = 6000;
 
 const lire = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch (_) { return d; } };
-const ecrire = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
+const ecrire = ecrireLocal;   // W18 : un échec est noté au journal (js/stockage.js)
 export const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 const STOP = new Set('le la les de du des un une et a au aux en est son sa ses mon ma mes ton ta tes il elle on qui que je tu nous vous ils elles ce cette pour par sur dans avec pas plus tres'.split(' '));
 export const mots = (s) => norm(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w));

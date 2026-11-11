@@ -23,6 +23,7 @@ import { Qui } from './qui.js';
 import { Famille, FAMILLE_TOOLS, FAMILLE_TOOL_NAMES } from './famille.js';
 import { Reactions } from './reactions.js';
 import { Memoire } from './memoire.js';
+import { brancherStockage, bilanStockage } from './stockage.js';
 import { Questions, QUESTION_TOOL } from './questions.js';
 import * as VP from './voiture.js';
 
@@ -37,7 +38,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.38.3';
+const VERSION = '1.39.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -121,7 +122,7 @@ class App {
     const imported = IMPORT_CHIFFRE || takeSettingsFromHash();     // « …#reglages=… » : réglages copiés depuis un autre appareil (PLAN 2 ter)
     this.settings = loadSettings();
     if (imported) {   // réglages absents du lien = valeur d'origine
-      mergeInto(this.settings, { ...shareable(DEFAULTS), ...imported }); this.settings._t = imported._t || Date.now(); saveSettings(this.settings); this._imported = true;
+      mergeInto(this.settings, { ...shareable(DEFAULTS), ...imported }); this.settings._t = 0; this.settings._sale = false; saveSettings(this.settings); this._imported = true;
     }
     this.remote = new RemoteLog(this);           // journal à distance (feuille Google lue par Claude)
     this.crm = new Crm(this);                    // CRM à la voix (PLAN 2 quater)
@@ -162,6 +163,7 @@ class App {
     this.lastActivity = 0; this.lastUserSpeech = 0; this.lastFrame = 0; this.playEndAt = 0;
     this.discard = false; this.endAfterSpeech = false; this.barge = { n: 0, echo: -60 };
     this.presenceAt = performance.now(); this.battery = null; this.settingsOpen = false;
+    brancherStockage((m) => this.log(m));   // W18 : écriture impossible dans le stockage de l'appareil → journal
     this._wireSensors(); this._wireBrain(); this._wireAudio();
     this.outils = new Outils(this);
     if ('serviceWorker' in navigator) {
@@ -169,6 +171,10 @@ class App {
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => { this.swReg = r; }).catch((e) => this.log('SW : ' + e.message));
       // Nouvelle version installée : on recharge (seulement si une ancienne version tournait, et jamais en pleine conversation).
       navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) this._reloadWhenIdle('nouvelle version installée', { nuit: true }); });
+      // W14 retour arrière : l'appli dit « prête » au service worker quelques secondes après son démarrage ; sans ce signal à temps,
+      // il resert la version précédente. Il dit aussi s'il vient de le faire (une seule fois au journal).
+      navigator.serviceWorker.addEventListener('message', (e) => this._messageSw(e.data || {}));
+      setTimeout(() => { this._swEnvoyer({ type: 'prete', version: VERSION }); this._swEnvoyer({ type: 'etat' }); }, 3000);
     }
 
     this._lireNouveautes();
@@ -341,6 +347,17 @@ class App {
     return t;
   }
 
+  _swEnvoyer(m) { try { const c = navigator.serviceWorker.controller; if (c) c.postMessage(m); } catch (_) {} }
+  _messageSw(d) {
+    if (d.type === 'retour' && d.fait === false) this.badge('Pas de version précédente gardée sur cet appareil', 6000);
+    if (d.type === 'etat' && d.etat && d.etat.statut === 'retour' && !d.etat.signale) {
+      this.log(`Retour arrière (${d.etat.raison || 'sans précision'}) : version ${String(d.etat.echec || '?').replace('wilson-', '')} abandonnée, retour à la version ${String(d.etat.precedente || '?').replace('wilson-', '')} jusqu'à la prochaine publication`, true);
+    }
+  }
+  // Pour un bouton « version précédente » dans les réglages (emplacement et texte à décider avec Timothée) : le service worker
+  // resert la version précédente et recharge la page.
+  versionPrecedente() { this.log('Retour à la version précédente demandé'); this._swEnvoyer({ type: 'retour', raison: 'demandé dans les réglages' }); }
+
   // Mise à jour automatique : la tablette reste allumée en permanence, Wilson se met donc à jour tout seul.
   async _checkUpdate() {
     try {
@@ -381,7 +398,7 @@ class App {
     const s = this.settings;
     if (key && !fromSync) {
       if (key === 'logUrl') { if (this.remote.on) this.sync.pull({ adopt: true }); }        // appareil qui rejoint : il prend les réglages communs
-      else if (!LOCAL_ONLY.includes(key)) { s._t = Date.now(); saveSettings(s); this.sync.schedulePush(); }
+      else if (!LOCAL_ONLY.includes(key)) { s._sale = true; saveSettings(s); this.sync.schedulePush(); }   // W19 : l'heure vient du script, pas d'ici
     }
     if (s.face !== this.face.styleName) this.face.setStyle(s.face);
     this.eco.setSpeed(s.ecoSpeed);

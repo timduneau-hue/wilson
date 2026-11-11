@@ -53,7 +53,10 @@ function claudePc_() {
   var o = null; try { o = JSON.parse(claudeCache_().get('claude_pc') || 'null'); } catch (e) {}
   if (!o) return { vivant: false, vu: null };
   var depuis = Date.now() - (+o.t || 0);
-  return { vivant: depuis < CLAUDE_VIVANT_MS, vu: Math.round(depuis / 1000), version: o.version || '', occupe: +o.occupe || 0 };
+  var r = { vivant: depuis < CLAUDE_VIVANT_MS, vu: Math.round(depuis / 1000), version: o.version || '', occupe: +o.occupe || 0 };
+  // W16 : limite d'utilisation de Claude signalée par le relais (jusqua = heure de reprise, en ms) : Wilson bascule sans attendre.
+  if (o.limite && +o.limite.jusqua > Date.now()) r.limite = { jusqua: +o.limite.jusqua, texte: String(o.limite.texte || '') };
+  return r;
 }
 
 function claudeDemander_(d) {
@@ -62,6 +65,7 @@ function claudeDemander_(d) {
   var pc = claudePc_(), deja = claudeLire_(id);
   if (deja) return { ok: true, accepte: deja.etat !== 'annulee', id: id, etat: deja.etat, pc: pc };   // renvoi après une coupure : rien en double
   if (!pc.vivant) return { ok: true, accepte: false, id: id, pc: pc };
+  if (pc.limite) return { ok: true, accepte: false, id: id, limite: pc.limite, pc: pc };   // limite atteinte : rien n'entre dans la file
   var q = {
     id: id, question: question, type: d.type === 'crm' ? 'crm' : 'internet', voiture: !!d.voiture, crm: d.type === 'crm' || d.crm === true,   // CRM : seulement pour Timothée (06/11/26)
     contexte: String(d.contexte || '').slice(0, 8000), regles: String(d.regles || '').slice(0, 8000),
@@ -73,13 +77,15 @@ function claudeDemander_(d) {
     var f = claudeFile_(); f.push(id);
     claudeCache_().put('claude_file', JSON.stringify(f.slice(-50)), CLAUDE_TTL);
   } finally { lock.releaseLock(); }
+  compter_('claude', false);   // W20 : compteur du jour, montré dans l'onglet État
   return { ok: true, accepte: true, id: id, etat: 'attente', pc: pc };
 }
 
 // Le relais attend une question (jusqu'à 25 s) ; max = 0 : il est occupé, il dit seulement qu'il est là.
 function claudePrendre_(d) {
   var c = claudeCache_(), fin = Date.now() + Math.min(Math.max(+d.attente || 0, 0), CLAUDE_PRENDRE_MAX_S) * 1000;
-  c.put('claude_pc', JSON.stringify({ t: Date.now(), version: String(d.version || '').slice(0, 20), occupe: +d.occupe || 0 }), CLAUDE_TTL);
+  var lim = d.limite && +d.limite.jusqua > Date.now() ? { jusqua: +d.limite.jusqua, texte: String(d.limite.texte || '').slice(0, 200) } : null;
+  c.put('claude_pc', JSON.stringify({ t: Date.now(), version: String(d.version || '').slice(0, 20), occupe: +d.occupe || 0, limite: lim }), CLAUDE_TTL);
   if (d.max === 0) return { ok: true, question: null };
   for (;;) {
     if (claudeFile_().length) {

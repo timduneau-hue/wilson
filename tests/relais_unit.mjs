@@ -3,7 +3,7 @@ import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decouper, demande, argumentsClaude, Relais, limiteAtteinte, GardeHA, HA_ACTION_MS } from '../pc/relais.mjs';
+import { decouper, demande, argumentsClaude, Relais, limiteAtteinte, repriseLimite, effortPour, commandeArret, arreterArbre, GardeHA, HA_ACTION_MS } from '../pc/relais.mjs';
 import { OUTILS, appeler, serveur } from '../pc/crm-mcp.mjs';
 
 let ok = 0, ko = 0;
@@ -52,7 +52,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 5 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 6 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -79,8 +79,51 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 5');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 6');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
+
+// ---------- Lot 4 : arrêt de tout l'arbre (W15), limite signalée au script (W16), effort réduit (W16) ----------
+{
+  const c = commandeArret(4242, 'win32');
+  check('W15 : Windows → taskkill /T /F sur tout l’arbre de processus', c && c[0] === 'taskkill' && c[1].join(' ') === '/pid 4242 /T /F', JSON.stringify(c));
+  check('W15 : ailleurs → pas de taskkill (groupe de processus)', commandeArret(4242, 'linux') === null);
+  let lance = null, tue = null;
+  arreterArbre({ pid: 77, kill: () => {} }, { plateforme: 'win32', executer: (cmd, a) => { lance = [cmd, a]; }, tuer: () => {} });
+  arreterArbre({ pid: 88, kill: () => {} }, { plateforme: 'linux', executer: () => {}, tuer: (pid, sig) => { tue = [pid, sig]; } });
+  check('W15 : arrêt effectif (taskkill sous Windows, kill du groupe ailleurs)', lance && lance[1].includes('77') && tue && tue[0] === -88 && tue[1] === 'SIGKILL');
+  let simple = false; arreterArbre({ pid: 99, kill: () => { simple = true; } }, { plateforme: 'linux', executer: () => {}, tuer: () => { throw new Error('ESRCH'); } });
+  check('W15 : si l’arrêt du groupe échoue, repli sur kill simple', simple);
+  const t4 = new Date(2026, 10, 11, 20, 0);
+  check('W16 : reprise « resets 4am » → 4 h le lendemain', new Date(repriseLimite("You've hit your weekly limit · resets 4am (Europe/Paris)", t4)).getHours() === 4 && repriseLimite('resets 4am', t4) > t4.getTime());
+  check('W16 : sans heure annoncée → dans une heure', repriseLimite('limit reached', t4) === t4.getTime() + 3600000);
+  check('W16 : effort « medium » pour une question CRM courte et simple', effortPour({ type: 'crm', question: 'Combien de clients actifs ?' }) === 'medium');
+  check('W16 : effort « high » pour une question CRM d’analyse, une recherche Internet ou une question longue', effortPour({ type: 'crm', question: 'Compare mon CA par famille avec l’an dernier' }) === 'high' && effortPour({ type: 'internet', question: 'Charge max Tectus TE 340 ?' }) === 'high' && effortPour({ type: 'crm', question: 'x'.repeat(200) }) === 'high');
+  check('W16 : « effort » écrit dans config.json l’emporte', effortPour({ type: 'crm', question: 'Combien ?' }, 'xhigh') === 'xhigh');
+
+  // Limite atteinte : signalée au script à l'appel suivant, et les questions suivantes ne lancent plus Claude.
+  const env2 = []; let lances = 0;
+  const R4 = new Relais({ config: { script: 'S', secret: 'x'.repeat(40) }, log: () => {},
+    fetchImpl: async (u, o) => { const b = JSON.parse(o.body); env2.push(b); return { status: 200, text: async () => JSON.stringify({ ok: true }) }; },
+    lancer: async () => { lances++; throw new Error("limite d'utilisation de Claude atteinte : You've hit your weekly limit · resets 4am (Europe/Paris)"); } });
+  await R4.traiter({ id: 'l1', type: 'crm', question: 'Combien ?' });
+  const lim = R4.limiteActive();
+  check('W16 : limite atteinte → heure de reprise retenue', lim && lim.jusqua > Date.now() && /weekly limit/.test(lim.texte), JSON.stringify(lim));
+  await R4.traiter({ id: 'l2', type: 'crm', question: 'Encore ?' });
+  const r2 = env2.filter((x) => x.action === 'claude_rendre').pop();
+  check('W16 : question suivante pendant la limite → refusée tout de suite, Claude pas relancé', lances === 1 && r2.id === 'l2' && r2.ok === false && /limite d'utilisation de Claude atteinte/.test(r2.erreur), JSON.stringify(r2));
+  R4.limite = { jusqua: Date.now() - 1, texte: 'vieille' };
+  check('W16 : limite dépassée → plus signalée', R4.limiteActive() === null);
+}
+// W15 : appels vides à la suite → la pause double (2 s, 4 s…), elle n'est jamais nulle.
+{
+  const pris2 = []; let n = 0;
+  const R5 = new Relais({ config: { script: 'S', secret: 'x'.repeat(40) }, log: () => {},
+    fetchImpl: async (u, o) => { const b = JSON.parse(o.body); if (b.action === 'claude_prendre') { pris2.push({ t: Date.now(), limite: b.limite }); if (++n >= 3) R5.stop = true; } return { status: 200, text: async () => JSON.stringify({ ok: true, question: null }) }; } });
+  R5.limite = { jusqua: Date.now() + 3600000, texte: 'x' };
+  const t0 = Date.now(); await R5.boucle();
+  check('W15 : trois appels vides rapides → pauses croissantes (≥ 2 s puis ≥ 4 s)', pris2.length === 3 && pris2[1].t - pris2[0].t >= 1900 && pris2[2].t - pris2[1].t >= 3900, pris2.map((x) => x.t - t0).join(','));
+  check('W16 : la limite en cours est envoyée au script à chaque appel', pris2.every((x) => x.limite && x.limite.texte === 'x'));
+}
 
 // ---------- Home Assistant surveillé par le relais (11/11/26 : machine virtuelle sans adresse du 07/11 au 11/11) ----------
 {

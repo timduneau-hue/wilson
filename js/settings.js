@@ -1,6 +1,7 @@
 // Wilson — réglages (stockés sur la tablette) et écrans de configuration.
 
 import { EXPRESSIONS, STYLES } from './face.js';
+import { ecrireLocal } from './stockage.js';
 import { checkKey, cleanKey, sessionsToday } from './brain.js';
 import { SCRIPT_URL, avecCle, scanQR, deviceName } from './remote.js';
 import { settingsLinkChiffre, nouveauCodeCopie } from './sync.js';
@@ -44,11 +45,11 @@ export function loadSettings() {
   if (s.v < 3) { s.listenMode = 'regard'; s.ecoSpeed = 'rapide'; s.v = 3; }   // 1.5 : écoute au regard, plus de mot-clé
   // 1.25.1 : visage choisi par Timothée le 01/11/26 = Miel. Un appareil resté sur l'ancien visage par défaut passe à Miel
   // (réglage daté : il part aussi vers les autres appareils par la synchronisation) ; un autre choix est respecté.
-  if (s.v < 4) { if (s.face === 'lumiere') { s.face = 'miel'; s._t = Date.now(); } s.v = 4; }
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (_) {}
+  if (s.v < 4) { if (s.face === 'lumiere') { s.face = 'miel'; s._sale = true; } s.v = 4; }
+  ecrireLocal(KEY, s);
   return s;
 }
-export function saveSettings(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
+export function saveSettings(s) { return ecrireLocal(KEY, s); }
 
 const $ = (id) => document.getElementById(id);
 
@@ -173,6 +174,13 @@ export class SettingsUI {
 
     $('s-close').onclick = () => this.close();
     $('s-reload').onclick = () => location.reload();
+    // W14 : retour à la version précédente (gardée par le service worker) ; il faut appuyer deux fois pour éviter un faux geste.
+    $('s-previous').onclick = () => {
+      const b = $('s-previous');
+      if (b.dataset.sur) { clearTimeout(this._prevT); delete b.dataset.sur; b.textContent = 'Revenir à la version précédente'; app.versionPrecedente(); return; }
+      b.dataset.sur = '1'; b.textContent = 'Sûr ? Appuie encore';
+      this._prevT = setTimeout(() => { delete b.dataset.sur; b.textContent = 'Revenir à la version précédente'; }, 5000);
+    };
     // Écouter la voix choisie : Wilson se présente avec elle (une conversation en cours est fermée d'abord).
     $('t-voice').onclick = () => {
       this.close();

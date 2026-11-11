@@ -1,12 +1,13 @@
 // Wilson — le petit journal des derniers échanges (pour la continuité d'une discussion à l'autre), stocké sur l'appareil.
 // Ce que Wilson retient pour longtemps est dans js/memoire.js (onglet « Mémoire » de la feuille du journal, demande du 05/11/26).
 
+import { ecrireLocal } from './stockage.js';
 const K_LOG = 'wilson.journal', MAX = 60;
 const pad = (n) => String(n).padStart(2, '0');
 const today = (d) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)}`;
 
 function load(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } }
-function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.warn('mémoire pleine', e); } }
+function save(k, v) { ecrireLocal(k, v); }
 
 export class Memory {
   constructor() { this.log = load(K_LOG, []); }

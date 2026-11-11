@@ -16,7 +16,7 @@ const PULL_MS = 10 * 60000;
 
 export function shareable(s, exclus = LOCAL_ONLY) {
   const o = {};
-  for (const k of Object.keys(s)) if (!exclus.includes(k)) o[k] = s[k];
+  for (const k of Object.keys(s)) if (k !== '_sale' && !exclus.includes(k)) o[k] = s[k];   // _sale : « changement pas encore envoyé » (W19), propre à l'appareil
   return o;
 }
 
@@ -103,7 +103,7 @@ export function takeSettingsFromHash() {
 export function mergeInto(local, remote, exclus = LOCAL_ONLY) {
   const changed = [];
   for (const k of Object.keys(remote)) {
-    if (k === '_t' || exclus.includes(k)) continue;
+    if (k === '_t' || k === '_sale' || exclus.includes(k)) continue;
     if (JSON.stringify(local[k]) !== JSON.stringify(remote[k])) { local[k] = remote[k]; changed.push(k); }
   }
   local._t = remote._t || local._t;
@@ -120,14 +120,22 @@ export class SettingsSync {
   // Un réglage a changé ici : envoyé (regroupé, 1,5 s après le dernier changement).
   schedulePush() {
     if (!this.on) return;
+    this._gen = (this._gen || 0) + 1;
     clearTimeout(this._timer); this._timer = setTimeout(() => this.push(), 1500);
   }
   async push() {
     if (!this.on) return false;
-    const s = this.app.settings;
+    const s = this.app.settings, gen = this._gen || 0;
     try {
-      const r = await this.app.remote.ask({ action: 'reglages_ecrire', t: s._t || 1, reglages: shareable(s, HORS_SYNCHRO) });
-      if (r && r.ok) { this._ok(r.applique ? 'envoyés' : 'déjà à jour'); return true; }
+      // W19 : l'heure du réglage est donnée par le script (réponse « t »), pas par l'horloge de l'appareil. « t » envoyé : seulement
+      // pour un ancien script, qui l'attend encore.
+      const r = await this.app.remote.ask({ action: 'reglages_ecrire', t: Date.now(), base: s._t || 0, reglages: shareable(s, HORS_SYNCHRO) });
+      if (r && r.ok) {
+        if (+r.t) s._t = +r.t;
+        if ((this._gen || 0) === gen) s._sale = false;               // rien n'a changé pendant l'envoi : plus rien à envoyer
+        this.app.saveSettingsQuiet();
+        this._ok(r.applique ? 'envoyés' : 'déjà à jour'); return true;
+      }
       return this._fail(r);
     } catch (e) { return this._fail(null, e); }
   }
@@ -141,6 +149,7 @@ export class SettingsSync {
       if (!r || !r.ok) return this._fail(r);
       const remote = r.reglages, rt = +r.t || 0, lt = +s._t || 0;
       if (!remote || !rt) { this._ok('premier envoi'); return this.push(); }   // rien de commun encore : cet appareil fait référence
+      if (s._sale) return this.push();                                         // W19 : un changement d'ici pas encore envoyé l'emporte (dernier arrivé)
       if (rt > lt || (adopt && JSON.stringify(shareable({ ...s, _t: 0 }, HORS_SYNCHRO)) !== JSON.stringify(shareable({ ...s, ...remote, logUrl: s.logUrl, _t: 0 }, HORS_SYNCHRO)))) {
         const changed = mergeInto(s, { ...remote, _t: rt }, HORS_SYNCHRO);
         this.app.saveSettingsQuiet();

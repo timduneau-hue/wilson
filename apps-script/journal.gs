@@ -95,11 +95,42 @@ function ajoute_(sh, rows, texteDes) {
   if (last > max + 500) sh.deleteRows(max + 2, last - max - 1);
 }
 
+// W20 : compteurs de quotas, gardés dans les propriétés du script (« quotas » : { nom: { p: période, n: nombre } }) et montrés à la
+// fin de l'onglet État : recherches Tavily du mois, alertes du jour, e-mails restants chez Google, questions à Claude du jour.
+var TAVILY_MENSUEL = 1000;   // recherches Tavily par mois (offre gratuite) ; propriété du script TAVILY_MENSUEL pour une autre offre
+function periode_(mois) { return Utilities.formatDate(new Date(), 'Europe/Paris', mois ? 'yyyy-MM' : 'yyyy-MM-dd'); }
+function compter_(nom, mois, plein) {
+  try {
+    var lock = LockService.getScriptLock(); if (!lock.tryLock(3000)) return;
+    try {
+      var p = PropertiesService.getScriptProperties(), q = {}, per = periode_(mois);
+      try { q = JSON.parse(p.getProperty('quotas') || '{}') || {}; } catch (e) { q = {}; }
+      if (!q[nom] || q[nom].p !== per) q[nom] = { p: per, n: 0 };
+      q[nom].n++; if (plein) q[nom].plein = Date.now();
+      p.setProperty('quotas', JSON.stringify(q));
+    } finally { lock.releaseLock(); }
+  } catch (e) {}   // un compteur ne doit jamais bloquer ce qu'il compte
+}
+function quotasEtat_() {
+  var q = {}, c = null, rows = [];
+  try { q = JSON.parse(PropertiesService.getScriptProperties().getProperty('quotas') || '{}') || {}; } catch (e) {}
+  try { c = JSON.parse(PropertiesService.getScriptProperties().getProperty('alertes') || 'null'); } catch (e) {}
+  var t = q.tavily && q.tavily.p === periode_(true) ? q.tavily : { n: 0 }, max = +prop_('TAVILY_MENSUEL', TAVILY_MENSUEL) || TAVILY_MENSUEL;
+  rows.push(['Quota Tavily (recherches Internet)', t.n + ' ce mois-ci sur ' + max + (t.n >= max ? ' — ATTEINT' : ', reste ' + (max - t.n)) + (t.plein ? ' — refus « quota » reçu le ' + Utilities.formatDate(new Date(t.plein), 'Europe/Paris', "dd/MM HH'h'mm") : '')]);
+  rows.push(['Quota alertes par e-mail', (c && c.jour === periode_(false) ? c.n : 0) + " sur 20 aujourd'hui"]);
+  var reste = ''; try { reste = MailApp.getRemainingDailyQuota() + " e-mails restants aujourd'hui"; } catch (e) { reste = 'inconnu'; }
+  rows.push(['Quota e-mails du compte Google', reste]);
+  var cl = q.claude && q.claude.p === periode_(false) ? q.claude.n : 0, lim = typeof claudePc_ === 'function' ? claudePc_().limite : null;
+  rows.push(["Questions à Claude (PC) aujourd'hui", cl + (lim ? " — LIMITE D'USAGE atteinte, reprise à " + Utilities.formatDate(new Date(lim.jusqua), 'Europe/Paris', "HH'h'mm") : '')]);
+  return rows;
+}
+
 // Dernier bilan de la tablette (version, état, vision, batterie…) : écrase le précédent.
 function etat_(sh, b, appareil) {
   if (!sh) return;
   var rows = [['Mis à jour', Utilities.formatDate(new Date(), 'Europe/Paris', 'dd/MM/yy HH\'h\'mm:ss')], ['Appareil', appareil || '']];
   Object.keys(b).forEach(function (k) { rows.push([k, String(b[k])]); });
+  try { quotasEtat_().forEach(function (r) { rows.push(r); }); } catch (e) {}
   var n = sh.getMaxRows();
   if (n < rows.length + 1) sh.insertRowsAfter(n, rows.length + 1 - n);
   sh.getRange(2, 1, sh.getMaxRows() - 1, 2).clearContent();
@@ -119,6 +150,7 @@ function chercher_(d) {
   });
   var code = r.getResponseCode(), j = {};
   try { j = JSON.parse(r.getContentText() || '{}'); } catch (err) {}
+  if (code === 200 || code === 432 || code === 429) compter_('tavily', true, code !== 200);   // W20 : 432 et 429 = quota atteint
   if (code !== 200) {
     var msg = (j.detail && (j.detail.error || j.detail)) || j.error || ('erreur ' + code);
     return json_({ ok: false, code: code, erreur: 'Tavily ' + code + ' : ' + msg });
@@ -139,8 +171,10 @@ function sansSecretsMaison_(r) { if (r) { delete r.haUrl; delete r.haToken; } re
 function ecrireReglages_(d) {
   var lock = LockService.getScriptLock(); lock.waitLock(10000);
   try {
-    var p = PropertiesService.getScriptProperties(), cur = JSON.parse(p.getProperty('reglages') || 'null'), t = +d.t || 0;
-    if (cur && cur.t >= t) return { ok: true, applique: false, t: cur.t };            // déjà plus récent : on garde
+    // W19 : l'horodatage est donné par le script, jamais par l'appareil (une tablette ou un téléphone à l'heure fausse ne peut plus
+    // faire gagner ni perdre un réglage). Le dernier envoi reçu l'emporte ; t croît toujours (le « d.t » de l'appareil est ignoré).
+    var p = PropertiesService.getScriptProperties(), cur = JSON.parse(p.getProperty('reglages') || 'null');
+    var t = Math.max(Date.now(), cur ? (+cur.t || 0) + 1 : 0);
     p.setProperty('reglages', JSON.stringify({ t: t, reglages: sansSecretsMaison_(d.reglages || {}) }));
     return { ok: true, applique: true, t: t };
   } finally { lock.releaseLock(); }

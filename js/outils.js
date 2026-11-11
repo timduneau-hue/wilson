@@ -1,6 +1,7 @@
 // Wilson — plus d'outils (PLAN.md, section 7 quater) : afficher à l'écran, minuteurs, rappels, météo, liste de courses.
 // Tout est gratuit et sans nouvelle clé : Wikipédia (images), Open-Meteo (météo), Home Assistant (liste de courses).
 
+import { ecrireLocal } from './stockage.js';
 import { deviceName } from './remote.js';
 
 const S = { type: 'STRING' }, N = { type: 'NUMBER' };
@@ -54,7 +55,7 @@ export const DEMANDE_ECRAN = /(montr|affich|par ecrit|ecri[st]\b|ecrire|a l'?ecr
 export const demandeEcran = (t) => DEMANDE_ECRAN.test(plat(t));
 const KEY_M = 'wilson.minuteurs', KEY_R = 'wilson.rappels', KEY_C = 'wilson.courses', KEY_I = 'wilson.idees';
 const lire = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch (_) { return d; } };
-const ecrire = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
+const ecrire = ecrireLocal;   // W18 : un échec est noté au journal (js/stockage.js)
 
 // Codes météo WMO → mot et pictogramme.
 const WMO = [[0, 'ensoleillé', '☀️'], [1, 'plutôt ensoleillé', '🌤️'], [2, 'nuageux', '⛅'], [3, 'couvert', '☁️'], [45, 'brouillard', '🌫️'], [48, 'brouillard givrant', '🌫️'],

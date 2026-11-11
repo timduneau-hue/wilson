@@ -5,6 +5,7 @@
 // Messages et garde passent par le script de Timothée (apps-script/famille.gs) pour être partagés entre ses appareils ;
 // sans script à jour, ils restent sur cet appareil.
 
+import { ecrireLocal } from './stockage.js';
 import { OreilleGarde, NOMS, URGENT } from './garde.js';
 import { deviceName } from './remote.js';
 import { joliNom } from './qui.js';
@@ -50,7 +51,7 @@ const jourDit = (t) => { const d = new Date(t); return `${JOURS[d.getDay()]} ${p
 const JOUR_SEUL = /^\d{4}-\d{2}-\d{2}$/;
 
 const lire = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || d; } catch (_) { return d; } };
-const ecrire = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
+const ecrire = ecrireLocal;   // W18 : un échec est noté au journal (js/stockage.js)
 export const norm = (x) => String(x || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const pad = (n) => String(n).padStart(2, '0');
 export const heure = (t) => { const d = new Date(t); return `${d.getHours()}h${pad(d.getMinutes())}`; };

@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 5';
+export const VERSION = 'relais 6';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
 const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
@@ -32,6 +32,38 @@ const jour = (d = new Date()) => `${['dimanche', 'lundi', 'mardi', 'mercredi', '
 // (limite d'utilisation de l'abonnement), et Wilson l'a lu comme la réponse du CRM. Ce message est une erreur, pas une réponse.
 export const LIMITE = /hit your .{0,30}limit|usage limit|limit (reached|exceeded)|limit\s*·\s*resets|rate.?limit|out of (extra )?usage|credit balance is too low/i;
 export function limiteAtteinte(texte) { const t = String(texte || ''); return t.length < 400 && LIMITE.test(t); }
+// Heure de reprise annoncée : « resets 4am », « resets 4:30pm », « resets 16h » ; sinon dans une heure (même règle que js/claude.js).
+export function repriseLimite(texte, maintenant = new Date()) {
+  const m = /resets?\s+(?:at\s+)?(\d{1,2})(?:[:h](\d{2}))?\s*(am|pm)?/i.exec(String(texte || ''));
+  if (!m) return maintenant.getTime() + 3600000;
+  let h = +m[1] % 24; const mn = +(m[2] || 0);
+  if (m[3] && /pm/i.test(m[3]) && h < 12) h += 12;
+  if (m[3] && /am/i.test(m[3]) && h === 12) h = 0;
+  const d = new Date(maintenant); d.setHours(h, mn, 0, 0);
+  if (d.getTime() <= maintenant.getTime()) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+// W16 : effort de réflexion. config.json « effort » l'impose s'il est écrit ; sinon « high », sauf une question CRM courte et
+// simple (un chiffre, une fiche, une liste) : « medium », plus rapide et moins gourmand pour l'abonnement.
+const COMPLEXE = /compar|analys|évolu|tendance|pourquoi|stratég|prévis|classement|palmar[eè]s|tous les|chaque|par (mois|an|client|famille)|depuis (le|janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)/i;
+export function effortPour(q, impose) {
+  if (impose) return impose;
+  return q && q.type === 'crm' && String(q.question || '').length <= 140 && !COMPLEXE.test(String(q.question || '')) ? 'medium' : 'high';
+}
+
+// W15 : arrêter Claude ET tout ce qu'il a lancé (Windows : taskkill /T /F ; ailleurs : le groupe de processus).
+export function commandeArret(pid, plateforme = process.platform) {
+  return plateforme === 'win32' ? ['taskkill', ['/pid', String(pid), '/T', '/F']] : null;
+}
+export function arreterArbre(p, { plateforme = process.platform, executer = (c, a) => spawnSync(c, a, { windowsHide: true, timeout: 15000 }), tuer = (pid, sig) => process.kill(pid, sig) } = {}) {
+  if (!p || !p.pid) return;
+  const c = commandeArret(p.pid, plateforme);
+  try {
+    if (c) executer(c[0], c[1]);
+    else tuer(-p.pid, 'SIGKILL');
+  } catch (_) { try { p.kill(); } catch (_2) {} }
+}
 
 export function decouper(texte) {
   const t = String(texte || '').replace(/\r/g, '').trim();
@@ -148,6 +180,8 @@ export class Relais {
     this.log = log || ((m) => this._log(m));
     this.gardeHA = new GardeHA({ cfg: this.cfg, fetchImpl, journal: (m) => { this.log('maison : ' + m); this.lignes.push({ t: Date.now(), m: 'Maison (PC) : ' + m }); } });
     this.scriptOkAt = 0;
+    this.vides = 0;          // appels « claude_prendre » restés vides à la suite (W15)
+    this.limite = null;      // { jusqua, texte } : limite d'utilisation de Claude atteinte (W16)
   }
 
   _log(m) {
@@ -205,7 +239,7 @@ export class Relais {
 
   async boucle() {
     let attente = 5000;
-    this.journal(`démarré (${VERSION}, ${os.hostname()}, Node ${process.versions.node}, ${this.cfg.modele || 'sonnet'}, effort ${this.cfg.effort || 'high'})`);
+    this.journal(`démarré (${VERSION}, ${os.hostname()}, Node ${process.versions.node}, ${this.cfg.modele || 'sonnet'}, effort ${this.cfg.effort || 'high (medium pour une question CRM simple)'})`);
     let dernierJournal = Date.now(), derniereMaj = Date.now() - MAJ_MS + 60000;   // 1re vérification une minute après le démarrage
     let derniereHA = Date.now() - HA_VERIF_MS + 90000, verifHA = null;                // Home Assistant : 1re vérification 1 min 30 après
     while (!this.stop) {
@@ -220,15 +254,21 @@ export class Relais {
           try { if (await this.miseAJour()) { this.stop = true; process.exit(0); } } catch (e) { this.log('mise à jour impossible : ' + e.message); }
         }
         if (this.enCours >= MAX_EN_COURS) {                                   // occupé : il dit seulement qu'il est là
-          await this.post({ action: 'claude_prendre', secret: this.cfg.secret, max: 0, occupe: this.enCours, version: VERSION }, 30000);
+          await this.post({ action: 'claude_prendre', secret: this.cfg.secret, max: 0, occupe: this.enCours, version: VERSION, limite: this.limiteActive() }, 30000);
           await pause(20000); continue;
         }
         const t0 = Date.now();
-        const r = await this.post({ action: 'claude_prendre', secret: this.cfg.secret, attente: 25, occupe: this.enCours, version: VERSION }, 45000);
+        const r = await this.post({ action: 'claude_prendre', secret: this.cfg.secret, attente: 25, occupe: this.enCours, version: VERSION, limite: this.limiteActive() }, 45000);
         if (!r.ok) throw new Error(r.erreur || 'refus du script');
         attente = 5000; this.scriptOkAt = Date.now();
-        if (r.question) this.traiter(r.question);
-        else if (Date.now() - t0 < 2000) await pause(2000);                    // le script n'a pas attendu : on ne le harcèle pas
+        if (r.question) { this.vides = 0; this.traiter(r.question); }
+        else {
+          // W15 : pause entre deux appels vides. Le script attend d'ordinaire ~25 s ; s'il répond tout de suite (quota, panne),
+          // la pause double à chaque appel vide de suite (2 s, 4 s… jusqu'à 30 s) au lieu de le harceler.
+          this.vides++;
+          if (Date.now() - t0 < 2000) await pause(Math.min(1000 * 2 ** Math.min(this.vides, 5), 30000));
+          else await pause(500);
+        }
       } catch (e) {
         this.log(`script injoignable ou refus : ${e.message} — nouvel essai dans ${Math.round(attente / 1000)} s`);
         await pause(attente); attente = Math.min(attente * 2, 60000);
@@ -236,12 +276,20 @@ export class Relais {
     }
   }
 
+  // W16 : la limite en cours (pour la signaler au script), ou null quand elle est passée.
+  limiteActive() {
+    if (this.limite && this.limite.jusqua > Date.now()) return this.limite;
+    this.limite = null; return null;
+  }
   async traiter(q) {
     this.enCours++;
     const t0 = Date.now();
     this.journal(`question reçue (${q.type}${q.voiture ? ', en voiture' : ''}) : « ${String(q.question).slice(0, 160)} »`);
     let rendu;
     try {
+      // Limite déjà atteinte : on ne lance pas Claude pour rien, Wilson bascule tout de suite.
+      const lim = this.limiteActive();
+      if (lim) throw new Error(`limite d'utilisation de Claude atteinte : ${lim.texte}`);
       const r = await this.lancerClaude(q);
       const s = Math.round((Date.now() - t0) / 1000);
       if (!r.dire) throw new Error('Claude n\'a rien répondu');
@@ -249,6 +297,10 @@ export class Relais {
       this.journal(`réponse en ${s} s (${r.etapes || '?'} étape(s)) : ${r.dire.slice(0, 200)}`);
     } catch (e) {
       rendu = { ok: false, erreur: String(e.message || e).slice(0, 400), duree: Math.round((Date.now() - t0) / 1000) };
+      if (limiteAtteinte(rendu.erreur) && !this.limiteActive()) {                 // W16 : noter la limite, la signaler au script
+        this.limite = { jusqua: repriseLimite(rendu.erreur), texte: rendu.erreur.replace(/^limite d'utilisation de Claude atteinte\s*:\s*/i, '').slice(0, 200) };
+        this.journal(`limite d'utilisation de Claude atteinte : plus de question avant ${heure(new Date(this.limite.jusqua))}`);
+      }
       this.journal(`échec après ${rendu.duree} s : ${rendu.erreur}`);
     }
     for (let n = 0; n < 4; n++) {                                           // rendre la réponse, même si le réseau hoquette
@@ -269,12 +321,12 @@ export class Relais {
   _claude(q) {
     return new Promise((ok, ko) => {
       const travail = path.join(this.dir, 'travail'); fs.mkdirSync(travail, { recursive: true });
-      const args = argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: this.cfg.effort || 'high', crm: q.type === 'crm' || q.crm !== false });
+      const args = argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: effortPour(q, this.cfg.effort), crm: q.type === 'crm' || q.crm !== false });
       const env = { ...process.env, ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER || '' };
       delete env.ANTHROPIC_API_KEY;                                         // jamais de facturation à l'usage : l'abonnement seulement
-      const p = spawn(this.exe(), args, { cwd: travail, env, windowsHide: true });
+      const p = spawn(this.exe(), args, { cwd: travail, env, windowsHide: true, detached: process.platform !== 'win32' });
       let out = '', err = '';
-      const minuteur = setTimeout(() => { try { p.kill(); } catch (_) {} ko(new Error(`Claude n'a pas fini en ${CLAUDE_MAX_MS / 60000} min`)); }, CLAUDE_MAX_MS);
+      const minuteur = setTimeout(() => { arreterArbre(p); ko(new Error(`Claude n'a pas fini en ${CLAUDE_MAX_MS / 60000} min`)); }, CLAUDE_MAX_MS);
       p.stdout.on('data', (b) => { out += b; });
       p.stderr.on('data', (b) => { err += b; });
       p.on('error', (e) => { clearTimeout(minuteur); ko(e); });

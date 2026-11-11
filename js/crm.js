@@ -8,6 +8,7 @@
 //  - Appeler (C4) : bouton vert avec le numéro (une page web n'a pas le droit de lancer un appel seule).
 
 import { Analyste } from './analyste.js';
+import { ecrireLocal } from './stockage.js';
 
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
@@ -247,7 +248,7 @@ export class Crm {
     } catch (_) {}
   }
   _save() {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ jour: frDate(new Date()), e: [...this.cache.values()].slice(-15) })); } catch (_) {}
+    ecrireLocal(CACHE_KEY, { jour: frDate(new Date()), e: [...this.cache.values()].slice(-15) });
   }
   _keep(r) {
     const e = { cle: r.cle, societe: r.societe, contact: r.contact, ville: r.ville || '', adresse: r.adresse || '', contacts: r.contacts || [], texte: r.texte, rdv: r.rdv || '', at: Date.now(),
@@ -452,7 +453,7 @@ export class Crm {
     this.log(`pas de réseau : écriture gardée sur le téléphone, envoyée au retour du réseau : ${p.relu}`, true);
     clearTimeout(this._qT); this._qT = setTimeout(() => this.flushQueue(), 30000);
   }
-  _saveQueue() { try { localStorage.setItem(QUEUE_KEY, JSON.stringify(this.queue)); } catch (_) {} }
+  _saveQueue() { ecrireLocal(QUEUE_KEY, this.queue); }
   async flushQueue() {
     if (!this.queue.length || this._flushing || !this.on) return;
     if (!navigator.onLine) { clearTimeout(this._qT); this._qT = setTimeout(() => this.flushQueue(), 30000); return; }
