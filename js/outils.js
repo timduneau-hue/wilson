@@ -348,7 +348,7 @@ export class Outils {
     const aut = typeof A._crmAutorise === 'function' ? A._crmAutorise() : { ok: false };
     if (!aut.ok) {
       this.log(`Bourse refusée : ${aut.qui ? `c'est ${aut.qui} qui me regarde` : 'je ne reconnais pas Timothée'} — réservée à Timothée`, true);
-      return `REFUSÉ : sa bourse est privée, réservée à Timothée${aut.qui ? `, et c'est ${aut.qui} qui te regarde` : ', et tu ne reconnais pas son visage en ce moment'}. Dis seulement que c'est réservé à Timothée${aut.qui ? '' : ' et qu'il doit bien te regarder'} ; aucun chiffre.`;
+      return `REFUSÉ : sa bourse est privée, réservée à Timothée${aut.qui ? `, et c'est ${aut.qui} qui te regarde` : ', et tu ne reconnais pas son visage en ce moment'}. Dis seulement que c'est réservé à Timothée${aut.qui ? '' : ' et qu’il doit bien te regarder'} ; aucun chiffre.`;
     }
     if (!R || !R.on) return "Le script de Wilson n'est pas relié sur cet appareil (Réglages → Journal à distance) : je ne peux pas lire le suivi bourse. Dis-le simplement.";
     let r = this._bourse && Date.now() - this._bourse.t < 120000 ? this._bourse.r : null;   // 2 min : les cours bougent peu entre deux questions
@@ -366,7 +366,7 @@ export class Outils {
     const voiture = !!A.enVoiture;
     return `${r.texte}
 
-RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus tels quels (arrondis à l'oral : « environ 1 750 euros », « moins 11 pour cent ») ; ne calcule rien de toi-même si le chiffre est déjà là ; ne récite pas tout${voiture ? ' ; il conduit : une ou deux phrases' : ''}. Le statut et les limites de vente sont ses propres règles : tu peux les rappeler. Tu ne donnes pas de conseil d'achat ou de vente ; pour une analyse poussée, il peut te la demander et tu la passes à question_difficile.${action === 'afficher' ? ' Le détail est affiché à l'écran.' : ''}`;
+RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus tels quels (arrondis à l'oral : « environ 1 750 euros », « moins 11 pour cent ») ; ne calcule rien de toi-même si le chiffre est déjà là ; ne récite pas tout${voiture ? ' ; il conduit : une ou deux phrases' : ''}. Le statut et les limites de vente sont ses propres règles : tu peux les rappeler. Tu ne donnes pas de conseil d'achat ou de vente ; pour une analyse poussée, il peut te la demander et tu la passes à question_difficile.${action === 'afficher' ? ' Le détail est affiché à l’écran.' : ''}`;
   }
 
   // ---------- F6 : mes idées (document Google par le script de Timothée ; sinon gardées sur l'appareil) ----------
