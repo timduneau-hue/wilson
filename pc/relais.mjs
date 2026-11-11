@@ -11,15 +11,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 6';
+export const VERSION = 'relais 7';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
-const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md'];
+const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md', 'mail-mcp.mjs', 'garde-chrome.mjs', 'consigne-mail.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const MAX_EN_COURS = 2;                 // deux questions en même temps au plus
 const CLAUDE_MAX_MS = 4 * 60000;        // au-delà, Claude est arrêté (Wilson a dit qu'il attendait 4 min au plus)
 const MAX_TOURS = 30;
 const OUTILS = 'WebSearch,WebFetch';
+// E-mails (demande du 11/11/26) : question de type « mail ». Claude n'a alors PAS Internet (un e-mail piégé ne doit pas pouvoir
+// faire sortir ce qu'il lit), seulement le Gmail perso (mail-mcp.mjs), le CRM en lecture et, pour la boîte pro, Chrome
+// limité à Outlook par garde-chrome.mjs. Outlook par Chrome est lent : 9 min au plus, 60 étapes.
+export const MAIL_MAX_MS = 9 * 60000;
+const MAIL_TOURS = 60;
+const CHROME_INTERDITS = ['javascript_tool', 'file_upload', 'upload_image', 'gif_creator', 'shortcuts_execute', 'shortcuts_list', 'read_network_requests', 'read_console_messages', 'switch_browser'].map((x) => 'mcp__claude-in-chrome__' + x).join(',');
 export const MARQUE_DIRE = /^\s*(?:\*\*)?À DIRE\s*:?(?:\*\*)?\s*:?\s*$/im;
 export const MARQUE_DETAIL = /^\s*(?:\*\*)?DÉTAIL\s*:?(?:\*\*)?\s*:?\s*$/im;
 
@@ -82,7 +88,7 @@ export function decouper(texte) {
 export function demande(q, maintenant = new Date()) {
   return [
     `Date et heure : ${jour(maintenant)} ${heure(maintenant)} (heure de Paris).`,
-    `Type de question : ${q.type === 'crm' ? 'CRM (ses données de commercial)' : 'recherche (Internet, produits, technique)'}.`,
+    `Type de question : ${q.type === 'crm' ? 'CRM (ses données de commercial)' : q.type === 'mail' ? `e-mails — boîte à regarder : ${q.boite === 'perso' ? 'PERSO seulement (Gmail)' : q.boite === 'pro' ? 'PRO seulement (Outlook, dans Chrome)' : 'les deux (Gmail perso, et Outlook pro dans Chrome)'}` : 'recherche (Internet, produits, technique)'}.`,
     `Timothée est en voiture : ${q.voiture ? 'oui (réponse très courte, il conduit)' : 'non'}.`,
     `Question de Timothée, dictée à Wilson : « ${q.question} »`,
     q.contexte ? `\nContexte donné par Wilson :\n${q.contexte}` : '',
@@ -95,7 +101,14 @@ export function demande(q, maintenant = new Date()) {
 // consigne : le texte de consigne.md (passé tel quel : --system-prompt remplace la consigne de développeur de Claude Code).
 // effort : réflexion de Claude (low, medium, high, xhigh, max) ; « high » par défaut : des réponses fiables (06/11/26).
 // crm : le CRM n'est branché que si c'est Timothée qui demande (règle du 06/11/26) ; sinon Claude n'a qu'Internet.
-export function argumentsClaude({ mcp, consigne, modele = 'sonnet', effort = 'high', crm = true }) {
+// mail : { pro, reglages } pour une question sur les e-mails (pro : Outlook dans Chrome ; reglages : fichier du crochet de garde).
+export function argumentsClaude({ mcp, consigne, modele = 'sonnet', effort = 'high', crm = true, mail = null }) {
+  if (mail) {
+    return ['-p', '--output-format', 'json', '--model', modele, '--effort', effort, '--max-turns', String(MAIL_TOURS),
+      '--tools', '', '--allowedTools', `mcp__mail,mcp__crm${mail.pro ? ',mcp__claude-in-chrome' : ''}`, '--permission-mode', 'dontAsk',
+      ...(mail.pro ? ['--chrome', '--disallowedTools', CHROME_INTERDITS, '--settings', mail.reglages] : ['--no-chrome']),
+      '--mcp-config', mcp, '--strict-mcp-config', '--system-prompt', consigne, '--no-session-persistence'];
+  }
   return ['-p', '--output-format', 'json', '--model', modele, '--effort', effort, '--max-turns', String(MAX_TOURS),
     '--tools', OUTILS, '--allowedTools', crm ? `${OUTILS},mcp__crm` : OUTILS, '--permission-mode', 'dontAsk',
     ...(crm ? ['--mcp-config', mcp] : []), '--strict-mcp-config', '--system-prompt', consigne, '--no-session-persistence'];
@@ -318,15 +331,27 @@ export class Relais {
     throw new Error('Claude Code introuvable sur le PC (relancer l\'installation)');
   }
 
+  // Question sur les e-mails : les deux fichiers que Claude Code lit sont écrits ici (chemins de CE PC), à chaque question :
+  // mcp-mail.json (Gmail perso + CRM en lecture) et reglages-mail.json (crochet : garde-chrome.mjs avant chaque action Chrome).
+  fichiersMail(q) {
+    const node = process.execPath, f = (n) => path.join(this.dir, n), slash = (x) => x.replace(/\\/g, '/');
+    const mcp = f('mcp-mail.json'), reglages = f('reglages-mail.json');
+    fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { crm: { type: 'stdio', command: node, args: [f('crm-mcp.mjs')] }, mail: { type: 'stdio', command: node, args: [f('mail-mcp.mjs')] } } }, null, 1));
+    fs.writeFileSync(reglages, JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'mcp__claude-in-chrome__.*', hooks: [{ type: 'command', command: `"${slash(node)}" "${slash(f('garde-chrome.mjs'))}"`, timeout: 15 }] }] } }, null, 1));
+    return { mcp, mail: { pro: q.boite !== 'perso', reglages } };
+  }
+
   _claude(q) {
     return new Promise((ok, ko) => {
       const travail = path.join(this.dir, 'travail'); fs.mkdirSync(travail, { recursive: true });
-      const args = argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: effortPour(q, this.cfg.effort), crm: q.type === 'crm' || q.crm !== false });
+      const mail = q.type === 'mail', maxMs = mail ? MAIL_MAX_MS : CLAUDE_MAX_MS;
+      const args = mail ? argumentsClaude({ ...this.fichiersMail(q), consigne: fs.readFileSync(path.join(this.dir, 'consigne-mail.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: effortPour(q, this.cfg.effort) })
+        : argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: effortPour(q, this.cfg.effort), crm: q.type === 'crm' || q.crm !== false });
       const env = { ...process.env, ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER || '' };
       delete env.ANTHROPIC_API_KEY;                                         // jamais de facturation à l'usage : l'abonnement seulement
       const p = spawn(this.exe(), args, { cwd: travail, env, windowsHide: true, detached: process.platform !== 'win32' });
       let out = '', err = '';
-      const minuteur = setTimeout(() => { arreterArbre(p); ko(new Error(`Claude n'a pas fini en ${CLAUDE_MAX_MS / 60000} min`)); }, CLAUDE_MAX_MS);
+      const minuteur = setTimeout(() => { arreterArbre(p); ko(new Error(`Claude n'a pas fini en ${maxMs / 60000} min`)); }, maxMs);
       p.stdout.on('data', (b) => { out += b; });
       p.stderr.on('data', (b) => { err += b; });
       p.on('error', (e) => { clearTimeout(minuteur); ko(e); });

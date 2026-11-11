@@ -10,6 +10,17 @@ export const CLAUDE_TOOL = {
   parameters: { type: 'OBJECT', properties: { question: { type: 'STRING', description: 'la question complète, avec les références, marques et dimensions dites' } }, required: ['question'] },
 };
 
+// Ses e-mails (demande de Timothée du 11/11/26) : Gmail perso (par son script) et Outlook pro (dans Chrome, sur le PC), lus par
+// Claude sur le PC. Wilson (Gemini) ne voit jamais les e-mails eux-mêmes, seulement la réponse de Claude.
+export const MAIL_TOOL = {
+  name: 'mails', behavior: 'BLOCKING',
+  description: "Ses e-mails (privés : réservés à Timothée) : lire les derniers ou les non lus, chercher un e-mail, analyser plusieurs échanges avec quelqu'un, faire un compte rendu, préparer une réponse ou un nouveau message. Claude, sur l'ordinateur de la maison, lit sa messagerie (une demi-minute pour la boîte perso, 2 à 5 minutes pour la boîte pro). Avant de l'appeler, dis seulement « Je regarde tes e-mails. ». boite : perso (son Gmail personnel), pro (sa messagerie Outlook Boschat Laveix : clients, collègues, fournisseurs), les_deux s'il ne précise pas et que le sujet ne le dit pas. Tu ne connais aucun de ses e-mails par cœur : n'invente jamais un e-mail, un expéditeur ou un contenu. Pour écrire : Claude prépare un brouillon et te donne le texte à relire ; s'il te demande « Je l'envoie ? », attends le « oui » de Timothée puis appelle mail_envoyer.",
+  parameters: { type: 'OBJECT', properties: {
+    demande: { type: 'STRING', description: "la demande complète, telle qu'il l'a dite : de qui, sur quoi, quelle période ; pour écrire : à qui et ce qu'il veut dire" },
+    boite: { type: 'STRING', enum: ['perso', 'pro', 'les_deux'] } }, required: ['demande'] },
+};
+export const MAIL_MAX_MS = 9 * 60000;     // e-mails : Outlook dans Chrome est lent, le relais laisse 9 min
+
 export const CLAUDE_MAX_MS = 4 * 60000;   // Claude a 4 min au plus (le relais l'arrête au-delà)
 export const PRISE_MAX_MS = 30000;        // pas prise par le PC en 30 s : il ne répondra pas
 const VU_MS = 20000;                      // état du PC gardé 20 s
@@ -76,14 +87,15 @@ export class ClaudePC {
   // La question → { ok: true, dire, detail, etapes, ms } ou { ok: false, raison, message } (raison : absent, pas_pris, trop_long,
   // erreur, script). Jamais d'exception sauf annulation (AbortError).
   // crm : Claude peut-il lire le CRM (seulement si c'est Timothée qui demande, règle du 06/11/26) ?
-  async repondre({ question, type = 'internet', contexte = '', regles = '', voiture = false, crm = false, appareil = '', signal, onPris } = {}) {
+  async repondre({ question, type = 'internet', contexte = '', regles = '', voiture = false, crm = false, boite = '', appareil = '', signal, onPris } = {}) {
+    const maxMs = type === 'mail' ? Math.max(this.maxMs, MAIL_MAX_MS + 15000) : this.maxMs;
     if (this.limiteJusqua && Date.now() < this.limiteJusqua) return { ok: false, raison: 'limite', message: `limite d'utilisation atteinte, reprise à ${new Date(this.limiteJusqua).getHours()}h${String(new Date(this.limiteJusqua).getMinutes()).padStart(2, '0')}` };
     const t0 = Date.now(), id = `w${t0.toString(36)}${(++this.n).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     // PC absent il y a moins d'une minute : pas la peine de redemander (la recherche de secours part tout de suite).
     if (this.pc && !this.pc.vivant && Date.now() - this.pcAt < 60000) return { ok: false, raison: 'absent', message: this.pc.vu != null ? `vu il y a ${Math.round(this.pc.vu / 60)} min` : 'jamais vu' };
     let r = null;
     for (let essai = 0; ; essai++) {                                          // réseau mobile capricieux : on redemande (même id, pas de doublon)
-      try { r = await this._ask({ action: 'claude_demander', id, question, type, contexte, regles, voiture, crm: !!crm, appareil }, signal, 20000); break; }
+      try { r = await this._ask({ action: 'claude_demander', id, question, type, contexte, regles, voiture, crm: !!crm, boite, appareil }, signal, 20000); break; }
       catch (e) {
         if (e.name === 'AbortError' && signal && signal.aborted) throw e;
         if (!reseau(e) || essai >= 2) return { ok: false, raison: 'script', message: e.message };
@@ -103,7 +115,7 @@ export class ClaudePC {
       if (signal && signal.aborted) { annuler(); const e = new Error('Annulé'); e.name = 'AbortError'; throw e; }
       const ecoule = Date.now() - t0;
       if (!pris && etat === 'attente' && ecoule > this.priseMaxMs) { annuler(); return { ok: false, raison: 'pas_pris', message: `question pas prise par le PC en ${Math.round(this.priseMaxMs / 1000)} s` }; }
-      if (ecoule > this.maxMs) { annuler(); return { ok: false, raison: 'trop_long', message: `pas de réponse en ${Math.round(ecoule / 60000)} min` }; }
+      if (ecoule > maxMs) { annuler(); return { ok: false, raison: 'trop_long', message: `pas de réponse en ${Math.round(ecoule / 60000)} min` }; }
       let s;
       try { s = await this._ask({ action: 'claude_resultat', id, attente: pris ? 15 : Math.min(15, Math.max(1, Math.round((this.priseMaxMs - ecoule) / 1000))), etat }, signal, 30000); }
       catch (e) {

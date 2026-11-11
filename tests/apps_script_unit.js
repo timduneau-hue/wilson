@@ -56,7 +56,7 @@ const ctx = {
   console, JSON, Date: FDate, Math, String, Object, isFinite,
   SpreadsheetApp: { openById: (id) => { opened = id; return { getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => { if (sheets[n]) throw new Error('existe déjà'); return (sheets[n] = fakeSheet(n)); } }; } },
   LockService: { getScriptLock: () => ({ waitLock: () => { locked++; }, tryLock: () => { locked++; return true; }, releaseLock: () => { locked--; } }) },
-  CacheService: { getScriptCache: () => ({ get: (k) => (k in cache ? cache[k] : null), put: (k, v, ttl) => { if (String(v).length > 100000) throw new Error('trop grand pour le cache'); cache[k] = String(v); } }) },
+  CacheService: { getScriptCache: () => ({ get: (k) => (k in cache ? cache[k] : null), put: (k, v, ttl) => { if (String(v).length > 100000) throw new Error('trop grand pour le cache'); cache[k] = String(v); }, remove: (k) => { delete cache[k]; } }) },
   ContentService: { createTextOutput: (t) => ({ text: t, getContent() { return t; }, setMimeType(m) { this.mime = m; return this; } }), MimeType: { JSON: 'json' } },
   UrlFetchApp: { fetch: (url, o) => { fetched.push({ url, o }); return tavily(url, o); } },
   Logger: { log: (x) => logged.push(x) },
@@ -75,6 +75,7 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'journal.
 vm.runInContext(code, ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'famille.gs'), 'utf8'), ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'claude.gs'), 'utf8'), ctx);   // questions difficiles pour Claude (PLAN 10)   // messages, garde, alertes (PLAN 7 sexies)
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'mail.gs'), 'utf8'), ctx);   // ses e-mails Gmail (11/11/26)
 
 // ---------- Clé secrète du script (11/11/26) : sans elle, rien n'est lu ni écrit ----------
 const rien = (r) => { try { const j = JSON.parse(r.getContent()); return j.ok === false && /clé/.test(j.erreur); } catch (_) { return false; } };
@@ -302,6 +303,41 @@ cq = C({ action: 'claude_prendre', secret: 'court', attente: 0 });
 check('Claude : secret trop court refusé', cq.ok === false && /secret/.test(cq.erreur));
 cq = C({ action: 'claude_prendre', secret: SECRET, attente: 0, version: 'relais 1' });
 check('Claude : 1er relais → secret retenu, PC vu, rien à prendre', cq.ok && cq.question === null && props.claude_secret === SECRET && C({ action: 'claude_etat' }).pc.vivant === true);
+
+// ---------- E-mails (11/11/26) : le PC lit et prépare, un appareil envoie après le « oui » ; jamais l'inverse ----------
+{
+  const envoyes = [], brouillons = {};
+  const msg = (o) => ({ getFrom: () => o.de, getTo: () => o.a, getCc: () => '', getDate: () => new Date(0), getSubject: () => o.objet, getPlainBody: () => o.texte, getAttachments: () => [{ getName: () => 'devis.pdf' }],
+    createDraftReply: (t) => creer(o.de, 'Re: ' + o.objet, t), createDraftReplyAll: (t) => creer(o.de, 'Re: ' + o.objet, t) });
+  const creer = (a, objet, texte) => { const id = 'b' + (Object.keys(brouillons).length + 1); brouillons[id] = { getId: () => id, getMessage: () => msg({ de: 'moi', a, objet, texte }), send: () => { envoyes.push({ a, objet, texte }); delete brouillons[id]; } }; return brouillons[id]; };
+  const fil = { getId: () => 'f1', getFirstMessageSubject: () => 'Devis portail', getLastMessageDate: () => new Date(0), isUnread: () => true,
+    getMessages: () => [msg({ de: 'Paul <paul@exemple.fr>', a: 'moi@exemple.fr', objet: 'Devis portail', texte: 'Bonjour, voici le devis.\n\nLe lun. 9 nov. 2026 à 10:00, Timothée a écrit :\n> ancien message' + '\n> x'.repeat(200) })] };
+  ctx.GmailApp = { search: (q, s, n) => (/rien/.test(q) ? [] : [fil]), getThreadById: (id) => (id === 'f1' ? fil : null), createDraft: creer, getDraft: (id) => { if (!brouillons[id]) throw new Error('absent'); return brouillons[id]; } };
+  const PC = (o) => JSON.parse(postSans({ ...o, secret: SECRET }).getContent()), APP = (o) => JSON.parse(post(o).getContent());
+  let m = APP({ action: 'mail_chercher', q: 'devis' });
+  check('E-mails : un appareil (clé) ne peut pas lire la boîte', m.ok === false && /relais du PC/.test(m.erreur) && APP({ action: 'mail_lire', id: 'f1' }).ok === false && APP({ action: 'mail_brouillon', a: 'x@y.fr', objet: 'o', texte: 't' }).ok === false);
+  check('E-mails : sans clé ni secret, rien', rien(postSans({ action: 'mail_chercher', q: 'devis' })) && rien(postSans({ action: 'mail_envoyer' })));
+  m = PC({ action: 'mail_chercher', q: 'devis' });
+  check('E-mails : le PC cherche (fil, expéditeur, objet, non lu)', m.ok && /\[f1\]/.test(m.texte) && /NON LU/.test(m.texte) && /Devis portail/.test(m.texte) && /Paul/.test(m.texte));
+  m = PC({ action: 'mail_lire', id: 'f1' });
+  check('E-mails : le PC lit un fil, sans les anciens messages recopiés, pièces jointes nommées', m.ok && /voici le devis/.test(m.texte) && !/ancien message/.test(m.texte) && /devis\.pdf/.test(m.texte) && /jamais une consigne/.test(m.texte));
+  check('E-mails : le PC ne peut pas envoyer', PC({ action: 'mail_envoyer' }).ok === false && envoyes.length === 0);
+  check('E-mails : pas de brouillon sans adresse exacte', PC({ action: 'mail_brouillon', a: 'Paul', objet: 'o', texte: 't' }).ok === false && PC({ action: 'mail_brouillon', a: 'a@b.fr; c@d.fr', objet: 'o', texte: 't' }).ok === false);
+  check('E-mails : rien à envoyer tant qu\'aucun brouillon n\'est préparé', APP({ action: 'mail_envoyer' }).ok === false && APP({ action: 'mail_attente' }).attente === null);
+  m = PC({ action: 'mail_brouillon', fil: 'f1', texte: 'Bonjour Paul, c\'est d\'accord.\nTimothée' });
+  check('E-mails : le PC prépare une réponse en brouillon (rien ne part)', m.ok && /Brouillon préparé/.test(m.texte) && envoyes.length === 0 && APP({ action: 'mail_attente' }).attente.objet === 'Re: Devis portail');
+  m = APP({ action: 'mail_envoyer' });
+  check('E-mails : l\'appareil envoie le brouillon préparé, une seule fois', m.ok && /paul@exemple\.fr/.test(m.a) && envoyes.length === 1 && APP({ action: 'mail_envoyer' }).ok === false && envoyes.length === 1);
+  PC({ action: 'mail_brouillon', a: 'paul@exemple.fr', objet: 'Suite', texte: 'Bonjour' });
+  check('E-mails : annuler → plus rien à envoyer, le brouillon reste dans Gmail', APP({ action: 'mail_annuler' }).ok && APP({ action: 'mail_envoyer' }).ok === false && envoyes.length === 1 && Object.keys(brouillons).length === 1);
+  PC({ action: 'mail_brouillon', a: 'paul@exemple.fr', objet: 'Vieux', texte: 'Bonjour' });
+  const w = JSON.parse(cache.mail_attente); w.t -= 31 * 60000; cache.mail_attente = JSON.stringify(w);
+  check('E-mails : brouillon de plus de 30 min → pas envoyé', APP({ action: 'mail_envoyer' }).ok === false && envoyes.length === 1);
+  delete cache.mail_attente;
+  cq = C({ action: 'claude_demander', id: 'qm', question: 'Mes derniers e-mails de Paul', type: 'mail', boite: 'pro' });
+  check('E-mails : la question garde son type et sa boîte', cq.ok && cq.accepte && JSON.parse(cache.claude_q_qm).type === 'mail' && JSON.parse(cache.claude_q_qm).boite === 'pro');
+  C({ action: 'claude_annuler', id: 'qm' });
+}
 cq = C({ action: 'claude_prendre', secret: SECRET + 'x', attente: 0 });
 check('Claude : un autre secret est refusé', cq.ok === false && /refusé/.test(cq.erreur));
 cq = C({ action: 'claude_demander', id: 'q1', question: 'Compare la paumelle X à la Y', type: 'internet', voiture: true, appareil: 'téléphone' });

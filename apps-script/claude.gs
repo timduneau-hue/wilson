@@ -67,7 +67,8 @@ function claudeDemander_(d) {
   if (!pc.vivant) return { ok: true, accepte: false, id: id, pc: pc };
   if (pc.limite) return { ok: true, accepte: false, id: id, limite: pc.limite, pc: pc };   // limite atteinte : rien n'entre dans la file
   var q = {
-    id: id, question: question, type: d.type === 'crm' ? 'crm' : 'internet', voiture: !!d.voiture, crm: d.type === 'crm' || d.crm === true,   // CRM : seulement pour Timothée (06/11/26)
+    id: id, question: question, type: d.type === 'crm' ? 'crm' : d.type === 'mail' ? 'mail' : 'internet', voiture: !!d.voiture, crm: d.type === 'crm' || d.crm === true,   // CRM : seulement pour Timothée (06/11/26)
+    boite: d.type === 'mail' ? (/^(perso|pro)$/.test(String(d.boite)) ? String(d.boite) : 'les_deux') : '',   // e-mails (11/11/26) : Gmail perso, Outlook pro, ou les deux
     contexte: String(d.contexte || '').slice(0, 8000), regles: String(d.regles || '').slice(0, 8000),
     appareil: String(d.appareil || '').slice(0, 40), t: Date.now(), etat: 'attente',
   };
@@ -128,7 +129,7 @@ function claudeHistorique_(q) {
   var sh = onglet_('Claude', CLAUDE_COLS);
   sh.insertRowsBefore(2, 1);
   sh.getRange(2, 2, 1, 8).setNumberFormat('@');
-  sh.getRange(2, 1, 1, 9).setValues([[new Date(q.t || Date.now()), q.appareil || '', (q.type === 'crm' ? 'CRM' : 'Internet') + (q.voiture ? ' (voiture)' : ''),
+  sh.getRange(2, 1, 1, 9).setValues([[new Date(q.t || Date.now()), q.appareil || '', (q.type === 'crm' ? 'CRM' : q.type === 'mail' ? 'E-mails' : 'Internet') + (q.voiture ? ' (voiture)' : ''),
     q.question || '', q.etat === 'erreur' ? 'Erreur : ' + (q.erreur || '') : (q.dire || ''), q.detail || '', String(q.duree || ''), String(q.etapes || ''), q.etat === 'faite' ? 'réponse' : 'erreur']]);
   sh.getRange(2, 1).setNumberFormat('dd/mm/yy hh"h"mm');
   var last = sh.getLastRow(); if (last > CLAUDE_HISTO_MAX + 100) sh.deleteRows(CLAUDE_HISTO_MAX + 2, last - CLAUDE_HISTO_MAX - 1);

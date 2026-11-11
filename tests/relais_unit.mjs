@@ -52,7 +52,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 6 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 7 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -79,7 +79,7 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 6');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 7');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
 
 // ---------- Lot 4 : arrêt de tout l'arbre (W15), limite signalée au script (W16), effort réduit (W16) ----------
@@ -192,7 +192,7 @@ check('MCP : méthode inconnue → erreur propre', reps.find((x) => x.id === 4).
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relais-'));
   for (const f of ['relais.mjs', 'crm-mcp.mjs', 'consigne.md']) fs.writeFileSync(path.join(dir, f), 'ancien ' + f + ' '.repeat(300));
   let distant = { 'relais.mjs': 'export const x = 1;\n' + '// '.repeat(100), 'crm-mcp.mjs': 'ancien crm-mcp.mjs' + ' '.repeat(300), 'consigne.md': 'Nouvelle consigne' + '.'.repeat(300) };
-  const fx = async (u) => { const f = u.split('/pc/')[1].split('?')[0]; return { ok: true, text: async () => distant[f] }; };
+  const fx = async (u) => { const f = u.split('/pc/')[1].split('?')[0]; return { ok: true, text: async () => distant[f] || '' }; };
   const R2 = new Relais({ dir, config: { script: 'S', secret: 'x'.repeat(40) }, fetchImpl: async (u, o) => (u.includes('raw.githubusercontent.com') ? fx(u) : { status: 200, text: async () => 'ok' }), log: () => {} });
   check('Mise à jour : fichiers changés remplacés (code vérifié avant)', (await R2.miseAJour()) === true && /export const x/.test(fs.readFileSync(path.join(dir, 'relais.mjs'), 'utf8')) && /Nouvelle consigne/.test(fs.readFileSync(path.join(dir, 'consigne.md'), 'utf8')) && /ancien crm/.test(fs.readFileSync(path.join(dir, 'crm-mcp.mjs'), 'utf8')));
   check('Mise à jour : rien de changé → rien à faire', (await R2.miseAJour()) === false);
@@ -202,5 +202,27 @@ check('MCP : méthode inconnue → erreur propre', reps.find((x) => x.id === 4).
   check('Mise à jour : jamais pendant une question', (await R2.miseAJour()) === false);
   fs.rmSync(dir, { recursive: true, force: true });
 }
+// ---------- E-mails (11/11/26) : Claude sans Internet, Chrome limité à Outlook, aucun outil d'envoi ----------
+{
+  const { adresseOk, refus } = await import('../pc/garde-chrome.mjs');
+  const M = await import('../pc/mail-mcp.mjs');
+  const pro = argumentsClaude({ mcp: 'M', consigne: 'C', mail: { pro: true, reglages: 'R' } }), perso = argumentsClaude({ mcp: 'M', consigne: 'C', mail: { pro: false, reglages: 'R' } });
+  const val = (a, n) => a[a.indexOf(n) + 1];
+  check('E-mails : Claude n\'a ni recherche Internet ni lecture de pages', val(pro, '--tools') === '' && val(perso, '--tools') === '' && !/Web/.test(pro.join(' ') + perso.join(' ')));
+  check('E-mails pro : Chrome, avec la garde et les outils dangereux interdits', pro.includes('--chrome') && val(pro, '--settings') === 'R' && /javascript_tool/.test(val(pro, '--disallowedTools')) && /mcp__claude-in-chrome/.test(val(pro, '--allowedTools')));
+  check('E-mails perso : pas de Chrome du tout', perso.includes('--no-chrome') && !perso.includes('--chrome') && val(perso, '--allowedTools') === 'mcp__mail,mcp__crm');
+  check('E-mails : la demande dit quelle boîte regarder', /PRO seulement/.test(demande({ type: 'mail', boite: 'pro', question: 'x' })) && /les deux/.test(demande({ type: 'mail', boite: 'les_deux', question: 'x' })));
+  check('Garde Chrome : Outlook permis', adresseOk('https://outlook.office.com/mail/') && adresseOk('outlook.office.com/mail/inbox') && adresseOk('back') && refus('mcp__claude-in-chrome__navigate', { url: 'https://outlook.office365.com/mail/' }) === '');
+  check('Garde Chrome : toute autre adresse refusée', !adresseOk('https://exemple.com/?d=secret') && !adresseOk('http://outlook.office.com/') && !adresseOk('https://outlook.office.com.exemple.com/') && !adresseOk('javascript:alert(1)') && !adresseOk('')
+    && /hors d'Outlook/.test(refus('mcp__claude-in-chrome__navigate', { url: 'https://exemple.com' })));
+  check('Garde Chrome : une adresse cachée dans un lot d\'actions est refusée aussi', /hors d'Outlook/.test(refus('mcp__claude-in-chrome__browser_batch', { actions: [{ name: 'computer', input: { action: 'screenshot' } }, { name: 'navigate', input: { url: 'https://exemple.com' } }] }))
+    && /interdit/.test(refus('mcp__claude-in-chrome__browser_batch', { actions: [{ name: 'javascript_tool', input: {} }] })) && refus('mcp__claude-in-chrome__computer', { action: 'left_click' }) === '');
+  check('Gmail (MCP) : chercher, lire, brouillon — aucun outil d\'envoi ni de suppression', M.OUTILS.map((o) => o.name).join() === 'mail_chercher,mail_lire,mail_brouillon');
+  let vu = null;
+  const rep = await M.appeler('mail_chercher', { q: 'from:x', n: 99 }, { script: 'S', secret: 's'.repeat(40), fetchImpl: async (u, o) => { vu = JSON.parse(o.body); return { text: async () => JSON.stringify({ ok: true, texte: 'Gmail : 0 fil' }) }; } });
+  check('Gmail (MCP) : passe par le script avec le secret du relais', vu && vu.action === 'mail_chercher' && vu.secret === 's'.repeat(40) && vu.q === 'from:x' && /0 fil/.test(rep.content[0].text));
+  check('Gmail (MCP) : outil inconnu refusé', (await M.appeler('mail_envoyer', {}, { script: 'S', secret: 'x' })).isError === true);
+}
+
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);

@@ -34,6 +34,9 @@ export const OUTILS = [
   { name: 'bourse', behavior: 'BLOCKING',   // demande de Timothée du 11/11/26 : « que Wilson ait accès à mon suivi bourse »
     description: "Son suivi bourse (feuille Google de son Drive, en lecture seule) : PEA chez Bourse Direct (capital versé, liquidités, date d'ouverture), chaque action (quantité, PRU, cours, variation du jour, valorisation, plus ou moins-value, limite de vente), totaux, historique quotidien (tout vendu frais déduits, écart avec le capital, gain net si retrait, statut du coussin) et son LDD. Pour TOUTE question sur sa bourse, son PEA, ses actions, ses plus-values, son LDD : appelle-le d'abord, tu n'en connais aucun chiffre par cœur. action : lire (par défaut), ou afficher s'il demande de le voir à l'écran.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['lire', 'afficher'] } } } },
+  { name: 'mail_envoyer', behavior: 'BLOCKING',   // demande de Timothée du 11/11/26 (e-mails) : rien ne part sans son « oui »
+    description: "Envoie le brouillon d'e-mail (Gmail personnel) que Claude vient de préparer avec l'outil mails. SEULEMENT après lui avoir relu le destinataire et le texte, lui avoir demandé « Je l'envoie ? » et avoir entendu son « oui » clair. action : envoyer ; annuler s'il dit non ou veut le changer (pour le changer, rappelle ensuite mails avec sa correction). Jamais pour la boîte pro : ses brouillons pro restent dans Outlook, il les envoie lui-même.",
+    parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['envoyer', 'annuler'] } }, required: ['action'] } },
   { name: 'remarque', behavior: 'BLOCKING',
     description: "Remarque de Timothée sur ton fonctionnement, pour ta prochaine mise à jour (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile. Une seule fois par remarque. Une correction qui vaut pour toujours (la prononciation d'un nom, la façon d'appeler quelqu'un) : appelle AUSSI memoriser, pour l'appliquer dès maintenant. Ensuite, dis seulement « C'est noté. », puis réponds au reste de ce qu'il a dit ou écoute la suite.",
     parameters: { type: 'OBJECT', properties: { texte: S }, required: ['texte'] } },
@@ -88,6 +91,7 @@ export class Outils {
       case 'courses': return this.courses(a);
       case 'idees': return this.idees(a);
       case 'bourse': return this.bourse(a);
+      case 'mail_envoyer': return this.mailEnvoyer(a);
       case 'remarque': return this.remarque(a);
       case 'mes_remarques': return this.mesRemarques();
       default: return 'Outil inconnu.';
@@ -368,6 +372,25 @@ export class Outils {
     return `${r.texte}
 
 RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus tels quels (arrondis à l'oral : « environ 1 750 euros », « moins 11 pour cent ») ; ne calcule rien de toi-même si le chiffre est déjà là ; ne récite pas tout${voiture ? ' ; il conduit : une ou deux phrases' : ''}. Le statut et les limites de vente sont ses propres règles : tu peux les rappeler. Tu ne donnes pas de conseil d'achat ou de vente ; pour une analyse poussée, il peut te la demander et tu la passes à question_difficile.${action === 'afficher' ? ' Le détail est affiché à l’écran.' : ''}`;
+  }
+
+  // ---------- F8 : envoyer le brouillon d'e-mail préparé par Claude (Gmail perso ; réservé à Timothée, après son « oui ») ----------
+  // Le script n'envoie que le dernier brouillon préparé par le PC il y a moins de 30 min. Ici, deux gardes de plus : c'est bien
+  // Timothée (visage, ou téléphone en voiture), et il vient de dire oui (ce que Wilson a entendu ces 25 dernières secondes).
+  async mailEnvoyer({ action = 'envoyer' } = {}) {
+    const A = this.app, R = A.remote;
+    const aut = typeof A._crmAutorise === 'function' ? A._crmAutorise() : { ok: false };
+    if (!aut.ok) { this.log('E-mail : envoi refusé (réservé à Timothée)', true); return 'REFUSÉ : ses e-mails sont réservés à Timothée, et tu ne le reconnais pas en ce moment. Dis-le simplement ; rien n\'est envoyé.'; }
+    if (!R || !R.on) return "Le script de Wilson n'est pas relié sur cet appareil : rien n'est envoyé. Dis-le simplement.";
+    if (action === 'annuler') { await R.ask({ action: 'mail_annuler' }).catch(() => null); this.log('E-mail : envoi annulé, le brouillon reste dans Gmail', true); return "Rien n'est envoyé : le brouillon reste dans ses brouillons Gmail. Dis-le en une phrase."; }
+    const dit = () => plat(A._entenduRecent ? A._entenduRecent(25000) : '');
+    const OUI = /\b(oui|ouais|vas-y|vas y|envoie|envoie-le|d'accord|ok|c'est bon|parfait)\b/;
+    for (let i = 0; i < 6 && !OUI.test(dit()); i++) await new Promise((r) => setTimeout(r, 250));
+    if (!OUI.test(dit())) { this.log(`E-mail : pas envoyé, pas de « oui » entendu (« ${dit().slice(-80)} »)`, true); return "PAS ENVOYÉ : tu n'as pas entendu son « oui ». Redemande-lui clairement « Je l'envoie ? » et rappelle cet outil seulement après sa réponse."; }
+    const r = await R.ask({ action: 'mail_envoyer' }).catch((e) => ({ ok: false, erreur: e.message }));
+    if (!r || !r.ok) { const e = String((r && r.erreur) || 'pas de réponse'); this.log(`E-mail : envoi impossible (${e})`, true); return `PAS ENVOYÉ : ${e}. Dis-le simplement, sans dire que c'est parti.`; }
+    this.log(`E-mail envoyé à ${r.a} : « ${String(r.objet).slice(0, 80)} »`, true);
+    return `E-mail envoyé à ${r.a} (objet : ${r.objet}). Confirme en une phrase courte, en disant le nom de la personne, pas son adresse.`;
   }
 
   // ---------- F6 : mes idées (document Google par le script de Timothée ; sinon gardées sur l'appareil) ----------

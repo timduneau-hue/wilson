@@ -59,6 +59,7 @@ function doPost(e) {
       if (/^(msg_|garde_|alerte|agenda_|mem_|q_)/.test(String(d.action))) return json_(famille_(d));   // messages, garde, alertes, agenda, mémoire, questions (fichier famille.gs)
       if (String(d.action).indexOf('claude_') === 0) return json_(claude_(d));   // questions difficiles pour Claude sur le PC (fichier claude.gs)
       if (String(d.action).indexOf('bourse_') === 0) return json_(bourse_(d));   // suivi bourse, en lecture seule (fichier bourse.gs)
+      if (String(d.action).indexOf('mail_') === 0) return json_(mail_(d));       // ses e-mails Gmail (fichier mail.gs)
       if (String(d.action).indexOf('crm_') === 0) return json_(crm_(d));
       return json_({ ok: false, erreur: 'action inconnue : ' + d.action });
     } catch (err) { return json_({ ok: false, erreur: 'script : ' + String(err && err.message || err) }); }   // ex. autorisation manquante
@@ -216,7 +217,7 @@ function num_(x) { return typeof x === 'number' && isFinite(x) ? Math.round(x * 
 // ---------- Clé secrète du script (11/11/26) ----------
 // La clé est dans les propriétés du script (jamais dans le code ni dans le dépôt). Elle arrive dans l'adresse (?k=…) ou,
 // à défaut, dans la requête (champ k). Le relais du PC peut aussi passer avec son secret, pour ses seules actions.
-var ACTIONS_DU_PC = /^(claude_prendre|claude_rendre|claude_etat|crm_(schema|requete|client|journee|bilan|produit)|bourse_etat)$/;
+var ACTIONS_DU_PC = /^(claude_prendre|claude_rendre|claude_etat|crm_(schema|requete|client|journee|bilan|produit)|bourse_etat|mail_(chercher|lire|brouillon))$/;
 function cleScript_() { return PropertiesService.getScriptProperties().getProperty('cle_wilson') || ''; }
 function memes_(a, b) {   // comparaison en temps constant
   a = String(a || ''); b = String(b || '');

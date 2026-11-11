@@ -18,7 +18,7 @@ import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini, netErr } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS, reglesCRM } from './analyste.js';
-import { ClaudePC, CLAUDE_TOOL, phraseIndispo } from './claude.js';
+import { ClaudePC, CLAUDE_TOOL, MAIL_TOOL, phraseIndispo } from './claude.js';
 import { Qui } from './qui.js';
 import { Famille, FAMILLE_TOOLS, FAMILLE_TOOL_NAMES } from './famille.js';
 import { Reactions } from './reactions.js';
@@ -28,7 +28,7 @@ import { Questions, QUESTION_TOOL } from './questions.js';
 import * as VP from './voiture.js';
 
 // Protocole voiture (PLAN 2 quinquies) : les seuls outils déclarés à Gemini quand le téléphone est relié à la voiture.
-const OUTILS_VOITURE = ['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_question', 'question_difficile', 'itineraire', 'appeler', 'crm_noter', 'crm_confirmer',
+const OUTILS_VOITURE = ['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_question', 'question_difficile', 'mails', 'mail_envoyer','itineraire', 'appeler', 'crm_noter', 'crm_confirmer',
   'date_et_heure', 'batterie', 'chercher', 'meteo', 'rappel', 'minuteur', 'remarque', 'mes_remarques', 'idees', 'bourse', 'messages', 'agenda', 'memoriser', 'oublier',
   'terminer_conversation', 'repondre_question'];
 // L'appli Android (PLAN 9) : son pont, s'il est là (null dans Chrome). Jamais d'erreur vers Wilson.
@@ -38,7 +38,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.40.0';
+const VERSION = '1.41.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -2039,6 +2039,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         continue;
       }
       if (c.name === 'question_difficile') { this._analyse(c, 'claude'); continue; }   // Claude sur le PC (PLAN 10), en arrière-plan
+      if (c.name === 'mails') { this._analyse(c, 'mail'); continue; }                  // ses e-mails, lus par Claude sur le PC (11/11/26)
       if (CRM_TOOL_NAMES.includes(c.name)) { this._crmTool(c); continue; }     // réponse envoyée quand le CRM a répondu
       if (MAISON_TOOL_NAMES.includes(c.name)) { this._maisonCmd(c); continue; } // réponse envoyée quand Home Assistant a agi
       if (OUTILS_NAMES.includes(c.name)) { this._outil(c); continue; }        // écran, minuteur, rappel, météo, courses
@@ -2420,7 +2421,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   }
 
   // ---------- CRM à la voix (PLAN 2 quater) ----------
-  _extraTools() { return [...OUTILS, ...FAMILLE_TOOLS, QUESTION_TOOL, ...(this.crm.on ? CRM_TOOLS : []), ...(this.claude.on ? [CLAUDE_TOOL] : []), ...(this.maison.on ? MAISON_TOOLS : [])]; }
+  _extraTools() { return [...OUTILS, ...FAMILLE_TOOLS, QUESTION_TOOL, ...(this.crm.on ? CRM_TOOLS : []), ...(this.claude.on ? [CLAUDE_TOOL, MAIL_TOOL] : []), ...(this.maison.on ? MAISON_TOOLS : [])]; }
 
   // Ce que Timothée dit, horodaté, avec le numéro du tour : le verrou n'accepte qu'un « oui » d'un tour APRÈS la relecture (C2).
   _noteHeard(text, whole = false) {
@@ -2846,8 +2847,8 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     const A = { id: call.id, name: call.name, quoi, question: String(a.question || a.demande || '').trim(), t0: performance.now(), conv: this.convId, gen: this._liveGen || 0, ctl: new AbortController(), cancelled: false };
     this._analyses = this._analyses || new Map(); this._analyses.set(call.id, A);
     this.face.setEmotion('reflexion', ANALYSE_MAX_MS, 0.7);
-    A.pid = this.pill(quoi === 'claude' ? 'Je cherche…' : 'Je cherche dans le CRM…');
-    this.log(quoi === 'claude' ? `Question difficile : « ${A.question.slice(0, 160)} »` : `Question au CRM : « ${A.question.slice(0, 160)} »`, true);
+    A.pid = this.pill(quoi === 'mail' ? 'Je regarde tes e-mails…' : quoi === 'claude' ? 'Je cherche…' : 'Je cherche dans le CRM…');
+    this.log(quoi === 'mail' ? `Question sur ses e-mails (${a.boite || 'les_deux'}) : « ${A.question.slice(0, 160)} »` : quoi === 'claude' ? `Question difficile : « ${A.question.slice(0, 160)} »` : `Question au CRM : « ${A.question.slice(0, 160)} »`, true);
     const timer = setTimeout(() => A.ctl.abort(), ANALYSE_MAX_MS + 5000);
     // En arrière-plan (question de Timothée du 04/11/26, 12h19 : « il peut travailler en arrière-plan et me répondre sur ce
     // qu'il fait ? ») : sur Gemini 3.1, un outil en cours le rend muet jusqu'au résultat (15 à 30 s pour l'analyste). Le
@@ -2858,14 +2859,14 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this.log('Analyste en arrière-plan : Wilson reste libre, la réponse viendra en message');
       // Remarque de Timothée du 05/11/26, 19h23 (« pendant que tu recherches, le petit bip-bip, c'est pas la peine de me
       // redemander si je veux autre chose, j'attends ») : « Je cherche. » et rien d'autre (K5).
-      this.brain.respond([{ id: call.id, name: call.name, response: { result: `Recherche lancée en arrière-plan (${quoi === 'claude' ? 'elle peut prendre une à deux minutes' : 'elle peut prendre une demi-minute'}). Dis seulement « Je cherche. » et RIEN d'autre : aucune question, ne lui demande pas s'il veut autre chose, ne propose rien ; il attend la réponse en silence. S'il te parle entre-temps, réponds-lui normalement. La réponse te sera donnée en message dès qu'elle arrive ; n'invente rien en attendant.` } }]);
+      this.brain.respond([{ id: call.id, name: call.name, response: { result: `Recherche lancée en arrière-plan (${quoi === 'mail' ? 'elle peut prendre de une à cinq minutes' : quoi === 'claude' ? 'elle peut prendre une à deux minutes' : 'elle peut prendre une demi-minute'}). Dis seulement « ${quoi === 'mail' ? 'Je regarde tes e-mails.' : 'Je cherche.'} » et RIEN d'autre : aucune question, ne lui demande pas s'il veut autre chose, ne propose rien ; il attend la réponse en silence. S'il te parle entre-temps, réponds-lui normalement. La réponse te sera donnée en message dès qu'elle arrive ; n'invente rien en attendant.` } }]);
     }
     let res;
-    try { res = quoi === 'claude' ? await this._questionDifficile(a, A.ctl.signal) : await this._crmRun('crm_question', a, A.ctl.signal); }
+    try { res = quoi === 'mail' ? await this._mails(a, A.ctl.signal) : quoi === 'claude' ? await this._questionDifficile(a, A.ctl.signal) : await this._crmRun('crm_question', a, A.ctl.signal); }
     catch (e) { res = { echec: true, info: 'La recherche a pris trop de temps. Dis-le simplement.', dire: 'La recherche a pris trop de temps, je n\'ai pas de réponse.' }; this.log('Recherche : abandon (' + e.message + ')'); }
     finally { clearTimeout(timer); this._analyses.delete(call.id); }
     if (!this._analyses.size && this.face.emotion === 'reflexion') this.face.clearEmotion();
-    this.pillEnd(A.pid, !res.echec, res.echec ? (quoi === 'claude' ? 'Pas de réponse' : 'Pas de réponse du CRM') : 'Réponse trouvée');
+    this.pillEnd(A.pid, !res.echec, res.echec ? (quoi !== 'crm' ? 'Pas de réponse' : 'Pas de réponse du CRM') : 'Réponse trouvée');
     this._livrer(A, res);
   }
 
@@ -2874,11 +2875,12 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   async _parClaude(o, signal) {
     if (!this.claude.on) return { indispo: '' };
     const t0 = performance.now();
-    this.log(`Claude (PC) : question ${o.type === 'crm' ? 'sur le CRM' : 'difficile'} envoyée`, true);
+    this.log(`Claude (PC) : question ${o.type === 'crm' ? 'sur le CRM' : o.type === 'mail' ? 'sur ses e-mails' : 'difficile'} envoyée`, true);
     const r = await this.claude.repondre({ ...o, appareil: deviceName(), signal, onPris: (s) => this.log(`Claude (PC) : question prise par le PC${s != null ? ` après ${s} s` : ''}`) });
     const s = Math.round((performance.now() - t0) / 1000);
     if (!r.ok) {
-      this.log(`Claude (PC) indisponible (${r.raison} : ${r.message}) : ${o.type === 'crm' ? 'analyste Gemini' : 'recherche simple'} à la place`);
+      this.log(`Claude (PC) indisponible (${r.raison} : ${r.message}) : ${o.type === 'crm' ? 'analyste Gemini à la place' : o.type === 'mail' ? 'pas d\'e-mails sans lui' : 'recherche simple à la place'}`);
+      if (o.type === 'mail') return { indispo: phraseIndispo(r.raison) };   // e-mails : pas de solution de secours, il faut toujours le dire
       // Une phrase au plus par demi-heure, et pas si le relais n'a jamais été vu (pas encore installé) : sinon c'est du bruit.
       const dire = !!(this.claude.pc && this.claude.pc.vu != null) && Date.now() - (this._indispoDitAt || 0) > 30 * 60000;
       if (dire) this._indispoDitAt = Date.now();
@@ -2887,7 +2889,24 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this.log(`Claude (PC) : réponse en ${s} s (${r.etapes} étape(s)) : ${r.dire.slice(0, 200)}`, true);
     this._claudeDernier = { question: o.question, dire: r.dire, detail: r.detail, at: Date.now() };
     const detail = r.detail ? `\nDétail (seulement s'il demande à le voir écrit, « montre-moi » : appelle afficher avec ce texte) : ${r.detail.slice(0, 1800)}` : '';
-    return { info: `Réponse de Claude (il a cherché ${s} s ${o.type === 'crm' ? 'dans le CRM' : 'sur Internet'}) : « ${r.dire} »\nRépète-la MOT POUR MOT, sans rien ajouter, retirer ni inventer.${detail}`, dire: r.dire };
+    return { info: `Réponse de Claude (il a cherché ${s} s ${o.type === 'crm' ? 'dans le CRM' : o.type === 'mail' ? 'dans ses e-mails' : 'sur Internet'}) : « ${r.dire} »\nRépète-la MOT POUR MOT, sans rien ajouter, retirer ni inventer.${o.type === 'mail' ? ' Si elle finit par « Je l\'envoie ? » : attends sa réponse ; « oui » → appelle mail_envoyer (action envoyer) ; « non » → mail_envoyer (action annuler) ; une correction → rappelle mails avec la correction.' : ''}${detail}`, dire: r.dire };
+  }
+  // mails (demande du 11/11/26) : ses e-mails, lus par Claude sur le PC (Gmail perso par le script, Outlook pro dans Chrome).
+  // Réservés à Timothée, comme le CRM. Pas de solution de secours : sans le PC, Wilson le dit.
+  async _mails(a, signal) {
+    const q = String(a.demande || a.question || '').trim();
+    if (!q) return { info: 'Il manque la demande : demande-lui ce qu\'il veut savoir sur ses e-mails.', dire: 'Qu\'est-ce que tu veux savoir sur tes e-mails ?' };
+    const aut = this._crmAutorise();
+    if (!aut.ok) {
+      this.log(`E-mails refusés : ${aut.qui ? `c'est ${aut.qui} qui me regarde` : 'je ne reconnais pas Timothée'} — réservés à Timothée`, true);
+      const dire = aut.qui && aut.qui !== 'quelqu\'un que je ne connais pas' ? `Désolé ${aut.qui}, les e-mails, c'est seulement pour Timothée.` : 'Les e-mails, c\'est seulement pour Timothée : regarde-moi bien et redemande.';
+      return { echec: true, info: `REFUSÉ : ses e-mails sont privés, réservés à Timothée. Dis seulement : « ${dire} » Aucun contenu d'e-mail.`, dire };
+    }
+    const boite = ['perso', 'pro'].includes(a.boite) ? a.boite : 'les_deux';
+    const r = await this._parClaude({ question: q, type: 'mail', boite, voiture: this.enVoiture, crm: true }, signal);
+    if (r.info) return r;
+    const p = r.indispo || 'Claude, sur l\'ordinateur de la maison, n\'est pas relié sur cet appareil';
+    return { echec: true, info: `Impossible de lire ses e-mails : ${p}. Dis-le simplement, sans rien inventer sur ses e-mails.`, dire: `Je ne peux pas lire tes e-mails pour le moment : ${p}.` };
   }
   // question_difficile : Claude ; si le PC ne répond pas, une recherche simple (Tavily), en le disant.
   async _questionDifficile(a, signal) {
@@ -2924,8 +2943,8 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       const n = this._modelOut, conv = this.convId;
       setTimeout(() => {
         if (conv !== this.convId || this._modelOut !== n || !this.brain.open || this.audio.playing) return;
-        this.log(`Pas de réponse 6 s après ${A.quoi === 'claude' ? 'la réponse de Claude' : 'l\'analyste'} : relance`);
-        this.brain.sendText(A.quoi === 'claude' ? '[Donne maintenant à voix haute la réponse de Claude, mot pour mot.]' : '[Donne maintenant à voix haute la réponse de l\'analyste du CRM.]');
+        this.log(`Pas de réponse 6 s après ${A.quoi !== 'crm' ? 'la réponse de Claude' : 'l\'analyste'} : relance`);
+        this.brain.sendText(A.quoi !== 'crm' ? '[Donne maintenant à voix haute la réponse de Claude, mot pour mot.]' : '[Donne maintenant à voix haute la réponse de l\'analyste du CRM.]');
       }, 6000);
       return;
     }
