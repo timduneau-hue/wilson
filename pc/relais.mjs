@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 3';
+export const VERSION = 'relais 4';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
 const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
@@ -28,6 +28,11 @@ const heure = (d = new Date()) => `${String(d.getHours()).padStart(2, '0')}h${St
 const jour = (d = new Date()) => `${['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'][d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`;
 
 // ---------- Ce que Claude rend : « À DIRE » (oral) et « DÉTAIL » (références, sources) ----------
+// Journal du 10/11/26, 08h47:23 et 08h48:58 : Claude a « répondu » « You've hit your weekly limit · resets 4am (Europe/Paris) »
+// (limite d'utilisation de l'abonnement), et Wilson l'a lu comme la réponse du CRM. Ce message est une erreur, pas une réponse.
+export const LIMITE = /hit your .{0,30}limit|usage limit|limit (reached|exceeded)|limit\s*·\s*resets|rate.?limit|out of (extra )?usage|credit balance is too low/i;
+export function limiteAtteinte(texte) { const t = String(texte || ''); return t.length < 400 && LIMITE.test(t); }
+
 export function decouper(texte) {
   const t = String(texte || '').replace(/\r/g, '').trim();
   const i = t.search(MARQUE_DIRE), j = t.search(MARQUE_DETAIL);
@@ -201,7 +206,8 @@ export class Relais {
         clearTimeout(minuteur);
         let j = null; try { j = JSON.parse(out.trim().split(/\r?\n/).filter(Boolean).pop() || ''); } catch (_) {}
         if (!j) return ko(new Error(`Claude s'est arrêté (code ${code}) : ${(err || out).trim().slice(0, 300) || 'aucune sortie'}`));
-        if (j.is_error && !j.result) return ko(new Error(`Claude : ${j.subtype || 'erreur'} ${String(j.result || err).slice(0, 200)}`));
+        if (limiteAtteinte(j.result) || (j.is_error && limiteAtteinte(err))) return ko(new Error(`limite d'utilisation de Claude atteinte : ${String(j.result || err).trim().slice(0, 200)}`));
+        if (j.is_error) return ko(new Error(`Claude : ${j.subtype || 'erreur'} ${String(j.result || err).slice(0, 200)}`));
         const r = decouper(j.result || '');
         ok({ ...r, etapes: j.num_turns || 0 });
       });

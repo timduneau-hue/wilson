@@ -116,7 +116,7 @@ export class AudioIO {
     }
   }
   _veilleNatif() {
-    if (!this.natif) return;
+    if (!this.natif || this.micPaused) return;
     const A = AudioIO.appli(), gap = performance.now() - this._natifAt;
     try { const bt = !!(A && A.bluetoothVoiture()); this.btIn = bt; } catch (_) {}
     if (gap < 2500) return;
@@ -156,6 +156,7 @@ export class AudioIO {
     }
     let ins = [];
     try { ins = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput'); } catch (_) {}
+    if (this.micPaused) { this.btIn = ins.some((d) => AudioIO.isBluetooth(d.label)); return; }   // rouvert au réveil, avec le bon micro
     const bt = ins.some((d) => AudioIO.isBluetooth(d.label)), t = this.stream && this.stream.getAudioTracks()[0];
     const curBt = !!(t && AudioIO.isBluetooth(t.label)), want = bt ? AudioIO.pickBuiltIn(ins) : null;
     const curId = t && t.getSettings ? t.getSettings().deviceId : '';
@@ -189,6 +190,7 @@ export class AudioIO {
     if (t.muted) { this._muted = true; this._micUpdate('micro coupé par le système'); }
   }
   async _reopen(n = 0) {
+    if (this.micPaused) return;                                // micro fermé exprès (voiture, en veille)
     try {
       if (this.src) { try { this.src.disconnect(); } catch (_) {} }
       const old = this.stream; this.stream = null;
@@ -201,6 +203,26 @@ export class AudioIO {
       this._emit('info', 'micro impossible à rouvrir : ' + e.message);
       if (n < 5) setTimeout(() => this._reopen(n + 1), 3000);
     }
+  }
+  // Micro fermé (remarque de Timothée du 06/11/26, 08h57 : « en voiture, n'activer le micro que lorsque je touche l'écran pour
+  // te réveiller, et le couper dès que je retouche l'écran pour te rendormir ») : plus aucun micro ouvert sur le téléphone.
+  pauseMic(why = '') {
+    if (this.micPaused || !this.ctx) return false;
+    this.micPaused = true;
+    if (this.src) { try { this.src.disconnect(); } catch (_) {} this.src = null; }
+    const old = this.stream; this.stream = null;
+    if (old) old.getTracks().forEach((tr) => { try { tr.stop(); } catch (_) {} });
+    if (this.natif) { try { AudioIO.appli().microArrete(); } catch (_) {} }
+    if (this._zero || this._muted) { this._zero = false; this._muted = false; this._micUpdate('micro fermé'); }
+    this._emit('info', `micro fermé${why ? ' (' + why + ')' : ''}`);
+    return true;
+  }
+  async resumeMic(why = '') {
+    if (!this.micPaused) return false;
+    this.micPaused = false; this._natifAt = performance.now();
+    if (why) this._emit('info', `réouverture du micro (${why})`);
+    await this._reopen();
+    return true;
   }
   _micUpdate(why) {
     const taken = this._muted || this._zero;

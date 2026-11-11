@@ -18,6 +18,21 @@ const pause = (ms, signal) => new Promise((ok, ko) => {
   const t = setTimeout(ok, ms);
   if (signal) signal.addEventListener('abort', () => { clearTimeout(t); const e = new Error('Annulé'); e.name = 'AbortError'; ko(e); }, { once: true });
 });
+// Limite d'utilisation de l'abonnement Claude (journal du 10/11/26, 08h47 : « You've hit your weekly limit · resets 4am
+// (Europe/Paris) » lu comme une réponse). Wilson le dit une fois, puis ne demande plus à Claude jusqu'à la reprise.
+export const LIMITE = /limite d'utilisation de Claude|hit your .{0,30}limit|usage limit|limit (reached|exceeded)|limit\s*·\s*resets|rate.?limit|out of (extra )?usage|credit balance is too low/i;
+export const limiteAtteinte = (t) => { t = String(t || ''); return t.length < 400 && LIMITE.test(t); };
+// Heure de reprise : « resets 4am », « resets 4:30pm », « resets 16h » ; sinon dans une heure.
+export function repriseLimite(texte, maintenant = new Date()) {
+  const m = /resets?\s+(?:at\s+)?(\d{1,2})(?:[:h](\d{2}))?\s*(am|pm)?/i.exec(String(texte || ''));
+  if (!m) return maintenant.getTime() + 3600000;
+  let h = +m[1] % 24; const mn = +(m[2] || 0);
+  if (m[3] && /pm/i.test(m[3]) && h < 12) h += 12;
+  if (m[3] && /am/i.test(m[3]) && h === 12) h = 0;
+  const d = new Date(maintenant); d.setHours(h, mn, 0, 0);
+  if (d.getTime() <= maintenant.getTime()) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
 const reseau = (e) => (e && (e.name === 'TypeError' || e.reseau)) || /Failed to fetch|NetworkError|Load failed|network|trop long/i.test(String((e && e.message) || ''));
 
 export class ClaudePC {
@@ -55,6 +70,7 @@ export class ClaudePC {
   // erreur, script). Jamais d'exception sauf annulation (AbortError).
   // crm : Claude peut-il lire le CRM (seulement si c'est Timothée qui demande, règle du 06/11/26) ?
   async repondre({ question, type = 'internet', contexte = '', regles = '', voiture = false, crm = false, appareil = '', signal, onPris } = {}) {
+    if (this.limiteJusqua && Date.now() < this.limiteJusqua) return { ok: false, raison: 'limite', message: `limite d'utilisation atteinte, reprise à ${new Date(this.limiteJusqua).getHours()}h${String(new Date(this.limiteJusqua).getMinutes()).padStart(2, '0')}` };
     const t0 = Date.now(), id = `w${t0.toString(36)}${(++this.n).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     // PC absent il y a moins d'une minute : pas la peine de redemander (la recherche de secours part tout de suite).
     if (this.pc && !this.pc.vivant && Date.now() - this.pcAt < 60000) return { ok: false, raison: 'absent', message: this.pc.vu != null ? `vu il y a ${Math.round(this.pc.vu / 60)} min` : 'jamais vu' };
@@ -90,10 +106,17 @@ export class ClaudePC {
       if (s.pc) { this.pc = s.pc; this.pcAt = Date.now(); }
       etat = s.etat;
       if (!pris && (etat === 'en_cours' || etat === 'faite')) { pris = true; if (onPris) onPris(s.pris); }
+      if (etat === 'faite' && limiteAtteinte(s.dire)) return this._limite(s.dire);         // ancien relais (avant « relais 4 »)
       if (etat === 'faite') return { ok: true, dire: s.dire, detail: s.detail || '', etapes: s.etapes || 0, ms: Date.now() - t0, duree: s.duree || 0 };
+      if (etat === 'erreur' && limiteAtteinte(s.erreur)) return this._limite(s.erreur);
       if (etat === 'erreur') return { ok: false, raison: 'erreur', message: s.erreur || 'erreur du relais' };
       if (etat === 'annulee') return { ok: false, raison: 'erreur', message: 'question annulée' };
     }
+  }
+  _limite(texte) {
+    this.limiteJusqua = repriseLimite(texte);
+    const h = new Date(this.limiteJusqua);
+    return { ok: false, raison: 'limite', message: `limite d'utilisation atteinte (« ${String(texte).trim().slice(0, 120)} »), plus de question à Claude avant ${h.getHours()}h${String(h.getMinutes()).padStart(2, '0')}` };
   }
 }
 
@@ -102,5 +125,6 @@ export function phraseIndispo(raison) {
   return raison === 'absent' ? "l'ordinateur de la maison ne répond pas (éteint ou en veille)"
     : raison === 'pas_pris' ? "l'ordinateur de la maison n'a pas pris la question"
       : raison === 'trop_long' ? "Claude n'a pas répondu à temps"
+        : raison === 'limite' ? "Claude a atteint sa limite d'utilisation pour le moment"
         : "Claude n'a pas pu répondre";
 }

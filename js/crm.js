@@ -175,7 +175,7 @@ export const CRM_TOOLS = [
     description: "Toute autre question sur ses données, même inhabituelle : chiffre d'un mois ou d'une année passée, devis à relancer, clients qui ont (ou n'ont pas) commandé, quand un client a acheté un article, détail d'une commande, comparaisons, listes, totaux… Un analyste cherche dans tout le CRM et répond, même si ça prend une minute ou plus. Avant de l'appeler, dis « Je cherche l'information… », puis attends le résultat sans relancer.",
     parameters: { type: 'OBJECT', properties: { question: { type: 'STRING', description: 'la question complète, avec le nom du client et la période s\'il les a dits (ou le client dont vous parlez)' } }, required: ['question'] } },
   { name: 'itineraire', behavior: 'BLOCKING',
-    description: "Aller chez un client : affiche un grand bouton qui ouvre le GPS (Google Maps ou Waze) avec l'adresse de sa fiche ; Timothée appuie dessus.",
+    description: "Aller chez un client : affiche un grand bouton qui ouvre le GPS (Google Maps ou Waze) avec l'adresse de sa fiche ; Timothée appuie dessus. SEULEMENT quand il demande d'y aller (« emmène-moi », « guide-moi », « lance le GPS », « l'itinéraire ») : jamais parce qu'il cite un client.",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou le contact' } }, required: ['client'] } },
   { name: 'appeler', behavior: 'BLOCKING',
     description: "Appeler un client : affiche sur l'écran un grand bouton vert avec son numéro ; Timothée appuie dessus pour lancer l'appel.",

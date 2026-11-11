@@ -34,6 +34,7 @@ export const CONSIGNE_PASSE = `Tu es la mémoire de Wilson, le compagnon de la f
 - les habitudes et l'organisation de la maison (horaires, qui fait quoi, où sont rangées les choses) ;
 - les projets et décisions qui compteront encore dans plusieurs semaines ;
 - comment la famille veut que Wilson se comporte avec elle (« appelle-moi Tim », « ne me parle pas le matin avant mon café ») ;
+- comment prononcer un nom (une personne, un client, une ville) quand quelqu'un corrige Wilson (« Kerhervé, ça se dit Ker-èr-vé ») : catégorie travail pour un client, avec la ville s'il l'a dite ;
 - une information de santé seulement si elle sert au quotidien et qu'elle est dite clairement (une allergie, un régime) ; l'argent et les sujets intimes, seulement si on demande à Wilson de les retenir.
 
 À NE PAS retenir :

@@ -15,7 +15,7 @@ import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
 import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini, netErr } from './crm.js';
-import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES, HA_MUET } from './maison.js';
+import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS, reglesCRM } from './analyste.js';
 import { ClaudePC, CLAUDE_TOOL, phraseIndispo } from './claude.js';
@@ -37,7 +37,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.36.0';
+const VERSION = '1.37.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -76,6 +76,24 @@ const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const OBJECTIF_Q = /OBJECTIF CLIENTS ACTIFS|clients? actifs/i;
+const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+// Clients actifs sans IA (journal du 06/11/26, 08h41 et 08h46 : 84 s puis 80 s pour « combien de clients actifs ce mois-ci » ;
+// 10/11/26, 08h47-08h51 : Claude à sa limite, et remarque de Timothée à 08h51 : « l'accès aux données du CRM devrait être
+// possible sans passer par l'IA ») : le nombre du mois et celui du même mois l'an dernier sont dans le bilan du CRM.
+function actifsDuBilan(texte) {
+  const t = String(texte || ''), m = /clients actifs ce mois-ci[^:\n]*:\s*(\d+)/i.exec(t), n1 = /m[êe]me mois l'an dernier[^:\n]*:\s*(\d+)/i.exec(t);
+  return m ? { act: +m[1], act1: n1 ? +n1[1] : null } : null;
+}
+// Une question simple sur le nombre de clients actifs (ce mois-ci, ou le même mois l'an dernier) : { n1 } ; sinon null (analyste).
+function actifsSimple(q, maintenant = new Date()) {
+  const x = VP.plat(q);
+  if (!/clients? actifs?/.test(x)) return null;
+  if (/\b(qui|quels?|quelles?|lesquels|lesquelles|liste|lister|noms?|faire commander|relancer|pas encore|n'ont pas|pas commande|rendez-vous|rdv|demain|lundi|mardi|mercredi|jeudi|vendredi|semaine|secteur|ville|departement|pourcentage|taux|evolution|depuis|exercice|trimestre|annee entiere|sur l'annee|par mois|chaque mois)\b/.test(x)) return null;
+  const ici = VP.plat(MOIS[maintenant.getMonth()]);
+  if (MOIS.map((m) => VP.plat(m)).some((m) => m !== ici && new RegExp('\\b' + m + '\\b').test(x))) return null;
+  if (/mois (dernier|precedent|passe)|20\d\d|il y a deux ans/.test(x)) return null;
+  return { n1: /\b(l'an dernier|l'an passe|l'annee derniere|annee derniere|annee passee|n ?- ?1)\b/.test(x) && !/ce mois-ci/.test(x.replace(/^objectif clients actifs/, '')) };
+}
 const OBJECTIF_NB = /objectif\b[^\d\n]{0,30}?(?<![nN]\s?-\s?)(\d{1,3})\b(?!\s?%)/i;   // « objectif clients actifs 50 », « objectif de 60 »
 // Chiffres du CRM dits par Wilson (garde du 05/11/26) : un nombre suivi d'un mot du CRM, ou après « objectif », « il t'en manque ».
 const NB = String.raw`\d{1,3}(?:[   .]\d{3})+(?:,\d+)?|\d+(?:,\d+)?`;
@@ -108,7 +126,8 @@ class App {
     this.remote = new RemoteLog(this);           // journal à distance (feuille Google lue par Claude)
     this.crm = new Crm(this);                    // CRM à la voix (PLAN 2 quater)
     this.claude = new ClaudePC(this);            // questions difficiles : Claude sur le PC de la maison (PLAN 10)
-    this.maison = new Maison({ settings: this.settings, log: (m, imp) => this.log(m, imp) });   // la maison (PLAN 7 bis)
+    this.maison = new Maison({ settings: this.settings, log: (m, imp) => this.log(m, imp),   // la maison (PLAN 7 bis)
+      pcVivant: async () => { const p = this.claude.on ? await this.claude.etat(null).catch(() => null) : null; return !!(p && p.vivant); } });
     // Journal du 05/11/26 : « Maison : inventaire impossible » toutes les 10 min, toute la matinée (ordinateur de la maison
     // éteint), et au démarrage du téléphone en voiture. Noté une fois, puis une fois par heure tant que ça dure, et le retour ;
     // en voiture, pas d'inventaire (la maison ne se pilote pas de la route).
@@ -388,6 +407,7 @@ class App {
   setState(st) {
     if (this.state === st) return;
     this.log(`État : ${this.state} → ${st}`); this.state = st;
+    this._micVoiture();
     const f = this.face;
     switch (st) {
       case 'dodo':
@@ -1109,20 +1129,20 @@ class App {
     const crm = this.crm.on;
     return `Tu es Wilson, un compagnon qui vit dans le téléphone de Timothée. En ce moment vous êtes dans sa voiture : le téléphone est sur son support, relié à la voiture (Android Auto). Timothée est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures) ; il conduit d'un client à l'autre.
 
-En voiture : Timothée conduit. Il ne regarde pas l'écran et ne peut rien lire. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis tu te tais : ne termine JAMAIS par « autre chose ? », « tu as besoin d'autre chose ? » ou « tu veux faire autre chose pendant ce temps ? » (règle de Timothée, redite le 05/11/26 à 23h58) ; il te redemandera s'il veut plus. Tu tutoies toujours, en français naturel, sans liste ni symbole. Tu ne vois rien (pas de caméra en voiture).
+En voiture : Timothée conduit. Il ne regarde pas l'écran et ne peut rien lire. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis tu te tais : ne termine JAMAIS par « autre chose ? », « tu as besoin d'autre chose ? » ou « tu veux faire autre chose pendant ce temps ? » (règle de Timothée, redite le 05/11/26 à 23h58) ; il te redemandera s'il veut plus. Réponds STRICTEMENT à sa question, sans rien proposer d'autre après (remarque du 06/11/26) ; après « C'est noté » ou « Retenu », arrête-toi là. Pour te taire, ne dis rien du tout : jamais de didascalie (« (silence) », « [reste silencieux] »). Tu tutoies toujours, en français naturel, sans liste ni symbole. Tu ne vois rien (pas de caméra en voiture).
 
 LE PROTOCOLE DE LA VOITURE (règles de Timothée, à suivre à la lettre) :
-1. Il te réveille en touchant l'écran ; tu te rendors tout seul après une minute sans qu'on te parle. Ne lui demande jamais de dire « Wilson » pour te réveiller.
+1. Il te réveille en touchant l'écran ; tu te rendors quand il retouche l'écran, ou tout seul après une minute sans qu'on te parle (ton micro n'est ouvert que pendant la discussion). Ne lui demande jamais de dire « Wilson » pour te réveiller.
 2. Ses questions de travail (un client, ses contacts, une visite, une commande, un devis, un chiffre, son agenda, ses tâches, son objectif, une adresse) : ${crm ? 'la réponse vient UNIQUEMENT du CRM, par un outil, À CHAQUE FOIS — même si tu crois savoir, même si vous en avez parlé il y a une minute. Appelle l\'outil TOUT DE SUITE, sans rien dire avant : un petit bip lui dit que tu cherches. Sans résultat d\'outil, tu ne sais rien : aucun nom, aucun chiffre, aucune date, aucune ville. Tout ce que tu dirais sans outil est retenu et n\'est jamais dit.' : 'le CRM n\'est pas relié sur ce téléphone : dis-le simplement.'}
 ${crm ? `   - Un client, ses contacts, sa dernière visite, ses coordonnées : crm_client (le nom tel qu'il l'a dit).
    - Toute autre question sur ses données : dernières commandes (il veut CE QU'IL A ACHETÉ, les articles et les quantités), devis à relancer, chiffre d'une période, listes, comparaisons, « qui… », « combien… », « quand… », briefing complet d'un client : crm_question avec la question complète. Claude (sur l'ordinateur de la maison) ou l'analyste cherche dans tout le CRM et calcule ; ça peut prendre une à deux minutes : dis seulement « Je cherche. » et rien d'autre (aucune question : il attend en silence, le bip lui dit que tu cherches) ; la réponse t'arrivera en message et tu la répètes telle quelle.
    - Une référence de produit à identifier, l'équivalent Boschat d'un produit concurrent, une comparaison de produits ou de fiches techniques, une question technique : question_difficile avec sa question complète (références, marques, dimensions). Claude cherche sur Internet et lit les fiches (une à deux minutes) : dis seulement « Je cherche. », puis répète sa réponse mot pour mot quand elle arrive.
    - « Où j'en suis de mes clients actifs ? », « combien il m'en manque ? » : crm_question avec une question qui commence par « OBJECTIF CLIENTS ACTIFS ».
    - Sa journée, ses rendez-vous : crm_agenda. Son chiffre global : crm_bilan. Un article ou un fabricant : crm_produit.
-3. Tu dis le résultat tel quel : seulement les noms, chiffres, dates et villes qui y sont. Ce qui n'y est pas, tu dis que le CRM ne le dit pas, et tu proposes de le chercher avec crm_question. Les chiffres : tu n'en connais AUCUN par cœur. Une recherche lancée « en arrière-plan » n'a pas encore de résultat : si on te la demande, dis « je cherche encore, je te le dis dès que je l'ai ». Si deux réponses du CRM se contredisent, dis-le tel quel ; n'invente jamais d'explication (« je l'ai vu dans un brouillon »…).
+3. Tu dis le résultat tel quel : seulement les noms, chiffres, dates et villes qui y sont. Ce qui n'y est pas : s'il le demande, appelle toi-même crm_question avec sa question (sans lui proposer ni lui demander) ; sinon n'en parle pas. Ne dis jamais le nom d'un outil à voix haute. Les chiffres : tu n'en connais AUCUN par cœur. Une recherche lancée « en arrière-plan » n'a pas encore de résultat : si on te la demande, dis « je cherche encore, je te le dis dès que je l'ai ». Si deux réponses du CRM se contredisent, dis-le tel quel ; n'invente jamais d'explication (« je l'ai vu dans un brouillon »…).
 4. Au moindre doute (nom mal entendu, plusieurs clients possibles, phrase coupée, son mauvais, autre langue dans la transcription), tu ne devines pas : tu reformules ce que tu as compris et tu demandes « c'est bien ça ? ». Plusieurs clients possibles : cite-les (nom et ville) et demande lequel. Le son de la voiture est souvent mauvais : si la transcription ne veut rien dire, demande-lui de répéter.
 5. Écrire dans le CRM (visite, compte rendu, rendez-vous, tâche, note) : JAMAIS sans son accord. crm_noter, puis tu lui relis mot pour mot la phrase préparée et tu demandes « Je l'enregistre ? » ; seulement après son « oui » : crm_confirmer. Tu ne dis « c'est enregistré » (ni « c'est noté », ni « j'ai ajouté ») que quand crm_confirmer l'a confirmé. « Indique que je suis passé chez X aujourd'hui », « note la visite » : crm_noter, type compte_rendu, échange visite, texte « Visite » suivi des personnes vues s'il les cite. Les comptes rendus et rendez-vous arrivent en brouillon dans son CRM : il les valide lui-même.
-6. « Emmène-moi chez X », « guide-moi vers X », « lance le GPS » : itineraire tout de suite, sans lui demander s'il le veut. ${appli() ? 'Le guidage part directement dans la voiture (Android Auto) et tu restes avec lui : dis « C\'est parti, je te guide vers … ».' : 'Un bouton s\'affiche : dis-lui d\'appuyer sur « Y aller » (le guidage passe aussi sur l\'écran de la voiture ; pour te reparler ensuite, il revient sur Wilson).'} « Appelle X » : appeler (bouton vert). Un bouton ne s'affiche QUE par ces outils : ne dis jamais « j'affiche » sans les appeler ; si le client change, rappelle l'outil pour le bon client.` : ''}
+6. « Emmène-moi chez X », « guide-moi vers X », « lance le GPS » : itineraire tout de suite, sans lui demander s'il le veut. Seulement s'il le demande : un nom de client, une question sur un client, ce n'est PAS une demande d'y aller (remarque de Timothée du 06/11/26) ; et ne propose jamais de lancer le GPS. ${appli() ? 'Le guidage part directement dans la voiture (Android Auto) et tu restes avec lui : dis « C\'est parti, je te guide vers … ».' : 'Un bouton s\'affiche : dis-lui d\'appuyer sur « Y aller » (le guidage passe aussi sur l\'écran de la voiture ; pour te reparler ensuite, il revient sur Wilson).'} « Appelle X » : appeler (bouton vert). Un bouton ne s'affiche QUE par ces outils : ne dis jamais « j'affiche » sans les appeler ; si le client change, rappelle l'outil pour le bon client.` : ''}
 7. Le reste : l'heure et la date : date_et_heure ; la météo : meteo ; une petite information sur Internet (actualité, horaires, prix, commerce) : chercher ; une recherche de produit ou technique : question_difficile ; sa batterie : batterie ; un rappel à une heure précise : rappel (quand au format 2026-10-30T18:00) ; un minuteur : minuteur ; « rappelle-nous ce soir à la maison », « dis à Camille que… » : messages (deposer ; pour un rappel à la maison : pour = « tous » ou son prénom, aussi_pour_moi = true, a_la_maison = true, apres = l'heure) ; l'agenda Famille (Google Agenda partagé avec Camille) : agenda ; « note cette idée » : idees ; « retiens que… » : memoriser.
 8. Une remarque sur ta façon de fonctionner (« pour la prochaine mise à jour… », « c'est un bug », « tu devrais… ») : remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. Ne dis jamais « c'est noté » sans avoir appelé remarque. N'invente jamais d'explication sur ton propre fonctionnement et ne promets rien.
 9. « Répète », « tu peux répéter ? » : redis simplement ta dernière phrase (aucun outil, surtout pas reafficher).
@@ -1174,7 +1194,7 @@ Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat 
 - Si un nom de client, un chiffre ou une date que tu as entendu te semble douteux, ne devine pas : dis ce que tu as compris et demande si c'est bien ça (« Tu parles de Franck Monvoisin, chez AD2M ? »), surtout avant de préparer une écriture.
 - Tu ne sais que ce que disent les réponses du CRM : si un détail demandé n'y est pas (le contenu d'une commande, par exemple), ${eco ? 'utilise l\'outil "question"' : 'appelle crm_question pour le chercher'} au lieu de le reconstituer.
 - Les chiffres (clients actifs, objectif, chiffre d'affaires, commandes, montants, nombres de devis) : tu n'en connais AUCUN par cœur. Tu ne dis un chiffre que s'il est dans une réponse du CRM, dans les derniers échanges ou dans ce que Timothée vient de dire. Une recherche lancée « en arrière-plan » n'a pas encore de résultat : tant que la réponse n'est pas arrivée, si on te la demande, dis « je cherche encore, je te le dis dès que je l'ai » — jamais un chiffre au hasard. L'objectif de clients actifs, tu ne peux pas le changer toi-même : dis-le à l'analyste (crm_question « OBJECTIF CLIENTS ACTIFS objectif N »).
-- Si deux réponses du CRM se contredisent (l'analyste parle d'un rendez-vous, la fiche n'en montre pas), dis-le tel quel (« l'analyste parlait d'un rendez-vous le 10, mais la fiche n'en montre pas ») et propose de vérifier ; n'invente jamais d'explication (« je l'ai vu dans un brouillon »…).
+- Si deux réponses du CRM se contredisent (l'analyste parle d'un rendez-vous, la fiche n'en montre pas), dis-le tel quel (« l'analyste parlait d'un rendez-vous le 10, mais la fiche n'en montre pas ») sans rien proposer ; n'invente jamais d'explication (« je l'ai vu dans un brouillon »…).
 `;
     const inv = maison && !eco ? this.maison.texteInventaire() : '';
     const maisonTxt = !maison ? '' : eco ? `
@@ -1187,7 +1207,7 @@ ${inv || '(inventaire pas encore lu : appelle maison_etat)'}
 - « Éteins la lumière » : si une seule lumière est allumée, c'est celle-là (regarde l'état, ou appelle maison_etat) ; ne demande que s'il y en a plusieurs.
 - Demande floue (quelle lampe, quelle radio, quel appareil, « mets de la musique ») : pose UNE question courte avec les choix possibles (« La grande lumière ou la lampe jaune ? »). Utilise le contexte : « éteins-la » = l'appareil dont on vient de parler ; « le salon » = tous les appareils de la pièce.
 - Télé : pour une appli (Netflix, YouTube, Prime Video, France TV), une seule action appli sur la Télé : elle allume la télé si besoin et vérifie que l'appli s'affiche. Radio : action radio avec le nom de la station, sur l'enceinte par défaut (sur la télé s'il le demande). Tu ne peux pas choisir un film ou une émission précise : dis-le simplement.
-- Si une action échoue, explique simplement pourquoi et propose ce qui est possible.
+- Si une action échoue, dis simplement pourquoi, en une phrase, sans poser de question.
 `;
     // La famille (PLAN 7 sexies) : qui te regarde, messages à dire, garde ; outils messages, visages, garde (direct seulement).
     const fam = this.famille.contexte(mode);
@@ -1201,7 +1221,7 @@ La famille : ${fam}${qst ? '\n' + qst : ''}
 - L'agenda Famille (Google Agenda partagé de Timothée et Camille) : « mets dans l'agenda le médecin de Louis jeudi à 10h », « on a quoi ce week-end ? » : outil agenda. Les rendez-vous clients de Timothée restent dans le CRM.
 `;
     const voiture = !car ? '' : `
-En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis propose d'en dire plus. Montants arrondis, jamais de longue liste. Tu ne vois rien (le téléphone est sur son support) : pas de photo sauf s'il te demande de regarder.
+En voiture : Timothée conduit. Réponses très courtes (une ou deux phrases), l'essentiel d'abord, puis tu te tais (s'il veut plus, il le demandera). Montants arrondis, jamais de longue liste. Tu ne vois rien (le téléphone est sur son support) : pas de photo sauf s'il te demande de regarder.
 En voiture, il te réveille en touchant l'écran (tu n'écoutes pas ton nom) et tu te rendors tout seul après une minute sans qu'on te parle : ne lui demande jamais de dire « Wilson » pour te réveiller.
 Ce que tu dis de l'écran doit être vrai : un bouton (itinéraire, appel) ne s'affiche QUE par l'outil itineraire ou appeler. Ne dis jamais « j'affiche l'itinéraire » sans appeler itineraire ; et si le client change (il te corrige le nom), appelle de nouveau itineraire pour le bon client.
 Le son de la voiture est souvent mauvais (Bluetooth, bruit de la route, réseau faible) : ce que tu entends peut être déformé (mots étranges, bouts de phrase, autre langue). Si une demande te paraît bizarre, incomplète ou hors sujet, reformule en quelques mots ce que tu as compris et demande s'il confirme, au lieu de deviner ; si tu n'as rien compris, demande-lui simplement de répéter.
@@ -1209,7 +1229,7 @@ S'il parle au téléphone avec quelqu'un d'autre (une conversation qui ne t'est 
 `;
     return `${car ? 'Tu es Wilson, un compagnon qui vit dans le téléphone de Timothée. En ce moment vous êtes dans sa voiture.' : 'Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d\'une famille. Ton visage animé montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.'}
 
-Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies toujours : « tu », « ton », « peux-tu », jamais « vous » ni « pourriez-vous », même pour être poli. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles. Ne termine jamais par « autre chose ? », « tu as besoin d'autre chose ? » ou « tu veux faire autre chose pendant ce temps ? » (règle de Timothée, redite le 05/11/26) : tu réponds, puis tu te tais ; et pendant une recherche, tu dis seulement « Je cherche. ».
+Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies toujours : « tu », « ton », « peux-tu », jamais « vous » ni « pourriez-vous », même pour être poli. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles. Ne termine jamais par « autre chose ? », « tu as besoin d'autre chose ? » ou « tu veux faire autre chose pendant ce temps ? » (règle de Timothée, redite le 05/11/26) : tu réponds, puis tu te tais ; et pendant une recherche, tu dis seulement « Je cherche. ». Tu réponds STRICTEMENT à sa question, sans rien proposer d'autre après : pas de « tu veux que… ? », « je peux aussi… », « tu as une autre question ? », « on continue ? » (remarque de Timothée du 06/11/26, 08h47). Après « C'est noté » ou « Retenu », tu t'arrêtes là. Pour te taire, ne dis rien du tout : jamais de didascalie (« (silence) », « [reste silencieux] », « *attend* »).
 
 Quand parler :
 ${car ? `- Timothée t'a appelé par ton prénom : ce que tu entends maintenant t'est adressé. Réponds à chaque phrase.
@@ -1439,8 +1459,10 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       }
       if (this._doublon === this._turnN - 1) {
         // Réponse identique à la précédente, sans que personne ait parlé entre les deux : coupée (journal du 04/11/26).
-        this._doublon = null; this._liveTurn = null; this._modelTalking = 0;
-        this.log(`Réponse en double coupée (déjà dite) : « ${wilson.slice(0, 100)} »`, true);
+        const did = this._didascalie === this._turnN - 1;
+        this._doublon = null; this._didascalie = null; this._liveTurn = null; this._modelTalking = 0;
+        this.log(did ? `Didascalie coupée (il voulait se taire, rien n'est dit) : « ${wilson.slice(0, 100)} »` : `Réponse en double coupée (déjà dite) : « ${wilson.slice(0, 100)} »`, true);
+        if (did && user) { this.log(`Entendu : « ${user.slice(0, 160)} »`, true); (this._entendus = this._entendus || []).push(user); this._entendus.splice(0, this._entendus.length - 6); }
         return;
       }
       if (this._retenu === this._turnN - 1) {
@@ -1526,6 +1548,11 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     });
     b.on('said', (t) => {
       if (this._retenu === this._turnN || this._doublon === this._turnN) return;
+      if (VP.estDidascalie(t)) {                           // didascalie (« (Wilson reste silencieux…) ») : coupée, rien n'est dit
+        this._doublon = this._turnN; this._didascalie = this._turnN; this.audio.flush(); this.face.setTalk(0); this._liveTurn = null; this._modelTalking = 0;
+        $('subtitle').textContent = '';
+        return;
+      }
       if (this._protocole) {
         const vv = this._vvTour();
         if (!vv.outil && !vv.hold && (vv.travail || this._travailRecent()) && (VP.annonceRecherche(t) || VP.affirmeFait(t))) this._vvRetenir(vv, 'il annonce une recherche ou affirme un fait sans outil');
@@ -1678,7 +1705,11 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       const K = this._maisonKo, now = Date.now();
       if (!K) { this._maisonKo = { depuis: now, dit: now, n: 1 }; this.log('Maison : inventaire impossible (' + e.message + ')'); return; }
       K.n++;
-      if (now - K.dit >= 3600000) { K.dit = now; this.log(`Maison : toujours injoignable depuis ${dureeTexte(now - K.depuis)} (${K.n} essais ; ordinateur de la maison éteint ?) — ${e.message}`); }
+      if (now - K.dit >= 3600000) {
+        K.dit = now;
+        const P = this.claude.pc, pc = P && P.vivant && Date.now() - this.claude.pcAt < 30 * 60000;
+        this.log(`Maison : toujours injoignable depuis ${dureeTexte(now - K.depuis)} (${K.n} essais ; ${pc ? 'l\'ordinateur de la maison répond, lui : la machine virtuelle de Home Assistant n\'est sans doute pas démarrée' : 'ordinateur de la maison éteint ?'}) — ${e.message}`, !!pc);
+      }
     });
   }
 
@@ -1861,6 +1892,12 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (vv.travail && !vv.outil && !wilson) this._vvHerite = { n: this._turnN, user: vv.user };
     if (!vv.hold || vv.outil || (!vv.held.length && !wilson)) return null;
     const mots = this._sourcesMots();
+    if (!VP.sansFait(wilson, mots) && VP.repriseFondee(wilson, mots, (this._sources || []).filter((x) => Date.now() - x.t < 3600000).map((x) => x.txt))) {
+      for (const [a, r] of vv.held) this.audio.play(a, r);
+      if (vv.held.length) { this.lastActivity = performance.now(); this.log(`Verrou de vérité : reprise d'un résultat déjà reçu, dite (« ${wilson.slice(0, 100)} »)`, true); }
+      vv.held = [];
+      return null;
+    }
     if (VP.sansFait(wilson, mots)) {
       for (const [a, r] of vv.held) this.audio.play(a, r);
       if (vv.held.length) { this.lastActivity = performance.now(); this.log(`Verrou de vérité : réponse qui n'affirme rien, dite (« ${wilson.slice(0, 80)} »)`); }
@@ -2075,7 +2112,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     try { result = await this._lookup(question, ctl.signal, t0, { raw: true }); }
     catch (e) {
       if (!this._searches.has(call.id)) return;                                  // annulée : rien à répondre
-      result = e.name === 'AbortError' ? "La recherche a pris trop de temps. Dis-le simplement et propose de réessayer."
+      result = e.name === 'AbortError' ? "La recherche a pris trop de temps. Dis-le simplement, en une phrase."
         : "Je n'ai pas pu obtenir l'information (Google refuse pour l'instant). Dis-le simplement.";
       this.log(`Recherche impossible (${((performance.now() - t0) / 1000).toFixed(1)} s) : ${e.name === 'AbortError' ? 'trop longue' : e.message}`);
     } finally { clearTimeout(timer); }
@@ -2392,11 +2429,20 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         return { info: pourGemini((avant ? avant + '\n' : '') + e.texte, car) };
       }
       case 'crm_agenda': return lu(await C.agenda(a.jour, signal));
-      case 'crm_bilan': return lu(await C.bilan(signal));
+      case 'crm_bilan': {
+        const r = await C.bilan(signal), res = lu(r), A = r.ok ? actifsDuBilan(r.texte) : null;
+        if (A) res.info += '\n' + this._actifsTexte(A).info;
+        return res;
+      }
+      case 'crm_actifs': {                                                            // question simple sur les clients actifs
+        const r = await this._actifs(a, signal);
+        return r || { info: 'Le bilan du CRM ne donne pas les clients actifs : appelle crm_question avec sa question complète.' };
+      }
       case 'crm_produit': return lu(await C.produit(a.produit || '', a.question, signal));
       case 'crm_question': {                                                          // C11 : toutes les autres questions
         const q = String(a.demande || (/^(qui_achete|infos)$/.test(a.question || '') ? '' : a.question) || '').trim();
         if (!q) return { info: 'Il manque la question : demande-lui ce qu\'il veut savoir.', dire: 'Qu\'est-ce que tu veux savoir exactement ?' };
+        if (actifsSimple(q)) { const r = await this._actifs(a, signal); if (r) return r; }
         let last = C.last ? `Dernier client dont vous avez parlé : ${C.last.societe}${C.last.contact ? ' (' + C.last.contact + ')' : ''}.` : '';
         if (OBJECTIF_Q.test(q)) last = (await this._contexteObjectif(q, signal)) + (last ? '\n' + last : '');   // 7 sexies, O
         // PLAN 10 : Claude, sur le PC de la maison, d'abord ; l'analyste Gemini si le PC ne répond pas.
@@ -2410,7 +2456,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         } catch (e) {
           if (e.name === 'AbortError') throw e;
           this.log('Analyste impossible : ' + e.message);
-          return { echec: true, info: e.crm ? `Impossible de chercher : ${e.message}. Dis-le simplement.` : `La recherche n'a pas abouti (${shorten(e.message)}). Dis-le simplement et propose de réessayer.`,
+          return { echec: true, info: e.crm ? `Impossible de chercher : ${e.message}. Dis-le simplement.` : `La recherche n'a pas abouti (${shorten(e.message)}). Dis-le simplement, en une phrase.`,
             dire: e.crm ? 'Le CRM n\'a pas encore le moteur de questions.' : 'Je n\'ai pas réussi à finir la recherche.' };
         }
         this.log(`Analyste : réponse en ${Math.round(r.ms / 1000)} s, ${r.etapes} étape(s), ${r.recherches} recherche(s) (${r.model}) : ${r.reponse.slice(0, 160)}`, true);
@@ -2518,6 +2564,31 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this.brain.respond([{ id: call.id, name: call.name, response: { result: info } }]);
   }
 
+  // Clients actifs sans IA : chiffres du bilan du CRM, objectif = le plus grand de N-1 et de l'objectif donné (règle de
+  // Timothée du 05/11/26), ce qu'il manque. null si le bilan ne les donne pas (l'analyste prend la question).
+  async _actifs(a, signal) {
+    const q = String((a && (a.question || a.demande)) || ''), S = actifsSimple(q);
+    const m = OBJECTIF_NB.exec(q);
+    if (m && +m[1] > 0 && +m[1] !== +this.settings.objectifActifs) { this.settings.objectifActifs = +m[1]; this.applySettings('objectifActifs'); this.log(`Objectif de clients actifs retenu : ${m[1]} par mois`); }
+    let r;
+    try { r = await this.crm.bilan(signal); } catch (e) { if (e.name === 'AbortError') throw e; return null; }
+    const A = r && r.ok !== false ? actifsDuBilan(r.texte) : null;
+    if (!A) return null;
+    const T = this._actifsTexte(A, S && S.n1);
+    this.log(`Clients actifs (bilan du CRM, sans IA) : ${T.dire}`, true);
+    return { info: `${T.info}\nRéponds seulement à sa question, avec ces chiffres, en une ou deux phrases${this.enVoiture ? ' très courtes' : ''} ; ne propose rien d'autre.`, dire: T.dire };
+  }
+  _actifsTexte({ act, act1 }, n1 = false) {
+    const d = new Date(), mois = MOIS[d.getMonth()], moisN1 = `${mois} ${d.getFullYear() - 1}`;
+    const objDonne = +this.settings.objectifActifs || 0, obj = Math.max(objDonne, act1 || 0);
+    const manque = obj ? Math.max(0, obj - act) : null;
+    const objTxt = obj ? `Objectif du mois : ${obj} clients actifs (${objDonne && objDonne >= (act1 || 0) ? 'donné par Timothée' : `règle de Timothée : au moins N-1${objDonne ? `, plus que les ${objDonne} qu'il avait donnés` : ''}`}). ${manque ? `Il en manque ${manque}.` : 'Objectif atteint.'}` : 'Objectif du mois : pas connu.';
+    const info = `Clients actifs (bilan du CRM, chiffres officiels, ne les recalcule pas) : ce mois-ci (${mois} ${d.getFullYear()}) ${act}${act1 != null ? ` ; ${moisN1}, mois entier (même mois l'an dernier, N-1 : ce n'est PAS le mois dernier) : ${act1}` : ''}. ${objTxt}`;
+    const dire = n1 && act1 != null ? `En ${moisN1}, tu avais ${act1} clients actifs.`
+      : `Tu as ${act} client${act > 1 ? 's' : ''} actif${act > 1 ? 's' : ''} ce mois-ci${obj ? `, pour un objectif de ${obj} : ${manque ? `il t'en manque ${manque}` : 'objectif atteint'}` : ''}.`;
+    return { info, dire };
+  }
+
   // L'objectif des clients actifs (PLAN 7 sexies, O) : le chiffre officiel du bilan du CRM, l'objectif (réglage, ou dit à la
   // voix : retenu), et les rendez-vous du prochain jour ouvré, donnés à l'analyste avec la question.
   async _contexteObjectif(q, signal) {
@@ -2604,7 +2675,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     try {
       if (call.name === 'maison_etat') { info = await this.maison.etat(a.appareils || [], ctl.signal); ok = true; }
       else { const r = await this.maison.commande(a, ctl.signal); info = r.info; ok = r.ok; }
-    } catch (e) { if (!this._searches.has(call.id)) return; info = HA_MUET; }
+    } catch (e) { if (!this._searches.has(call.id)) return; this.log('Maison : ' + (e.message || e.name)); info = await this.maison.diag(e); }
     if (conv !== this.convId || !this._searches.has(call.id)) return;
     this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
     if (call.name === 'maison_commande') { this.face.clearEmotion(); this.face.play(ok ? 'nod' : 'shake'); }
@@ -2612,8 +2683,38 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this.brain.respond([{ id: call.id, name: call.name, response: { result: `${ok ? 'OK' : 'Échec'} : ${info}` } }]);
   }
 
+  // Journal du 06/11/26, 08h43:18 et 08h45:13 : guidage vers Lebre lancé deux fois sans qu'il le demande (il avait seulement
+  // dit le nom, puis « pourquoi tu as activé le GPS alors que j'ai pas dit que on allait à Lèbre ? ») ; remarque de Timothée à
+  // 08h45:47 : « quand je parle d'une entreprise, ça ne veut pas dire que je veux y aller ». Le guidage ne part que s'il l'a
+  // demandé (GPS, itinéraire, emmène-moi… dans ses phrases des 90 dernières secondes), ou s'il dit oui à la proposition.
+  async _itinerairePermis() {
+    const now = performance.now(), recents = () => (this._heard || []).filter((h) => now - h.t < 90000).map((h) => h.text);
+    let ent = String(this.brain.inText || '').trim();
+    for (let i = 0; !ent && !recents().length && i < 6; i++) { await sleep(250); ent = String(this.brain.inText || '').trim(); }   // transcription en route
+    const H = recents(), dernier = ent || H[H.length - 1] || '';
+    if (!dernier) return { ok: true, pourquoi: 'aucune transcription de sa phrase' };
+    if (VP.refusItineraire(dernier) && !VP.estItineraire(VP.plat(dernier).replace(/.*\b(mais|plutot|par contre)\b/, ''))) return { ok: false, dit: dernier };
+    if ([...H.slice(-3), ent].filter(Boolean).some((t) => VP.estItineraire(t) && !VP.refusItineraire(t))) return { ok: true };
+    const W = (this._ditWilson || []).filter((w) => now - w.t < 90000).pop();
+    if (W && /guide|itineraire|gps|y aller|emmene|on y va/.test(VP.plat(W.text)) && VP.estOui(dernier)) return { ok: true, pourquoi: 'oui à sa proposition' };
+    return { ok: false, dit: dernier };
+  }
+
   async _crmTool(call) {
-    if (call.name === 'crm_question') return this._analyse(call);
+    if (call.name === 'itineraire') {
+      const P = await this._itinerairePermis();
+      if (!P.ok) {
+        this.log(`Itinéraire vers « ${(call.args || {}).client || '?'} » refusé : il ne l'a pas demandé (il a dit : « ${P.dit.slice(0, 120)} »)`, true);
+        if (this.brain.open) this.brain.respond([{ id: call.id, name: call.name, response: { result: `REFUSÉ, rien n'a été lancé : il n'a pas demandé d'y aller (il a dit : « ${P.dit.slice(0, 160)} »). Citer un client n'est pas une demande de GPS. Ne lance pas le guidage et ne propose pas de le lancer : réponds seulement à ce qu'il a dit (s'il se plaint du GPS, dis « Pardon, je ne lance rien. »).` } }]);
+        return;
+      }
+      if (P.pourquoi) this.log(`Itinéraire permis : ${P.pourquoi}`);
+    }
+    if (call.name === 'crm_question') {
+      const qa = String((call.args || {}).question || (call.args || {}).demande || '');
+      if (this.crm.on && actifsSimple(qa)) return this._crmTool0(call, null, 'crm_actifs');   // réponse tout de suite, sans IA
+      return this._analyse(call);
+    }
     // Journal du 05/11/26, 15h53:24-15h53:34 : itineraire demandé 3 fois pour Miroiterie 35 (Google l'annulait quand
     // Timothée disait « oui » par-dessus) : 3 boutons, 2 messages « résultat », puis « C'est affiché, » coupé. La même
     // lecture demandée de nouveau dans les 20 s : même résultat, rien de réaffiché, rien de redit en message.
@@ -2633,25 +2734,26 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (entree) R.set(cleD, entree);
     try { return await this._crmTool0(call, entree); } finally { if (finD) finD({ info: (entree && entree.info) || 'Le CRM n\'a pas répondu.' }); }
   }
-  async _crmTool0(call, entree) {
+  async _crmTool0(call, entree, run = call.name) {
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
     ctl.crm = call.name;                    // outil du CRM : jamais abandonné en route (voir 'toolcancel')
     this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
-    if (['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit'].includes(call.name)) this.face.setEmotion('reflexion', CRM_MAX_MS + 2000, 0.6);
-    this.log(`CRM (direct) : ${call.name} ${JSON.stringify(call.args || {}).slice(0, 160)}`, true);
+    const lecture = ['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_actifs'].includes(run);
+    if (lecture) this.face.setEmotion('reflexion', CRM_MAX_MS + 2000, 0.6);
+    this.log(`CRM (direct) : ${run} ${JSON.stringify(call.args || {}).slice(0, 160)}`, true);
     if (call.name === 'itineraire') this._itiTurn = this._turnN; else if (call.name === 'appeler') this._appelTurn = this._turnN;
     if (['itineraire', 'appeler', 'crm_noter'].includes(call.name)) {
       const ent = String(this.brain.inText || '').trim() || ((this._heard || [])[this._heard.length - 1] || {}).text || '';
       if (this._echoPossible(ent)) this.log(`Écho possible : « ${ent.slice(0, 80)} » reprend mot pour mot sa propre phrase d'avant (${call.name})`, true);
     }
-    const pid = ['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit'].includes(call.name) ? this.pill('Je regarde dans le CRM…') : 0;
+    const pid = lecture ? this.pill('Je regarde dans le CRM…') : 0;
     const timer = setTimeout(() => ctl.abort(), CRM_MAX_MS);
     let res;
-    try { res = await this._crmRun(call.name, call.args || {}, ctl.signal); }
+    try { res = await this._crmRun(run, call.args || {}, ctl.signal); }
     catch (e) {
       if (!this._searches.has(call.id)) return;                                  // annulé (on l'a coupé)
-      res = { info: e.name === 'AbortError' ? 'Le CRM a mis trop de temps à répondre (réseau faible ?). Dis-le simplement et propose de réessayer.'
-        : isNetErr(e) ? 'Pas de réseau vers le CRM pour l\'instant. Dis-le simplement et propose de réessayer dans un moment.' : `Le CRM ne répond pas (${e.message}). Dis-le simplement.` };
+      res = { info: e.name === 'AbortError' ? 'Le CRM a mis trop de temps à répondre (réseau faible ?). Dis-le simplement, en une phrase.'
+        : isNetErr(e) ? 'Pas de réseau vers le CRM pour l\'instant. Dis-le simplement, en une phrase.' : `Le CRM ne répond pas (${e.message}). Dis-le simplement.` };
       this.log(`CRM impossible (${((performance.now() - t0) / 1000).toFixed(1)} s) : ${e.name === 'AbortError' ? 'trop long' : e.message}`);
     } finally { clearTimeout(timer); }
     if (entree) entree.info = res.info;
@@ -2969,8 +3071,17 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Dis-lui exactement : « ${phrase} »]`);
     else this._sayAfter(phrase);
   }
+  // Remarque de Timothée du 06/11/26, 08h57 : en voiture, le micro n'est ouvert que pendant une discussion (il touche l'écran
+  // pour réveiller Wilson, le retouche pour l'endormir) ; en veille, il est fermé. Hors de la voiture, il reste ouvert.
+  _micVoiture() {
+    const A = this.audio; if (!A || !A.ctx || !this.started) return;
+    const fermer = this._voitureBt && (this.state === 'veille' || this.state === 'dodo') && !this.settingsOpen && !this._earTest && !this.phone;
+    if (fermer && !A.micPaused) { A.pauseMic('voiture, en veille : rouvert quand tu touches l\'écran'); this._sourd = null; }
+    else if (!fermer && A.micPaused) A.resumeMic(this._voitureBt ? 'réveil' : 'plus en voiture').catch((e) => this.log('Micro impossible à rouvrir : ' + e.message));
+  }
   _sourdGarde() {
-    if (!this._voitureBt || !this.started || document.hidden || this.phone || this.settingsOpen) return;
+    this._micVoiture();
+    if (!this._voitureBt || !this.started || document.hidden || this.phone || this.settingsOpen || this.audio.micPaused) { if (this.audio && this.audio.micPaused) this._capAt = performance.now(); return; }
     const now = performance.now(), muet = now - (this._capAt || now);
     if (!this._sourd && this._capAt && muet > 5000 && now - (this._shownAt || 0) > 5000) {
       this._sourd = { at: Date.now() - Math.round(muet), pourquoi: 'micro muet (aucun son reçu depuis ' + Math.round(muet / 1000) + ' s)' };
@@ -2980,6 +3091,15 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Dis-lui exactement : « ${avis} »]`);   // une seule voix
       else if (!this.audio.playing) { try { this.voice.speak(avis); } catch (_) {} }
     } else if (this._sourd && this._sourd.pourquoi.startsWith('micro') && muet < 1000) this._sourdFin();
+  }
+  // Une fenêtre à laquelle il doit répondre (carte « Oui / Non », bouton d'itinéraire ou d'appel, réglages) : le toucher ne
+  // l'endort pas.
+  _fenetreOuverte() {
+    const c = document.querySelector('#cards .card');
+    if (c && !c.hidden && !c.closest('[hidden]') && c.getClientRects().length) return c.querySelector('.card-ok') ? 'une validation (Oui / Non)' : 'un bouton (' + (c.className.replace(/\bcard\b/, '').trim() || 'carte') + ')';
+    if (this.settingsOpen) return 'les réglages';
+    if (this.crm && this.crm.pending) return 'un enregistrement à valider';
+    return '';
   }
   _backFromCall() {
     const c = this._callAfter; if (!c) return;
@@ -3048,6 +3168,13 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this.voice.warm();
       if (this.audio.holdErr && this._voitureBt) this._holdTry = 0;            // lecteur refusé faute de geste : un toucher le relance
       if (!this.audio.running) { this.audio.resume(); this._hideWake(); return; }
+      // Remarques de Timothée du 06/11/26, 08h48-08h49 : en voiture, retoucher l'écran pendant la discussion le rendort tout de
+      // suite (sans attendre la minute de silence), sauf si une fenêtre à valider (Oui / Non, bouton…) est affichée.
+      if (this.enVoiture && (this.state === 'conversation' || this.state === 'eveil')) {
+        const F = this._fenetreOuverte();
+        if (!F) { this.log('Voiture : écran retouché pendant la discussion : je me rendors', true); this.endConversation('toucher'); return; }
+        this.log(`Voiture : écran touché, mais ${F} est affiché(e) : je reste éveillé`);
+      }
       if (this.speaking) { this.interrupt('toucher'); return; }
       if (this.state === 'veille' || this.state === 'dodo') { this.famille.presence('écran touché'); this.face.setEmotion('surprise', 900); this.startConversation('toucher'); return; }
       this.face.setEmotion('rire', 1600);

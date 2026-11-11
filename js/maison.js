@@ -47,6 +47,13 @@ const TIMEOUT_MS = 15000;
 // Assistant tourne sur le PC de la maison) ; journal du 01/11/26, 19h16 : il disait seulement « Home Assistant ne répond pas ».
 export const HA_MUET = "Home Assistant ne répond pas : l'ordinateur de la maison est sans doute éteint (il doit être allumé pour que je commande les appareils).";
 const HA_INJOIGNABLE = "Impossible de joindre la maison : l'ordinateur de la maison est peut-être éteint (il doit être allumé), ou Tailscale n'est pas allumé sur cet appareil.";
+// Journal du 07/11/26, 09h20 → 11/11 : Home Assistant injoignable des jours entiers alors que le PC de la maison répondait
+// (relais Claude vivant) : c'est sa machine virtuelle qui n'était pas démarrée, pas l'ordinateur qui était éteint.
+export const HA_VM = "Home Assistant ne répond pas, alors que l'ordinateur de la maison est allumé : c'est sans doute sa machine virtuelle (Home Assistant) qui n'est pas démarrée sur l'ordinateur.";
+// Journal du 06/11/26, 08h26:33 : une lumière n'a pas répondu en 15 s (« signal is aborted without reason ») alors que les
+// autres répondaient en 1 à 4 s, et Wilson a dit « l'ordinateur de la maison est sans doute éteint ».
+const HA_LENT = "Home Assistant a mis trop de temps à répondre pour cet appareil (il répond pour les autres) : la commande est peut-être passée quand même.";
+const SERVICE_MS = 25000;
 const netErr = (e) => !navigator.onLine || (e && e.name === 'TypeError') || /Failed to fetch|NetworkError|Load failed/i.test(String((e && e.message) || ''));
 const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9+]+/g, ' ').trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -54,22 +61,33 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function cleanUrl(u) { return String(u || '').trim().replace(/\/+$/, ''); }
 
 export class Maison {
-  constructor({ settings, log = () => {} }) { this.settings = settings; this.log = log; this.inv = null; this.invAt = 0; this._blink = null; }
+  // pcVivant : () => Promise<bool>, l'ordinateur de la maison répond-il (relais Claude) ? Pour dire la vraie panne.
+  constructor({ settings, log = () => {}, pcVivant = async () => false }) { this.settings = settings; this.log = log; this.pcVivant = pcVivant; this.inv = null; this.invAt = 0; this._blink = null; this.okAt = 0; }
   get url() { return cleanUrl(this.settings.haUrl); }
   get token() { return String(this.settings.haToken || '').trim(); }
   get on() { return !!(this.url && this.token); }
 
-  async _fetch(path, { method = 'GET', body, signal, text = false } = {}) {
-    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  async _fetch(path, { method = 'GET', body, signal, text = false, ms = TIMEOUT_MS } = {}) {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
     if (signal) signal.addEventListener('abort', () => ctl.abort(), { once: true });
     try {
       const r = await fetch(this.url + path, { method, signal: ctl.signal,
         headers: { Authorization: 'Bearer ' + this.token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
       let j = null; try { j = text ? await r.text() : await r.json(); } catch (_) {}
+      if (r.ok) this.okAt = Date.now();
       return { status: r.status, ok: r.ok, json: j };
     } finally { clearTimeout(t); }
   }
-  _service(domain, service, data, signal) { return this._fetch(`/api/services/${domain}/${service}`, { method: 'POST', body: data, signal }); }
+  _service(domain, service, data, signal) { return this._fetch(`/api/services/${domain}/${service}`, { method: 'POST', body: data, signal, ms: SERVICE_MS }); }
+  // La phrase qui dit la vraie panne : appareil lent (les autres répondent), machine virtuelle arrêtée (le PC répond), ou PC éteint.
+  async diag(err) {
+    if (err && (err.status === 401 || err.status === 403)) return "Home Assistant refuse le jeton d'accès : il faut en recréer un et le recoller dans les réglages.";
+    if (err && err.name === 'AbortError' && Date.now() - this.okAt < 120000) return HA_LENT;   // trop long, mais il répond pour les autres
+    let pc = false;
+    try { pc = await Promise.race([Promise.resolve(this.pcVivant()), new Promise((ok) => setTimeout(() => ok(false), 6000))]); } catch (_) {}
+    if (pc) return HA_VM;
+    return netErr(err) ? HA_INJOIGNABLE : HA_MUET;
+  }
 
   // ---------- Inventaire ----------
   // Appareils pilotables : états (/api/states) + pièce et « caché » (un modèle de Home Assistant). Les interrupteurs de
@@ -160,8 +178,7 @@ export class Maison {
     } catch (err) {
       if (err.name === 'AbortError' && signal && signal.aborted) throw err;
       this.log('Maison : ' + (err.message || err.name));
-      if (err.status === 401 || err.status === 403) return { ok: false, info: "Home Assistant refuse le jeton d'accès : il faut en recréer un et le recoller dans les réglages." };
-      return { ok: false, info: netErr(err) ? HA_INJOIGNABLE : HA_MUET };
+      return { ok: false, info: await this.diag(err) };
     }
   }
 
@@ -351,8 +368,7 @@ export class Maison {
     } catch (e) {
       if (e.name === 'AbortError' && signal && signal.aborted) throw e;
       this.log('Maison : ' + (e.message || e.name));
-      if (e.name === 'AbortError') return { ok: false, dire: HA_MUET };
-      return { ok: false, dire: netErr(e) ? HA_INJOIGNABLE : HA_MUET };
+      return { ok: false, dire: await this.diag(e) };
     }
   }
 

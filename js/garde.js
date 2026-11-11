@@ -36,8 +36,9 @@ export function jugerSons(sons, etat, now) {
     A.push(now);
     if (now - A[0] >= 45000) { ev.push({ genre: 'alarme', score: score(m, SONS.alarme) }); etat.alarme = []; }
   }
-  // Pour info (raconté au retour).
-  for (const [g, seuil] of [['sonnette', 0.3], ['frappe', 0.4], ['chien', 0.4], ['cris', 0.45]]) {
+  // Pour info (raconté au retour). Plus les aboiements (remarque de Timothée du 09/11/26, 15h08 : « les bruits de chien, on
+  // s'en fout » ; c'est un chien du voisinage) : ni notés, ni racontés.
+  for (const [g, seuil] of [['sonnette', 0.3], ['frappe', 0.4], ['cris', 0.45]]) {
     if (score(m, SONS[g]) >= seuil && now - (etat.info[g] || -1e12) > INFO_ECART_MS) { etat.info[g] = now; ev.push({ genre: g, score: score(m, SONS[g]), info: true }); }
   }
   return ev;

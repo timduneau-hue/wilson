@@ -3,7 +3,7 @@ import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decouper, demande, argumentsClaude, Relais } from '../pc/relais.mjs';
+import { decouper, demande, argumentsClaude, Relais, limiteAtteinte } from '../pc/relais.mjs';
 import { OUTILS, appeler, serveur } from '../pc/crm-mcp.mjs';
 
 let ok = 0, ko = 0;
@@ -52,12 +52,25 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 3 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 4 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
 const rendu2 = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : Claude en échec → erreur rendue à Wilson (jamais de silence)', rendu2 && rendu2.ok === false && /4 min/.test(rendu2.erreur), JSON.stringify(rendu2));
+
+// Limite d'utilisation de l'abonnement (journal du 10/11/26, 08h47:23) : une erreur, plus une « réponse ».
+check('Limite : « You\'ve hit your weekly limit · resets 4am (Europe/Paris) » reconnue', limiteAtteinte("You've hit your weekly limit · resets 4am (Europe/Paris)") && !limiteAtteinte('La première porte 80 kilos, la seconde 120.'));
+{
+  const bin = path.join(os.tmpdir(), 'faux-claude-' + process.pid + (process.platform === 'win32' ? '.cmd' : ''));
+  fs.writeFileSync(bin, '#!/bin/sh\ncat > /dev/null\necho \'{"type":"result","is_error":true,"result":"You\\u0027ve hit your weekly limit · resets 4am (Europe/Paris)","num_turns":1}\'\n', { mode: 0o755 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relais-'));
+  fs.writeFileSync(path.join(dir, 'consigne.md'), 'consigne'); fs.writeFileSync(path.join(dir, 'mcp.json'), '{}');
+  const R3 = new Relais({ config: { script: 'S', secret: 'x'.repeat(40), claude: bin }, dir, fetchImpl: fauxFetch, log: () => {} });
+  let err = null; try { await R3._claude({ id: 'q9', type: 'crm', question: 'Combien de clients actifs ?' }); } catch (e) { err = e; }
+  check('Limite : le relais la rend comme une ERREUR (« limite d\'utilisation de Claude atteinte »), pas comme une réponse', err && /limite d'utilisation de Claude atteinte/.test(err.message) && /resets 4am/.test(err.message), err ? err.message : 'pas d\'erreur');
+  fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(bin, { force: true });
+}
 
 // Une boucle : prend la question en attente puis s'arrête.
 envoyes.length = 0; fileQ = [{ id: 'q3', type: 'crm', question: 'Mon CA du mois ?' }];
@@ -66,7 +79,7 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 3');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 4');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
 
 // ---------- Le CRM en lecture seule ----------

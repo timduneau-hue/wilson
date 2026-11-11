@@ -27,7 +27,19 @@ export function estTravail(t, { clients = [] } = {}) {
 export function estEcriture(t) {
   return /\b(note|notes|noter|enregistre|enregistrer|indique|indiquer|ajoute|ajouter|mets|mettre|marque|marquer|compte[- ]rendu|tache|cree|creer)\b|j'ai vu|je suis passe|je reviens de/.test(plat(t));
 }
-export function estItineraire(t) { return /\b(itineraire|gps|guide[- ]moi|emmene[- ]moi|amene[- ]moi|conduis[- ]moi|navigation|y aller|route vers)\b/.test(plat(t)); }
+export function estItineraire(t) { return /\b(itineraire|gps|guide[- ]moi|emmene[- ]moi|amene[- ]moi|conduis[- ]moi|navigation|y aller|route vers|emmenes?|amenes?|me guides?|me guider|waze|google maps|guidage|on y va|allons chez|on va chez|comment aller)\b/.test(plat(t)); }
+// Didascalie lue à voix haute (journal du 09/11/26, 17h52:33 et 17h59:07 : « (Wilson reste silencieux car la conversation
+// ne semble pas s'adresser à lui.) ») : pour se taire, Gemini ne doit rien dire du tout ; l'appli coupe ce qui ressemble à ça.
+export function estDidascalie(t) {
+  const x = plat(t);
+  return /^\s*[([*]/.test(x) || /\b(je reste|il reste|wilson reste|reste|rester|demeure) (silencieux|muet)\b|ne (me )?semble pas s'adresser a (lui|moi)|[([*]\s*(silence|pause|wilson|il se tait|se tait|attend|ne dit rien|ne repond pas)\b/.test(x);
+}
+
+// Il dit qu'il n'a PAS demandé le guidage (journal du 06/11/26, 08h45:13 : « Et pourquoi tu as activé le GPS alors que j'ai pas
+// dit que on allait à Lèbre ? » → Gemini a relancé le guidage, à cause du mot « GPS »).
+export function refusItineraire(t) { return /\b(pas demande|pas dit|pourquoi (tu|t'as|as-tu|il)|arrete|annule|coupe|eteins|enleve|ferme|n'y (vais|va|allons) pas|on y va pas|j'y vais pas|pas besoin|pas la peine|je (ne )?veux pas|non non)\b/.test(plat(t)); }
+// Un simple « oui » (à une proposition de Wilson).
+export function estOui(t) { const x = plat(t).trim(); return x.split(/\s+/).length <= 6 && /^(oui|ouais|ok|okay|d'accord|vas-y|vas y|allez|go|volontiers|bien sur|c'est parti|carrement|parfait|yes)\b/.test(x); }
 
 // Ce que Wilson dit pour annoncer une recherche (« Je regarde dans le CRM… ») : sans outil derrière, rien de vrai ne suit.
 export function annonceRecherche(t) { return /\b(je (re)?regarde|je cherche|je verifie|je consulte|je jette un (oeil|coup d'oeil))\b|dans (le|ton) crm|dans (la|sa) fiche/.test(plat(t)); }
@@ -101,6 +113,23 @@ export function sansFait(t, mots) {
   if (!x) return true;
   if (x.split(/\s+/).length > 35 || /\d/.test(x) || affirmeFait(x) || annonceRecherche(x)) return false;
   return nomsInventes(x, mots).length === 0;
+}
+
+// Journal du 06/11/26, 08h46:06 : il redemande « le nombre de clients actifs ce mois-ci » une minute après la réponse de
+// Claude ; Wilson la répète (23, 49, 26 : tous dans cette réponse) et le verrou l'a jetée, puis la même recherche a repris
+// 80 s. Une REPRISE d'un résultat récent peut être dite sans nouvel outil : tous ses chiffres et au moins 70 % de ses mots
+// sont dans un même résultat d'outil (ou réponse donnée en message), aucun nom inventé, rien d'écrit dans le CRM.
+export const nombresDe = (t) => (String(t || '').match(/\d+(?:[\u00a0\u202f .]\d{3})*(?:,\d+)?/g) || []).map((n) => n.replace(/[\u00a0\u202f .]/g, ''));
+export function repriseFondee(t, mots, sources = []) {
+  const x = String(t || '').trim();
+  if (!x || x.split(/\s+/).length > 90 || annonceRecherche(x)) return false;
+  if (/\b(j'ai (ajoute|note|enregistre|mis|indique|marque|cree)|c'est (note|fait|enregistre|ajoute))\b/.test(plat(x))) return false;
+  const ns = nombresDe(x), ws = [...motsDe(x)].filter((w) => w.length >= 4);
+  if (!ns.length || ws.length < 3 || nomsInventes(x, mots).length) return false;
+  return sources.some((src) => {
+    const N = new Set(nombresDe(src)); if (!ns.every((n) => N.has(n))) return false;
+    const W = motsDe(src); return ws.filter((w) => W.has(w)).length >= 0.7 * ws.length;
+  });
 }
 
 // Une réponse sans outil qu'on peut quand même laisser passer : une simple question pour comprendre (« Pour quel client ? »,
