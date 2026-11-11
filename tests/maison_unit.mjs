@@ -34,4 +34,33 @@ t(!(await m.verifier()).ok, 'vérifier jeton refusé');
 s.haUrl = 'http://homeassistant.local'; t(/https/.test((await m.verifier()).msg), 'http refusé');
 s.haToken = ''; t(!m.on, 'pas relié sans jeton'); r = await m.dire('x'); t(!r.ok && /réglages/.test(r.dire), 'message réglages');
 t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'demande', 'outil');
+// Chauffage de la voiture (module MG iSMART de Home Assistant, 11/11/26) : entité climate (modes off / auto)
+{
+  const appels = [];
+  const etats = [
+    { entity_id: 'climate.mg_zs_vehicle_climate', state: 'off', attributes: { friendly_name: 'MG ZS Vehicle climate', hvac_modes: ['off', 'auto'], min_temp: 17, max_temp: 33, temperature: 22 } },
+    { entity_id: 'switch.mg_zs_charging', state: 'on', attributes: { friendly_name: 'MG ZS Charging' } },
+    { entity_id: 'switch.mg_zs_front_window_defroster_heating', state: 'off', attributes: { friendly_name: 'MG ZS Front window defroster heating' } },
+  ];
+  const f0 = globalThis.fetch;
+  globalThis.fetch = async (url, o) => {
+    if (url.endsWith('/api/states')) return { status: 200, ok: true, json: async () => etats };
+    if (url.endsWith('/api/template')) return { status: 200, ok: true, text: async () => etats.map((e) => `${e.entity_id}||False|False`).join('\n') };
+    if (url.includes('/api/services/')) { appels.push([url.split('/api/services/')[1], JSON.parse(o.body)]); return { status: 200, ok: true, json: async () => [] }; }
+    return { status: 404, ok: false, json: async () => ({}) };
+  };
+  const v = new Maison({ settings: { haUrl: 'https://ha.exemple.ts.net', haToken: 'bon' } });
+  const inv = await v.rafraichir();
+  t(inv.some((e) => e.id === 'climate.mg_zs_vehicle_climate') && !inv.some((e) => /charging/.test(e.id)) && inv.some((e) => /defroster/.test(e.id)), 'voiture : chauffage dans l\'inventaire, interrupteur de charge écarté : ' + inv.map((e) => e.id).join(', '));
+  t(/chauffage et clim/.test(v.texteInventaire()) && /17 à 33 °C/.test(v.texteInventaire()), 'voiture : consigne « chauffage et clim, temperature (17 à 33 °C) »');
+  let r = await v.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'temperature', valeur: '21' });
+  t(r.ok && appels[0][0] === 'climate/set_temperature' && appels[0][1].temperature === 21 && appels[0][1].hvac_mode === 'auto' && /une minute/.test(r.info), 'voiture : « chauffe à 21 » → set_temperature 21, mode auto : ' + JSON.stringify(appels[0]));
+  r = await v.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'temperature', valeur: '40' });
+  t(r.ok && appels[1][1].temperature === 33 && /17 à 33/.test(r.info), 'voiture : 40 °C ramené à 33 (le maximum)');
+  r = await v.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'allumer' });
+  t(r.ok && appels[2][0] === 'climate/set_hvac_mode' && appels[2][1].hvac_mode === 'auto', 'voiture : allumer → mode auto');
+  r = await v.commande({ appareil: 'climate.mg_zs_vehicle_climate', action: 'eteindre' });
+  t(r.ok && appels[3][1].hvac_mode === 'off', 'voiture : éteindre → off');
+  globalThis.fetch = f0;
+}
 console.log(`${ok}/${ok + ko} OK`); process.exit(ko ? 1 : 0);

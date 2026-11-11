@@ -9,14 +9,14 @@
 // l'assistant de Home Assistant (dire()).
 
 const ACTIONS = ['allumer', 'eteindre', 'basculer', 'luminosite', 'volume', 'volume_plus', 'volume_moins', 'muet', 'son',
-  'lecture', 'pause', 'stop', 'suivant', 'precedent', 'appli', 'radio', 'source', 'clignoter'];
+  'lecture', 'pause', 'stop', 'suivant', 'precedent', 'appli', 'radio', 'source', 'clignoter', 'temperature'];
 
 export const MAISON_TOOLS = [
   { name: 'maison_etat', behavior: 'BLOCKING',
     description: "État actuel de la maison : chaque appareil (lumières, télé, enceinte…) avec sa pièce, s'il est allumé, sa luminosité, son volume, ce qu'il joue. À appeler pour répondre à « qu'est-ce qui est allumé ? », « la télé est allumée ? », ou avant d'agir si tu as un doute.",
     parameters: { type: 'OBJECT', properties: { appareils: { type: 'ARRAY', items: { type: 'STRING' }, description: 'identifiants (light.xxx…) ou noms ; vide = toute la maison' } } } },
   { name: 'maison_commande', behavior: 'BLOCKING',
-    description: "Agit sur UN appareil de la maison. Plusieurs appareils (« les lumières du salon ») : un appel par appareil. Actions : allumer, eteindre, basculer, luminosite (valeur 0 à 100), volume (0 à 100), volume_plus / volume_moins (valeur = nombre de crans, 2 par défaut), muet, son (remettre le son), lecture, pause, stop, suivant, precedent, appli (valeur = Netflix, YouTube, Prime Video ou France TV : allume la télé si besoin et ouvre l'appli), radio (valeur = nom de la station, ex. France Inter, Nostalgie, RTL : la diffuse sur l'enceinte ou sur la télé), source (valeur = entrée), clignoter (valeur = nombre de clignotements, 5 par défaut).",
+    description: "Agit sur UN appareil de la maison. Plusieurs appareils (« les lumières du salon ») : un appel par appareil. Actions : allumer, eteindre, basculer, luminosite (valeur 0 à 100), volume (0 à 100), volume_plus / volume_moins (valeur = nombre de crans, 2 par défaut), muet, son (remettre le son), lecture, pause, stop, suivant, precedent, appli (valeur = Netflix, YouTube, Prime Video ou France TV : allume la télé si besoin et ouvre l'appli), radio (valeur = nom de la station, ex. France Inter, Nostalgie, RTL : la diffuse sur l'enceinte ou sur la télé), source (valeur = entrée), clignoter (valeur = nombre de clignotements, 5 par défaut), temperature (valeur en °C : chauffage ou clim, par exemple celle de la voiture ; l'allume aussi). Chauffage ou clim de la voiture (« chauffe la voiture », « mets la clim à 20 ») : la voiture met jusqu'à une minute à démarrer ; ne promets pas qu'il fait déjà chaud.",
     parameters: { type: 'OBJECT', properties: {
       appareil: { type: 'STRING', description: "l'identifiant de l'inventaire (light.grande_lumiere_salon…), ou son nom" },
       action: { type: 'STRING', enum: ACTIONS },
@@ -39,8 +39,8 @@ const APPLIS = [
   [/prime|amazon/, 'https://app.primevideo.com', 'com.amazon.amazonvideo.livingroom', 'Prime Video'],
   [/france ?tv|france ?2|france ?3|francetv|france ?5/, 'https://www.france.tv', 'fr.francetv.pluzz', 'France TV'],
 ];
-const TYPE = { light: 'lumière', switch: 'prise', media_player: 'lecteur', remote: 'télécommande', script: 'raccourci', scene: 'ambiance', cover: 'volet', fan: 'ventilateur', input_boolean: 'interrupteur' };
-const ETAT = { on: 'allumé', off: 'éteint', playing: 'en lecture', paused: 'en pause', idle: 'allumé (rien en cours)', standby: 'en veille', unavailable: 'injoignable', unknown: 'inconnu', buffering: 'chargement', open: 'ouvert', closed: 'fermé' };
+const TYPE = { light: 'lumière', switch: 'prise', media_player: 'lecteur', remote: 'télécommande', script: 'raccourci', scene: 'ambiance', cover: 'volet', fan: 'ventilateur', input_boolean: 'interrupteur', climate: 'chauffage et clim' };
+const ETAT = { on: 'allumé', off: 'éteint', playing: 'en lecture', paused: 'en pause', idle: 'allumé (rien en cours)', standby: 'en veille', unavailable: 'injoignable', unknown: 'inconnu', buffering: 'chargement', open: 'ouvert', closed: 'fermé', auto: 'en marche', heat: 'chauffe', cool: 'refroidit', heat_cool: 'en marche', fan_only: 'ventilation seule', dry: 'déshumidifie' };
 const PLAY_MEDIA = 512;
 const TIMEOUT_MS = 15000;
 // Remarque de Timothée du 30/10/26, 18h02:44 : « l'ordinateur doit être allumé pour commander les appareils » (Home
@@ -96,7 +96,7 @@ export class Maison {
     if (!this.on) return null;
     const [st, tp] = await Promise.all([this._fetch('/api/states', { signal }),
       this._fetch('/api/template', { method: 'POST', signal, text: true, body: { template:
-        "{% set cast = integration_entities('cast') %}{% for s in states if s.domain in ['light','switch','media_player','remote','script','scene','cover','fan','input_boolean'] %}{{ s.entity_id }}|{{ area_name(s.entity_id) or '' }}|{{ is_hidden_entity(s.entity_id) }}|{{ s.entity_id in cast }}\n{% endfor %}" } })]);
+        "{% set cast = integration_entities('cast') %}{% for s in states if s.domain in ['light','switch','media_player','remote','script','scene','cover','fan','input_boolean','climate'] %}{{ s.entity_id }}|{{ area_name(s.entity_id) or '' }}|{{ is_hidden_entity(s.entity_id) }}|{{ s.entity_id in cast }}\n{% endfor %}" } })]);
     if (!st.ok || !Array.isArray(st.json)) throw Object.assign(new Error('états illisibles (' + st.status + ')'), { status: st.status });
     const meta = {};
     for (const l of String(tp.json || '').split('\n')) { const [id, piece, cache, cast] = l.split('|'); if (id) meta[id.trim()] = { piece: (piece || '').trim(), cache: /true/i.test(cache || ''), cast: /true/i.test(cast || '') }; }
@@ -104,6 +104,7 @@ export class Maison {
       const d = e.entity_id.split('.')[0], m = meta[e.entity_id] || {}, nom = (e.attributes || {}).friendly_name || '';
       if (!TYPE[d] || m.cache) return false;
       if (d === 'switch' && /led|automatique|mise a jour|mise à jour|verrou|child/i.test(nom)) return false;
+      if (d === 'switch' && /\bcharging\b|find my car|gateway/i.test(nom)) return false;   // voiture (MG iSMART) : jamais couper la charge ni klaxonner par erreur (« éteins tout »)
       return true;
     }).map((e) => ({ id: e.entity_id, domaine: e.entity_id.split('.')[0], nom: (e.attributes || {}).friendly_name || e.entity_id, piece: (meta[e.entity_id] || {}).piece || '', cast: !!(meta[e.entity_id] || {}).cast, etat: e.state, a: e.attributes || {} }));
     this.invAt = Date.now();
@@ -121,6 +122,10 @@ export class Maison {
       if (detail && a.source) bits.push(`entrée ${a.source}`);
     }
     if (e.domaine === 'remote' && a.current_activity) bits.push(`appli ${a.current_activity}`);
+    if (e.domaine === 'climate') {
+      if (a.temperature != null) bits.push(`réglé à ${a.temperature} °C`);
+      if (a.current_temperature != null) bits.push(`il fait ${a.current_temperature} °C dedans`);
+    }
     return bits.join(', ');
   }
   _possible(e) {
@@ -131,6 +136,7 @@ export class Maison {
     }
     if (e.domaine === 'script' || e.domaine === 'scene') return 'allumer (lance)';
     if (e.domaine === 'remote') return 'appli';
+    if (e.domaine === 'climate') return `allumer, éteindre, temperature (${e.a.min_temp != null ? e.a.min_temp + ' à ' + e.a.max_temp + ' °C' : 'en °C'})`;
     return 'allumer, éteindre';
   }
   // Pour la consigne de Wilson : une ligne par appareil.
@@ -214,6 +220,21 @@ export class Maison {
       if (x && x.state === 'unavailable' && !(await this._relancer(e))) return { ok: false, info: `${e.nom} ne répond pas : la prise a sans doute perdu le Wi-Fi. Il faut la débrancher puis la rebrancher ; si ça revient souvent, elle est trop loin de la box.` };
     }
     try {
+      // Chauffage ou clim (la voiture par le module MG iSMART de Home Assistant, demande du 11/11/26) : la commande part vers
+      // la voiture, qui met jusqu'à une minute à répondre ; on ne vérifie donc pas l'état tout de suite.
+      if (d === 'climate' && ['allumer', 'eteindre', 'basculer', 'temperature'].includes(action)) {
+        const modes = e.a.hvac_modes || [], marche = ['auto', 'heat_cool', 'heat', 'cool'].find((m) => modes.includes(m)) || 'auto';
+        const t = num(valeur, NaN);
+        if (action === 'eteindre' || (action === 'basculer' && e.etat !== 'off')) { await svc('climate', 'set_hvac_mode', { hvac_mode: 'off' }); return { ok: true, info: `${e.nom} : arrêt demandé.` }; }
+        if (Number.isFinite(t)) {
+          const lo = e.a.min_temp != null ? e.a.min_temp : 16, hi = e.a.max_temp != null ? e.a.max_temp : 30, c = Math.max(lo, Math.min(hi, Math.round(t)));
+          await svc('climate', 'set_temperature', { temperature: c, hvac_mode: marche });
+          return { ok: true, info: `${e.nom} : mise en marche demandée, à ${c} °C${c !== Math.round(t) ? ` (${lo} à ${hi} °C possibles)` : ''}. La voiture met jusqu'à une minute à démarrer.` };
+        }
+        if (action === 'temperature') return { ok: false, info: 'Il manque la température : demande-lui combien de degrés.' };
+        await svc('climate', 'set_hvac_mode', { hvac_mode: marche });
+        return { ok: true, info: `${e.nom} : mise en marche demandée${e.a.temperature != null ? `, à ${e.a.temperature} °C` : ''}. La voiture met jusqu'à une minute à démarrer.` };
+      }
       switch (action) {
         case 'allumer':
           if (d === 'script' || d === 'scene') { await svc(d, 'turn_on'); return { ok: true, info: `${e.nom} lancé.` }; }
