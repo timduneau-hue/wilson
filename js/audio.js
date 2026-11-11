@@ -171,6 +171,7 @@ export class AudioIO {
   async setEchoCancel(aec) {
     aec = !!aec;
     if (!this.ctx || !this.node || aec === this.aec) return false;
+    if (this.micPaused) { this.aec = aec; return true; }      // micro fermé (voiture, en veille) : pris en compte à la réouverture
     if (this.src) { try { this.src.disconnect(); } catch (_) {} }
     if (this.stream) this.stream.getTracks().forEach((tr) => tr.stop());
     this.stream = await this._openMic(aec); this.aec = aec; this._watchTrack();

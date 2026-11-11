@@ -26,7 +26,7 @@ STUB = """(() => {
   const md = navigator.mediaDevices, gum0 = md.getUserMedia.bind(md);
   md.enumerateDevices = async () => [
     { deviceId: 'id-speaker', kind: 'audioinput', label: 'Speakerphone', groupId: 'g1' },
-    { deviceId: 'id-bt', kind: 'audioinput', label: 'Bluetooth headset', groupId: 'g3' },
+    ...(window.__bt === false ? [] : [{ deviceId: 'id-bt', kind: 'audioinput', label: 'Bluetooth headset', groupId: 'g3' }]),
     { deviceId: 'cam', kind: 'videoinput', label: 'camera 1, facing front', groupId: 'g4' }].map((d) => ({ ...d, toJSON() { return d; } }));
   md.getUserMedia = async (c) => gum0(c && c.audio ? { audio: true, video: false } : c);
 })();"""
@@ -174,11 +174,11 @@ async def main():
         check('Consigne : un bouton ne s\'affiche que par l\'outil, rappeler l\'outil si le client change (protocole 1.30.0)', "ne dis jamais « j'affiche » sans les appeler" in sp and 'si le client change, rappelle l\'outil' in sp)
         await finir('silence : personne ne lui parle')
         # à la maison (téléphone sans voiture), l'oreille revient si la case est cochée
-        await page.evaluate("wilson._voitureGraceMs = 0; wilson.audio.btIn = false; window.__feeds = 0")
-        await page.wait_for_timeout(1500)
+        await page.evaluate("window.__bt = false; wilson._voitureGraceMs = 0; wilson.audio.btIn = false; window.__feeds = 0")   # la voiture n'est plus là (plus de micro Bluetooth)
+        await page.wait_for_timeout(4000)                 # micro fermé en veille dans la voiture (1.37.0) : rouvert en 2 s au plus
         n2 = await page.evaluate("[wilson._voitureBt, wilson._oreilleMaison, window.__feeds]")
         check('Sans la voiture (case « prenomMaison » cochée), l\'oreille écoute de nouveau', n2[0] is False and n2[1] is True and n2[2] > 0, str(n2))
-        await page.evaluate("wilson.audio.btIn = true; wilson._voitureGraceMs = null")
+        await page.evaluate("window.__bt = true; wilson.audio.btIn = true; wilson._voitureGraceMs = null")
         await page.wait_for_timeout(500)
 
         # ---------- 2. Le bouton d'itinéraire suit le bon client ----------

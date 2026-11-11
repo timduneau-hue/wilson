@@ -92,6 +92,17 @@ async def main():
         check('… aucun micro ouvert par la page (getUserMedia audio)', True not in (await ev('window.__gum || []')), str(await ev('window.__gum || []')))
         check('… « Micro prêt » le dit (micro de l\'appli, micro du téléphone, voiture sur le canal musique)', any('Micro prêt' in l and "micro de l'appli (micro du téléphone, source reconnaissance vocale" in l and 'canal musique' in l for l in logs), str([l for l in logs if 'Micro prêt' in l])[:300])
         check('… pas de « micro de la page »', await ev('wilson.audio.natif && !wilson.audio.stream && !wilson.audio.src'))
+        check('Voiture reconnue (pont) ; caméra éteinte', await ev('wilson._voitureBt && wilson.audio.btIn && wilson.vision === null'))
+        # Remarque du 06/11/26, 08h57 : en veille dans la voiture, le micro de l'appli est arrêté ; rouvert au toucher.
+        ok = await attendre(lambda: ev('wilson.audio.micPaused && window.__mic.stops >= 1'), 5)
+        check('En veille dans la voiture : micro de l\'appli arrêté', ok and has('micro fermé (voiture, en veille'), str(await ev('window.__mic')))
+        n0 = len((await ev('window.__mic'))['starts'])
+        await page.wait_for_timeout(3000)
+        check('… et pas relancé tout seul (« muet » voulu)', len((await ev('window.__mic'))['starts']) == n0 and not has("micro de l'appli muet depuis"))
+
+        await ev("wilson.startConversation('toucher')")
+        await page.wait_for_function("wilson.state === 'conversation' && wilson.brain.open", timeout=10000)
+        check('Toucher : micro de l\'appli rouvert', await attendre(lambda: ev(f'!wilson.audio.micPaused && window.__mic.starts.length > {n0}'), 3))
         f0 = await ev('wilson.audio.ringFilled')
         await page.wait_for_timeout(600)
         f1 = await ev('wilson.audio.ringFilled')
@@ -102,16 +113,10 @@ async def main():
         await ev('window.__mic.amp = 150')
         ok = await attendre(lambda: ev('!wilson.audio.speaking'), 3)
         check('… puis le silence', ok)
-        check('Voiture reconnue (pont) ; caméra éteinte', await ev('wilson._voitureBt && wilson.audio.btIn && wilson.vision === null'))
-
-        await ev("wilson.startConversation('toucher')")
-        await page.wait_for_function("wilson.state === 'conversation' && wilson.brain.open", timeout=10000)
         await ev('window.__mic.amp = 9000')
         ok = await attendre(lambda: asyncio.sleep(0, result=bool(conns and conns[-1]['audio'] > 5)), 4)
         check('Discussion : le son de l\'appli part vers Gemini', ok, str(conns[-1]['audio'] if conns else 'pas de connexion'))
         await ev('window.__mic.amp = 150')
-        await ev("wilson.endConversation('test')")
-        await page.wait_for_timeout(500)
 
         n0 = len((await ev('window.__mic'))['starts'])
         await ev('window.__mic.push = false')
@@ -128,6 +133,9 @@ async def main():
         check('Anti-écho changé : micro de l\'appli relancé avec anti-écho', ch and mic['starts'] == [True], str(mic))
         check('… toujours aucun micro de la page', True not in (await ev('window.__gum || []')) and await ev('!wilson.audio.stream'))
         check('… describe : « anti-écho de l\'appli »', "anti-écho de l'appli" in await ev('wilson.audio.describe()'))
+        s0 = (await ev('window.__mic'))['stops']
+        await ev("wilson.endConversation('test')")
+        check('Fin de la discussion : micro de l\'appli de nouveau arrêté', await attendre(lambda: ev(f'wilson.audio.micPaused && window.__mic.stops > {s0}'), 3))
         bil = await ev('wilson.bilan()')
         check('Onglet État : « micro : celui de l\'appli (téléphone) »', "micro : celui de l'appli (téléphone)" in bil.get('Appli Android', ''), str(bil.get('Appli Android')))
         errs = [l for l in logs if 'PAGEERROR' in l]

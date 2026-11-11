@@ -102,9 +102,15 @@ async def main():
         # retour d'arrière-plan, un petit son seulement (avant : « J'étais en arrière-plan pendant 2 minutes… »).
         check('Au retour après 2 min : noté au journal, un petit son, plus de phrase (une seule voix)', has('Sourd pendant 125 s') and not any('arrière-plan pendant' in str(x) for x in dit), str(dit))
         # 2. micro muet
+        # En veille dans la voiture, le micro est fermé exprès (remarque du 06/11/26, 08h57) : aucune alerte.
+        await page.evaluate("window.__dit = []; wilson._shownAt = performance.now() - 10000; wilson._capAt = performance.now() - 7000; wilson._sourdGarde()")
+        check('En veille dans la voiture, micro fermé exprès : pas d\'alerte « je ne t\'entends plus »', await page.evaluate("wilson.audio.micPaused") and not has('Sourd : micro muet') and not await page.evaluate("window.__dit.length"))
+        # Pendant une discussion : micro muet → il le dit.
+        await page.evaluate("wilson.setState('conversation')")
+        await page.wait_for_timeout(800)
         await page.evaluate("window.__dit = []; wilson._shownAt = performance.now() - 10000; wilson._capAt = performance.now() - 7000; wilson.audio._emit = () => {}; wilson._sourdGarde()")
         dit = await page.evaluate("window.__dit.slice()")
-        check('Micro muet 7 s : il le dit tout de suite', has('Sourd : micro muet') and any('mon micro est coupé' in str(x) for x in dit), str(dit) + str([l for l in logs if 'Sourd' in l]))
+        check('Pendant une discussion, micro muet 7 s : il le dit tout de suite', has('Sourd : micro muet') and any('mon micro est coupé' in str(x) for x in dit), str(dit) + str([l for l in logs if 'Sourd' in l]))
         await page.evaluate("wilson._sourd.at -= 30000; wilson._capAt = performance.now(); wilson._sourdGarde()")
         dit = await page.evaluate("window.__dit.slice()")
         check('Micro revenu : « je t\'écoute »', any('mon micro était coupé' in str(x) for x in dit) and not await page.evaluate("wilson._sourd"), str(dit))
