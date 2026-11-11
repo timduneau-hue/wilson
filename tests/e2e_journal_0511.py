@@ -98,6 +98,10 @@ async def main():
         await page.route(GL, gem)
         # A (bruit de la radio) en cours de vérification 2 s → « non » ; B (« Wilson, tu m'entends ? ») arrive pendant ce temps.
         plan[:] = [('non', 2.0), ('oui', 0)]
+        # (1.37.0 : en veille dans la voiture, le micro est fermé et le réveil se fait au toucher ; ici on garde le micro
+        # ouvert pour vérifier la logique de vérification du nom, toujours utilisée à la maison.)
+        await page.evaluate("wilson._micVoiture = () => {}; wilson.audio.resumeMic()")
+        await page.wait_for_timeout(2500)
         await page.evaluate("wilson._onName({ score: 90.0, limite: 167.3, duree: 1.0 })")
         await page.wait_for_timeout(700)
         await page.evaluate("wilson._onName({ score: 98.2, limite: 167.3, duree: 0.6 })")

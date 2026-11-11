@@ -81,7 +81,7 @@ async def main():
             if a == 'crm_schema': body = {'ok': True, 'texte': 'Tables : commandes (date, client, montant), clients (societe, ville).'}
             elif a == 'crm_requete': body = {'ok': True, 'texte': 'Recherche 1 : 19 clients distincts.'}
             elif a == 'crm_client': body = {'ok': True, 'cle': '["M FAUCHEUX Ludovic","TECMETALU SARL"]', 'societe': 'TECMETALU SARL', 'contact': 'M FAUCHEUX Ludovic', 'ville': 'Janzé', 'adresse': 'Janzé', 'texte': 'Client : TECMETALU SARL, Janzé. CA exercice : 12 482 €.', 'contacts': []}
-            elif a == 'crm_bilan': body = {'ok': True, 'texte': 'Clients actifs ce mois-ci : 19.'}
+            elif a == 'crm_bilan': body = {'ok': True, 'texte': 'Clients actifs du mois : 19.'}   # (format sans « ce mois-ci : N » : la question va à l'analyste, comme le 05/11 ; le calcul direct est dans e2e_journal_1011.py)
             elif a == 'crm_journee': body = {'ok': True, 'rdv': [], 'texte': 'Aucun rendez-vous.'}
             elif a == 'msg_deposer':                                   # comme le script déployé : seulement ces champs-là
                 m = d.get('msg', {}); st['msgs'][m['id']] = {k: m.get(k) for k in ['id', 'pour', 'de', 'texte', 't', 'par']}; st['msgs'][m['id']]['remis'] = None

@@ -2712,7 +2712,11 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     }
     if (call.name === 'crm_question') {
       const qa = String((call.args || {}).question || (call.args || {}).demande || '');
-      if (this.crm.on && actifsSimple(qa)) return this._crmTool0(call, null, 'crm_actifs');   // réponse tout de suite, sans IA
+      // Réponse tout de suite, sans IA, si le bilan du CRM donne les clients actifs (sinon : l'analyste, comme avant).
+      if (this.crm.on && actifsSimple(qa) && this._crmAutorise().ok) {
+        const b = await this.crm.bilan().catch(() => null);
+        if (b && b.ok !== false && actifsDuBilan(b.texte)) return this._crmTool0(call, null, 'crm_actifs');
+      }
       return this._analyse(call);
     }
     // Journal du 05/11/26, 15h53:24-15h53:34 : itineraire demandé 3 fois pour Miroiterie 35 (Google l'annulait quand
