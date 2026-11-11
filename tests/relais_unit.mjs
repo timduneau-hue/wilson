@@ -112,7 +112,7 @@ check('Relais : la question prise est traitée', envoyes.some((x) => x.action ==
 }
 
 // ---------- Le CRM en lecture seule ----------
-check('CRM : 6 outils, tous des lectures', OUTILS.length === 6 && OUTILS.every((o) => /^crm_(schema|requete|client|journee|bilan|produit)$/.test(o.action)));
+check('CRM : 7 outils (6 du CRM + bourse), tous des lectures', OUTILS.length === 7 && OUTILS.every((o) => /^(crm_(schema|requete|client|journee|bilan|produit)|bourse_etat)$/.test(o.action)));
 check('CRM : aucun outil d\'écriture', !OUTILS.some((o) => /noter|tache|brouillon|confirmer|ecrire|ajouter/.test(o.name + o.action)));
 const vus = [];
 const fauxCRM = async (url, o) => { const b = JSON.parse(o.body); vus.push(b); return { status: 200, text: async () => JSON.stringify(b.action === 'crm_client' && b.client === 'inconnu' ? { ok: false, erreur: 'client introuvable' } : { ok: true, texte: `résultat de ${b.action}` }) }; };
@@ -139,7 +139,7 @@ await new Promise((res) => setTimeout(res, 100));
 const reps = lu.trim().split('\n').map((l) => JSON.parse(l));
 check('MCP : initialisation', reps[0].id === 1 && reps[0].result.protocolVersion === '2025-06-18' && reps[0].result.capabilities.tools);
 check('MCP : pas de réponse à une notification', reps.length === 4);
-check('MCP : liste des outils, marqués lecture seule', reps[1].result.tools.length === 6 && reps[1].result.tools.every((t) => t.annotations.readOnlyHint && t.inputSchema));
+check('MCP : liste des outils, marqués lecture seule', reps[1].result.tools.length === 7 && reps[1].result.tools.every((t) => t.annotations.readOnlyHint && t.inputSchema));
 check('MCP : appel d\'un outil, avec le secret du relais', reps.find((x) => x.id === 3).result.content[0].text === 'résultat de crm_bilan' && vus[vus.length - 1].secret === 's'.repeat(40));
 check('MCP : méthode inconnue → erreur propre', reps.find((x) => x.id === 4).error.code === -32601);
 
