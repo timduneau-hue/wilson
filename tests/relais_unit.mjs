@@ -88,6 +88,9 @@ check('Relais : la question prise est traitée', envoyes.some((x) => x.action ==
   const G = new GardeHA({ cfg: {}, vbox: 'VBoxManage', pauseMs: 0, maintenant: () => t, journal: (m) => notes.push(m),
     fetchImpl: async () => { if (!haOk) throw new TypeError('fetch failed'); return { status: 200 }; },
     run: async (a) => { cmds.push(a.join(' ')); return { ok: true, out: a[1] === 'vms' ? '"HomeAssistant" {1234}\n"Autre" {5678}\n' : a[1] === 'runningvms' ? (enRoute ? '"HomeAssistant" {1234}\n' : '') : '', err: '' }; } });
+  haOk = false; enRoute = true;
+  check('HA : jamais vu répondre depuis le PC → on ne touche pas au câble (pont Wi-Fi)', (await G.verifier()) === 'jamais vu' && (t += 5 * 60000, await G.verifier()) === 'jamais vu' && !cmds.some((c) => /controlvm/.test(c)), cmds.join(' | '));
+  G.muet = 0; G.enPanne = 0; cmds.length = 0;
   check('HA : répond → rien à faire', (haOk = true, await G.verifier()) === 'ok' && !cmds.length);
   haOk = false;
   check('HA : muet une fois, machine en route → on attend (pas d\'action sur un raté)', (await G.verifier()) === 'muet' && !cmds.some((c) => /controlvm|startvm/.test(c)), cmds.join(' | '));

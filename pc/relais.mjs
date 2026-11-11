@@ -74,7 +74,8 @@ export function argumentsClaude({ mcp, consigne, modele = 'sonnet', effort = 'hi
 // (« IPv4 addresses for enp0s3: (No address) » : carte en pont sur le Wi-Fi du PC, adresse jamais reprise) ; rebrancher son
 // câble réseau virtuel l'a remise en route tout de suite. Le relais, qui tourne sur ce PC, la surveille : toutes les 5 min,
 // Home Assistant répond-il ? Sinon (et seulement si le PC lui-même a du réseau), au plus une fois par 30 min : machine
-// arrêtée → démarrée sans fenêtre ; machine en route mais muette deux fois de suite → câble virtuel débranché puis rebranché.
+// arrêtée → démarrée sans fenêtre ; machine en route mais muette deux fois de suite → câble virtuel débranché puis rebranché
+// (seulement si le PC l'a déjà vue répondre : la carte en pont sur le Wi-Fi ne se laisse pas toujours joindre par le PC).
 // Tout est noté dans le journal de Wilson (« Maison (PC) : … »). config.json : "ha": false pour couper, ou
 // { "url": "http://…:8123", "vm": "nom de la machine" }.
 export const HA_VERIF_MS = 5 * 60000, HA_ACTION_MS = 30 * 60000;
@@ -86,7 +87,7 @@ export class GardeHA {
     this.vbox = vbox !== undefined ? vbox : [process.env.VBOX_MSI_INSTALL_PATH && path.join(process.env.VBOX_MSI_INSTALL_PATH, 'VBoxManage.exe'),
       'C:\\Program Files\\Oracle\\VirtualBox\\VBoxManage.exe'].filter(Boolean).find((x) => { try { return fs.existsSync(x); } catch (_) { return false; } }) || '';
     this.run = run || ((args) => new Promise((ok) => execFile(this.vbox, args, { timeout: 60000, windowsHide: true }, (e, out, err) => ok({ ok: !e, out: String(out || ''), err: String(err || (e && e.message) || '') }))));
-    this.muet = 0; this.actionAt = 0; this.ip = ''; this.enPanne = 0; this.dit = ''; this.pauseMs = pauseMs;
+    this.muet = 0; this.actionAt = 0; this.ip = ''; this.enPanne = 0; this.dit = ''; this.pauseMs = pauseMs; this.dejaVu = false;
   }
   async repond(url) {
     try { const r = await this.fetch(url + '/manifest.json', { signal: AbortSignal.timeout(8000) }); return r.status > 0; } catch (_) { return false; }
@@ -105,7 +106,7 @@ export class GardeHA {
     if (!ok && this.ip) ok = await this.repond(`http://${this.ip}:8123`);
     if (ok) {
       if (this.enPanne) this.journal(`Home Assistant répond de nouveau (muet depuis ${Math.round((this.maintenant() - this.enPanne) / 60000)} min)`);
-      this.muet = 0; this.enPanne = 0;
+      this.muet = 0; this.enPanne = 0; this.dejaVu = true;
       if (!this.ip) { try { const d = await import('node:dns'); this.ip = (await d.promises.lookup(new URL(this.url).hostname, { family: 4 })).address; } catch (_) {} }
       return 'ok';
     }
@@ -120,6 +121,9 @@ export class GardeHA {
       this.journal(r.ok ? `Home Assistant ne répondait pas : sa machine virtuelle « ${nom} » était arrêtée, je l'ai démarrée` : `machine virtuelle « ${nom} » arrêtée, démarrage impossible : ${r.err.slice(0, 160)}`);
       return r.ok ? 'démarrée' : 'échec';
     }
+    // Le PC ne joint pas toujours la machine en pont sur le Wi-Fi (11/11/26 : refusé depuis le PC alors qu'elle avait son
+    // adresse) : le câble n'est rebranché que si le PC l'a déjà vue répondre (sinon « muet » ne veut rien dire).
+    if (!this.dejaVu) { if (this.dit !== 'jamais vu') { this.dit = 'jamais vu'; this.journal(`Home Assistant ne répond pas au PC (${this.url}) ; sa machine virtuelle tourne : je ne touche à rien tant que je ne l'ai pas vu répondre une fois`); } return 'jamais vu'; }
     if (this.muet < 2) return 'muet';
     this.actionAt = this.maintenant();
     const a = await this.run(['controlvm', nom, 'setlinkstate1', 'off']);
