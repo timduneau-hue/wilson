@@ -80,6 +80,11 @@ const chg = S.mergeInto(local, { apiKey: 'A', logUrl: 'https://script.google.com
 check('Synchronisation : l\'adresse du script avec sa clé n\'est jamais remplacée par celle des réglages communs', /\?k=/.test(local.logUrl) && !chg.includes('logUrl') && local.crm === false, JSON.stringify(local));
 check('… ni envoyée aux autres appareils par la synchronisation', !('logUrl' in S.shareable(local, S.HORS_SYNCHRO)));
 check('… mais gardée dans le lien de copie des réglages (geste volontaire)', 'logUrl' in S.shareable(local));
+{ const m = { haUrl: 'https://ha.exemple.ts.net', haToken: 'secret', voice: 'Aoede', _t: 1 };
+  check('W9 : l’adresse et le jeton Home Assistant ne partent pas par la synchronisation', !('haToken' in S.shareable(m, S.HORS_SYNCHRO)) && !('haUrl' in S.shareable(m, S.HORS_SYNCHRO)) && 'voice' in S.shareable(m, S.HORS_SYNCHRO));
+  const l2 = { haToken: 'local', voice: 'x' }; S.mergeInto(l2, { haToken: 'distant', haUrl: 'https://autre', voice: 'Aoede', _t: 2 }, S.HORS_SYNCHRO);
+  check('W9 : et ceux des autres appareils ne remplacent pas ceux de l’appareil', l2.haToken === 'local' && !l2.haUrl && l2.voice === 'Aoede');
+  check('W9 : mais le lien de copie les garde (geste volontaire)', 'haToken' in S.shareable(m)); }
 
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

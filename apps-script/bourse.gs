@@ -18,8 +18,9 @@ function bourse_(d) {
 }
 
 function bourseEtat_(jours) {
-  if (!BOURSE_FEUILLE || BOURSE_FEUILLE.indexOf('COLLE_ICI') === 0) return { ok: false, erreur: 'le suivi bourse n\'est pas encore relié au script (identifiant à coller dans bourse.gs)' };
-  var ss = SpreadsheetApp.openById(BOURSE_FEUILLE), parts = [];
+  var feuilleId = prop_('BOURSE_FEUILLE', BOURSE_FEUILLE);
+  if (!feuilleId || feuilleId.indexOf('COLLE_ICI') === 0) return { ok: false, erreur: 'le suivi bourse n\'est pas encore relié au script (identifiant dans la propriété BOURSE_FEUILLE du script, ou à coller dans bourse.gs)' };
+  var ss = SpreadsheetApp.openById(feuilleId), parts = [];
   var tz = ss.getSpreadsheetTimeZone() || 'Europe/Paris';
   parts.push('Suivi bourse de Timothée (feuille Google « ' + ss.getName() + ' »), lu le ' + Utilities.formatDate(new Date(), tz, 'dd/MM/yy à HH:mm') + '.');
 

@@ -110,7 +110,7 @@ function alerte_(d) {
       + (d.photo ? '<p><img src="cid:photo" style="max-width:100%"></p>' : '')
       + '<p style="color:#888">Wilson n\'est pas un système d\'alarme : il prévient seulement de ce qu\'il entend ou voit.</p>';
     var o = { to: moi, subject: sujet, htmlBody: html, body: texte + ' — ' + heure + (d.details ? '\n' + d.details : '') };
-    var aussi = String(ALERTES_AUSSI || '').split(/[,;\s]+/).filter(function (x) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x); });
+    var aussi = String(prop_('ALERTES_AUSSI', ALERTES_AUSSI) || '').split(/[,;\s]+/).filter(function (x) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x); });
     if (aussi.length) o.cc = aussi.join(',');
     if (d.photo) { var b = Utilities.newBlob(Utilities.base64Decode(String(d.photo)), 'image/jpeg', 'wilson-' + heure.replace('h', '-') + '.jpg'); o.inlineImages = { photo: b }; o.attachments = [b]; }
     MailApp.sendEmail(o);
@@ -198,7 +198,7 @@ var Q_COLS = ['Id', 'Date', 'Question', 'Pourquoi', 'Réponse', 'Répondu le'];
 var MEM_MAX = 400;   // au-delà, Wilson n'ajoute plus rien (il doit d'abord oublier ce qui ne sert plus)
 
 function onglet_(nom, cols) {
-  var ss = SpreadsheetApp.openById(FEUILLE), sh = ss.getSheetByName(nom);
+  var ss = SpreadsheetApp.openById(prop_('FEUILLE', FEUILLE)), sh = ss.getSheetByName(nom);
   if (!sh) {
     sh = ss.insertSheet(nom);
     sh.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight('bold');

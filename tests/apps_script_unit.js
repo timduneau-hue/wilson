@@ -149,6 +149,9 @@ check('Réglages : rien au départ', rg.ok && rg.reglages === null && rg.t === 0
 let w = JSON.parse(post({ action: 'reglages_ecrire', t: 100, reglages: { voice: 'Charon', city: 'Angers' } }).text);
 rg = JSON.parse(post({ action: 'reglages_lire' }).text);
 check('Réglages : écrits puis relus', w.ok && w.applique && rg.reglages.voice === 'Charon' && rg.t === 100 && locked === 0);
+post({ action: 'reglages_ecrire', t: 101, reglages: { voice: 'Charon', haUrl: 'https://ha.exemple', haToken: 'secret-ha' } });
+rg = JSON.parse(post({ action: 'reglages_lire' }).text);
+check('W9 : adresse et jeton Home Assistant jamais gardés ni rendus par le script', rg.reglages && !('haToken' in rg.reglages) && !('haUrl' in rg.reglages) && rg.reglages.voice === 'Charon', JSON.stringify(rg.reglages));
 w = JSON.parse(post({ action: 'reglages_ecrire', t: 50, reglages: { voice: 'Puck' } }).text);
 rg = JSON.parse(post({ action: 'reglages_lire' }).text);
 check('Réglages : un envoi plus ancien ne remplace pas le plus récent', w.ok && !w.applique && rg.reglages.voice === 'Charon');
@@ -346,8 +349,34 @@ check('Clé : un faux secret du PC est refusé', rien(postSans({ action: 'claude
 vm.runInContext('oublierPC()', ctx);
 check('Claude : oublierPC efface le secret', !('claude_secret' in props));
 check('Clé : PC oublié → un nouveau relais ne peut pas se déclarer sans la clé', rien(postSans({ action: 'claude_prendre', secret: 'y'.repeat(40), max: 0 })) && !('claude_secret' in props));
-const vieille = CLE; vm.runInContext('nouvelleCle()', ctx);
-check('Clé : « nouvelleCle » change la clé, l\'ancienne ne marche plus', props.cle_wilson !== vieille && rien(postSans({ action: 'reglages_lire' }, { k: vieille })) && !rien(postSans({ action: 'reglages_lire' }, { k: props.cle_wilson })));
+const lire = (k) => !rien(postSans({ action: 'reglages_lire' }, { k }));
+// W12 : l'ancienne clé reste valable 48 h après « nouvelleCle »
+const vieille = CLE; vm.runInContext('nouvelleCle()', ctx); const nouvelle = props.cle_wilson;
+check('Clé (W12) : « nouvelleCle » change la clé, la nouvelle marche, l\'ancienne aussi pendant 48 h', nouvelle !== vieille && lire(nouvelle) && lire(vieille));
+fauxTemps += 47 * 3600000; check('Clé (W12) : … encore valable à 47 h', lire(vieille) && lire(nouvelle));
+fauxTemps += 2 * 3600000; check('Clé (W12) : … refusée après 48 h, la nouvelle marche toujours', !lire(vieille) && lire(nouvelle));
+vm.runInContext('nouvelleCle()', ctx); const v2 = nouvelle, n2 = props.cle_wilson;
+check('Clé (W12) : deuxième changement : la clé d\'avant marche encore', lire(v2) && lire(n2) && !lire(vieille));
+vm.runInContext('oublierAncienneCle()', ctx);
+check('Clé (W12) : « oublierAncienneCle » coupe l\'ancienne tout de suite', !lire(v2) && lire(n2) && !('cle_ancienne' in props));
+vm.runInContext('nouvelleCle()', ctx); const v3 = props.cle_ancienne; vm.runInContext('nouvelleCleSansDelai()', ctx);
+check('Clé (W12) : « nouvelleCleSansDelai » (clé volée) : l\'ancienne ne marche plus du tout', !lire(v3) && !('cle_ancienne' in props) && lire(props.cle_wilson));
+// W11 : essais ratés comptés, blocage temporaire
+delete cache.acces_rates; delete cache.acces_bloque; const bonne = props.cle_wilson;
+for (let n = 0; n < 29; n++) postSans({ action: 'reglages_lire' }, { k: 'mauvaise' + n });
+check('Clé (W11) : 29 essais ratés → pas encore de blocage, la bonne clé passe', lire(bonne) && !cache.acces_bloque);
+postSans({ action: 'reglages_lire' }, { k: 'mauvaise-30' });
+check('Clé (W11) : 30e essai raté → blocage : même la bonne clé est refusée un moment', !!cache.acces_bloque && !lire(bonne));
+delete cache.acces_bloque;
+check('Clé (W11) : blocage terminé (cache expiré) → la bonne clé repasse, compteur remis à zéro', lire(bonne) && cache.acces_rates === '0');
+check('Clé (W11) : une bonne clé ne compte pas comme un essai raté', (() => { delete cache.acces_rates; lire(bonne); lire(bonne); return !cache.acces_rates || cache.acces_rates === '0'; })());
+// W13 : identifiants dans les propriétés du script, repli sur les constantes
+check('Propriétés (W13) : propriété absente ou vide → valeur du code', vm.runInContext("prop_('FEUILLE', 'ID_CODE')", ctx) === 'ID_CODE' && (props.FEUILLE = '  ', vm.runInContext("prop_('FEUILLE', 'ID_CODE')", ctx)) === 'ID_CODE');
+props.FEUILLE = 'ID_PROP'; check('Propriétés (W13) : propriété renseignée → elle l\'emporte', vm.runInContext("prop_('FEUILLE', 'ID_CODE')", ctx) === 'ID_PROP'); delete props.FEUILLE;
+props.CRM_URL = 'https://script.google.com/macros/s/AKfycbDEPROPRIETEDEPROPRIETE/exec'; fetched.length = 0; vm.runInContext("crm_({ action: 'crm_schema' })", ctx);
+check('Propriétés (W13) : l\'adresse du CRM vient de la propriété', fetched.length === 1 && fetched[0].url === props.CRM_URL); delete props.CRM_URL;
+vm.runInContext("TAVILY_CLE = 'tvly-DANSLECODE'; FEUILLE = 'COLLE_ICI_X';", ctx); delete props.TAVILY_CLE; logged.length = 0; vm.runInContext('deplacerIdentifiantsVersProprietes()', ctx);
+check('Propriétés (W13) : « deplacerIdentifiantsVersProprietes » copie les vrais identifiants, pas les modèles « COLLE_ICI »', props.TAVILY_CLE === 'tvly-DANSLECODE' && !props.FEUILLE && logged.some((l) => /TAVILY_CLE/.test(String(l))));
 }
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);

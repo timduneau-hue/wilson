@@ -9,7 +9,9 @@ export const LOCAL_ONLY = ['gazeCalib', 'mirror', 'ecoVoice', 'v', 'oreilleSens'
 // 08h41-08h42, la tablette puis le téléphone scannent le nouveau QR code (adresse avec la clé), et aussitôt la
 // synchronisation leur remet l'ancienne adresse des réglages communs (sans la clé) → « clé refusée », plus rien ne passait
 // (CRM, journal, mémoire, Claude). Elle reste dans le lien de copie (« #reglages=… », geste volontaire de Timothée).
-export const HORS_SYNCHRO = [...LOCAL_ONLY, 'logUrl'];
+// Home Assistant (haUrl, haToken) non plus (PLAN-AMELIORATIONS W9) : le jeton donne la main sur la maison ; il ne doit pas
+// dormir dans les propriétés du script. À saisir sur chaque appareil, ou à reprendre par le lien de copie (geste volontaire).
+export const HORS_SYNCHRO = [...LOCAL_ONLY, 'logUrl', 'haUrl', 'haToken'];
 const PULL_MS = 10 * 60000;
 
 export function shareable(s, exclus = LOCAL_ONLY) {

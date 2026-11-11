@@ -22,6 +22,27 @@ var FORMAT_DATE = 'dd/mm/yy hh"h"mm:ss';
 var TAVILY_CLE = 'COLLE_ICI_TA_CLE_TAVILY';      // ta clé Tavily (app.tavily.com, commence par tvly-)
 var CRM_URL = 'COLLE_ICI_L_ADRESSE_DE_TON_CRM';   // l'adresse de ton CRM, celle que tu ouvres d'habitude (finit par /exec)
 
+// W13 : identifiants (FEUILLE, TAVILY_CLE, CRM_URL, BOURSE_FEUILLE, ALERTES_AUSSI) lus d'abord dans les propriétés du script
+// (Paramètres du projet → Propriétés du script), avec repli sur les lignes ci-dessus : le code peut alors être collé ou
+// partagé sans eux. « deplacerIdentifiantsVersProprietes » (à lancer une fois dans l'éditeur) les y copie.
+function prop_(nom, defaut) {
+  var v = PropertiesService.getScriptProperties().getProperty(nom);
+  return v && String(v).trim() ? String(v).trim() : defaut;
+}
+function deplacerIdentifiantsVersProprietes() {
+  var p = PropertiesService.getScriptProperties(), valeurs = {
+    FEUILLE: FEUILLE, TAVILY_CLE: TAVILY_CLE, CRM_URL: CRM_URL,
+    BOURSE_FEUILLE: typeof BOURSE_FEUILLE === 'undefined' ? '' : BOURSE_FEUILLE,    // bourse.gs et famille.gs : autres fichiers du projet
+    ALERTES_AUSSI: typeof ALERTES_AUSSI === 'undefined' ? '' : ALERTES_AUSSI,
+  }, fait = [];
+  Object.keys(valeurs).forEach(function (n) {
+    var v = String(valeurs[n] || '');
+    if (v && v.indexOf('COLLE_ICI') !== 0 && !p.getProperty(n)) { p.setProperty(n, v); fait.push(n); }
+  });
+  Logger.log(fait.length ? 'Copiés dans les propriétés du script : ' + fait.join(', ') + '. Tu peux maintenant effacer leurs valeurs dans le code (laisser les guillemets vides).'
+    : 'Rien à copier (déjà fait, ou valeurs pas encore renseignées dans le code).');
+}
+
 function doPost(e) {
   var d = {};
   try { d = JSON.parse((e && e.postData && e.postData.contents) || '{}') || {}; } catch (err) { return json_({ ok: false, erreur: 'requête illisible' }); }
@@ -45,7 +66,7 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var ss = SpreadsheetApp.openById(FEUILLE);
+    var ss = SpreadsheetApp.openById(prop_('FEUILLE', FEUILLE));
     var v = String(d.version || '');
     var lignes = (d.lignes || []).map(function (l) { return [new Date(l.t), v, String(l.m).slice(0, 3000)]; });
     ajoute_(ss.getSheetByName('Journal'), lignes, 2);   // colonnes 2-3 en texte : « 1.8.0 » n'est pas une date
@@ -89,11 +110,11 @@ function etat_(sh, b, appareil) {
 // Recherche Internet par Tavily : réponse courte + extraits des meilleurs résultats, en français.
 function chercher_(d) {
   var q = String(d.question || '').slice(0, 400);
-  if (!/^tvly-/.test(TAVILY_CLE)) return json_({ ok: false, erreur: 'clé Tavily absente du script' });
+  if (!/^tvly-/.test(prop_('TAVILY_CLE', TAVILY_CLE))) return json_({ ok: false, erreur: 'clé Tavily absente du script' });
   if (!q) return json_({ ok: false, erreur: 'question vide' });
   var r = UrlFetchApp.fetch('https://api.tavily.com/search', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    headers: { Authorization: 'Bearer ' + TAVILY_CLE },
+    headers: { Authorization: 'Bearer ' + prop_('TAVILY_CLE', TAVILY_CLE) },
     payload: JSON.stringify({ query: q, search_depth: 'basic', include_answer: 'basic', max_results: 5, country: 'france', topic: d.actualite ? 'news' : 'general' }),
   });
   var code = r.getResponseCode(), j = {};
@@ -111,14 +132,16 @@ function chercher_(d) {
 // Réglages communs (un seul exemplaire, dans les propriétés du script : invisibles dans la feuille).
 function lireReglages_() {
   var o = JSON.parse(PropertiesService.getScriptProperties().getProperty('reglages') || 'null');
-  return { ok: true, reglages: o ? o.reglages : null, t: o ? o.t : 0 };
+  return { ok: true, reglages: o ? sansSecretsMaison_(o.reglages) : null, t: o ? o.t : 0 };
 }
+// Jamais d'adresse ni de jeton Home Assistant dans les réglages communs (W9) : retirés à la lecture et à l'écriture.
+function sansSecretsMaison_(r) { if (r) { delete r.haUrl; delete r.haToken; } return r; }
 function ecrireReglages_(d) {
   var lock = LockService.getScriptLock(); lock.waitLock(10000);
   try {
     var p = PropertiesService.getScriptProperties(), cur = JSON.parse(p.getProperty('reglages') || 'null'), t = +d.t || 0;
     if (cur && cur.t >= t) return { ok: true, applique: false, t: cur.t };            // déjà plus récent : on garde
-    p.setProperty('reglages', JSON.stringify({ t: t, reglages: d.reglages || {} }));
+    p.setProperty('reglages', JSON.stringify({ t: t, reglages: sansSecretsMaison_(d.reglages || {}) }));
     return { ok: true, applique: true, t: t };
   } finally { lock.releaseLock(); }
 }
@@ -126,8 +149,8 @@ function ecrireReglages_(d) {
 // Question au CRM : transmise à son application Web avec le jeton de Timothée (le CRM vérifie que c'est bien lui).
 // Le jeton doit porter l'autorisation Google Drive : elle est demandée une fois en lançant « essaiCRM » dans l'éditeur.
 function crm_(d) {
-  if (!/^https:\/\/script\.google\.com\/.+\/exec\/?$/.test(CRM_URL)) return { ok: false, erreur: 'adresse du CRM absente du script (ligne CRM_URL)' };
-  var r = UrlFetchApp.fetch(CRM_URL, {
+  if (!/^https:\/\/script\.google\.com\/.+\/exec\/?$/.test(prop_('CRM_URL', CRM_URL))) return { ok: false, erreur: 'adresse du CRM absente du script (propriété CRM_URL du script, ou la ligne CRM_URL)' };
+  var r = UrlFetchApp.fetch(prop_('CRM_URL', CRM_URL), {
     method: 'post', contentType: 'text/plain;charset=utf-8', payload: JSON.stringify(d), muteHttpExceptions: true, followRedirects: true,
     headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
   });
@@ -167,18 +190,50 @@ function memes_(a, b) {   // comparaison en temps constant
   var x = 0; for (var i = 0; i < a.length; i++) x |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return x === 0;
 }
+// W11 : essais ratés comptés dans le cache du script ; au-delà de 30 en 10 minutes, tout est refusé pendant 10 minutes.
+var ESSAIS_MAX = 30, ESSAIS_FENETRE_S = 600, BLOCAGE_S = 600;
+function accesBloque_() { return !!CacheService.getScriptCache().get('acces_bloque'); }
+function noterEssaiRate_() {
+  var lock = LockService.getScriptLock(), ok = false;
+  try { lock.waitLock(3000); ok = true; } catch (err) {}
+  try {
+    var c = CacheService.getScriptCache(), n = (+c.get('acces_rates') || 0) + 1;
+    if (n >= ESSAIS_MAX) { c.put('acces_bloque', '1', BLOCAGE_S); c.put('acces_rates', '0', ESSAIS_FENETRE_S); }
+    else c.put('acces_rates', String(n), ESSAIS_FENETRE_S);
+  } catch (err) {} finally { if (ok) lock.releaseLock(); }
+}
 function accesOk_(e, d) {
-  var cle = cleScript_(), k = (e && e.parameter && e.parameter.k) || (d && d.k) || '';
+  if (accesBloque_()) return false;
+  if (accesVerifie_(e, d)) return true;
+  noterEssaiRate_();
+  return false;
+}
+// W12 : après « nouvelleCle », l'ancienne clé reste acceptée 48 h, le temps de rescanner le QR code sur chaque appareil.
+var DELAI_ANCIENNE_CLE_MS = 48 * 3600 * 1000;
+function accesVerifie_(e, d) {
+  var p = PropertiesService.getScriptProperties(), cle = cleScript_(), k = (e && e.parameter && e.parameter.k) || (d && d.k) || '';
   if (cle.length >= 24 && memes_(k, cle)) return true;
-  var pc = PropertiesService.getScriptProperties().getProperty('claude_secret') || '', s = String((d && d.secret) || '');
+  var vieille = p.getProperty('cle_ancienne') || '', fin = +p.getProperty('cle_ancienne_fin') || 0;
+  if (vieille.length >= 24 && Date.now() < fin && memes_(k, vieille)) return true;
+  var pc = p.getProperty('claude_secret') || '', s = String((d && d.secret) || '');
   return pc.length >= 24 && ACTIONS_DU_PC.test(String((d && d.action) || '')) && memes_(s, pc);
 }
-// À lancer dans l'éditeur : crée (ou change) la clé ; l'ancienne ne marche plus. Le lien est dans « Journal d'exécution ».
-function nouvelleCle() {
+// À lancer dans l'éditeur : crée (ou change) la clé. L'ancienne reste valable 48 h (le temps de rescanner le QR code sur
+// chaque appareil). Clé perdue ou volée : lancer plutôt « nouvelleCleSansDelai ». Le lien est dans « Journal d'exécution ».
+function nouvelleCle() { changerCle_(DELAI_ANCIENNE_CLE_MS); }
+function nouvelleCleSansDelai() { changerCle_(0); }
+function oublierAncienneCle() {
+  var p = PropertiesService.getScriptProperties(); p.deleteProperty('cle_ancienne'); p.deleteProperty('cle_ancienne_fin');
+  Logger.log('Ancienne clé oubliée : seule la clé actuelle fonctionne.');
+}
+function changerCle_(delaiMs) {
+  var p = PropertiesService.getScriptProperties(), avant = cleScript_();
   var cle = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
-  PropertiesService.getScriptProperties().setProperty('cle_wilson', cle);
-  Logger.log('Nouvelle clé créée : l\'ancienne ne marche plus. Ouvre ce lien et montre le QR code à Wilson sur chaque appareil '
-    + '(Réglages → Journal à distance → Scanner le QR code) :');
+  p.setProperty('cle_wilson', cle);
+  if (delaiMs > 0 && avant) { p.setProperty('cle_ancienne', avant); p.setProperty('cle_ancienne_fin', String(Date.now() + delaiMs)); }
+  else { p.deleteProperty('cle_ancienne'); p.deleteProperty('cle_ancienne_fin'); }
+  Logger.log('Nouvelle clé créée : ' + (delaiMs > 0 && avant ? 'l’ancienne marche encore 48 h (« oublierAncienneCle » pour la couper tout de suite). ' : 'l’ancienne ne marche plus. ')
+    + 'Ouvre ce lien et montre le QR code à Wilson sur chaque appareil (Réglages → Journal à distance → Scanner le QR code) :');
   lienQR();
 }
 // À lancer dans l'éditeur : redonne le lien de la page au QR code, sans changer la clé. Ce lien ne se partage pas.
