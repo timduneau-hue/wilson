@@ -135,6 +135,8 @@ async def main():
         check('Journal des échanges', len(log) >= 1 and 'Moustache' in json.dumps(log, ensure_ascii=False), json.dumps(log[-1], ensure_ascii=False)[:120])
 
         # --- Outils bloquants : heure + oubli ---
+        send(conn, {'serverContent': {'inputTranscription': {'text': 'Il est quelle heure ? Et oublie le chat.'}}})   # l'heure seulement s'il la demande (12/11/26)
+        await page.wait_for_timeout(200)
         send(conn, {'toolCall': {'functionCalls': [{'id': 't3', 'name': 'date_et_heure', 'args': {}}, {'id': 't4', 'name': 'oublier', 'args': {'sujet': 'le chat Moustache'}}]}})
         await page.wait_for_timeout(300)
         tr = {x['id']: x for x in conn['tool_responses']}

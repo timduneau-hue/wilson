@@ -147,10 +147,14 @@ async def main():
         check('Appli en arrière-plan : ni retard compté, ni mode allégé', r['lag'] < 50 and not r['light'] and any('arrière-plan ou écran éteint' in l for l in logs), str(r))
 
         # Batterie : signalée une seule fois jusqu'au rebranchement.
-        r = await page.evaluate("""(() => { wilson.battery = { charging: false, level: 0.73 }; wilson._batTold = false;
+        r = await page.evaluate("""(() => { wilson.battery = { charging: false, level: 0.43 }; wilson._batTold = false;
           const a = wilson._system('eco').includes("plus branchée"), b = wilson._system('eco').includes("plus branchée");
           wilson.sensors._emit ? 0 : 0; wilson._batTold = false; return [a, b]; })()""")
         check('Batterie débranchée : signalée une fois, pas à chaque phrase', r == [True, False], str(r))
+        # Journal du 12/11/26, 08h25:50 : « pas branchée, mais la batterie est pleine » : rien à dire au-dessus de 50 %.
+        r = await page.evaluate("""(() => { wilson.battery = { charging: false, level: 1 }; wilson._batTold = false;
+          const a = wilson._system('eco').includes("plus branchée"); wilson._batTold = false; return a; })()""")
+        check('Batterie débranchée mais pleine : rien à signaler (12/11/26)', r is False, str(r))
 
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])

@@ -27,6 +27,8 @@ export function estTravail(t, { clients = [] } = {}) {
 export function estEcriture(t) {
   return /\b(note|notes|noter|enregistre|enregistrer|indique|indiquer|ajoute|ajouter|mets|mettre|marque|marquer|compte[- ]rendu|tache|cree|creer)\b|j'ai vu|je suis passe|je reviens de/.test(plat(t));
 }
+// Un ordre d'écrire (« Enregistre la visite chez… », « note que… ») : jamais une question pour l'analyste ou Claude (lecture seule).
+export function ordreEcriture(t) { return /^\s*(?:(?:tu peux|peux-tu|est-ce que tu peux|il faut|faut) )?(?:m'|me |lui )?(enregistre[rsz]?|note[rsz]?|ajoute[rsz]?|mets|mettre|marque[rsz]?|cree[rsz]?|indique[rsz]?|saisi[rst]?|ecri[rst]|ecrire|redige[rsz]?|fais (un|le) compte[- ]rendu)\b/.test(plat(t)); }
 export function estItineraire(t) { return /\b(itineraire|gps|guide[- ]moi|emmene[- ]moi|amene[- ]moi|conduis[- ]moi|navigation|y aller|route vers|emmenes?|amenes?|me guides?|me guider|waze|google maps|guidage|on y va|allons chez|on va chez|comment aller)\b/.test(plat(t)); }
 // Didascalie lue à voix haute (journal du 09/11/26, 17h52:33 et 17h59:07 : « (Wilson reste silencieux car la conversation
 // ne semble pas s'adresser à lui.) ») : pour se taire, Gemini ne doit rien dire du tout ; l'appli coupe ce qui ressemble à ça.
@@ -37,7 +39,32 @@ export function estDidascalie(t) {
 
 // Il dit qu'il n'a PAS demandé le guidage (journal du 06/11/26, 08h45:13 : « Et pourquoi tu as activé le GPS alors que j'ai pas
 // dit que on allait à Lèbre ? » → Gemini a relancé le guidage, à cause du mot « GPS »).
-export function refusItineraire(t) { return /\b(pas demande|pas dit|pourquoi (tu|t'as|as-tu|il)|arrete|annule|coupe|eteins|enleve|ferme|n'y (vais|va|allons) pas|on y va pas|j'y vais pas|pas besoin|pas la peine|je (ne )?veux pas|non non)\b/.test(plat(t)); }
+// Journal du 12/11/26, 08h45:03 et 08h45:13 : « tu supprimes la destination dans le GPS », « enlève-le » → guidage RELANCÉ
+// (le mot « GPS » suffisait) : supprimer, retirer, effacer, stop sont des refus.
+export function refusItineraire(t) { return /\b(pas demande|pas dit|pourquoi (tu|t'as|as-tu|il)|arrete|annule|coupe|eteins|enleve|enlever|ferme|supprim\w*|retire|retirer|efface|effacer|stop|n'y (vais|va|allons) pas|on y va pas|j'y vais pas|pas besoin|pas la peine|je (ne )?veux pas|j'veux pas|non non|pas (au|le) bon)\b/.test(plat(t)); }
+// Journal du 12/11/26, 08h44:11, 08h45:25, 08h45:53 et 08h46:17 : « je veux aller voir la société FMA », « Je veux aller chez
+// FMA », « tu vas naviguer vers… » puis le nom, « Oui. Oui. » à « tu confirmes que tu veux aller chez… ? » : tous refusés
+// (« il n'a pas demandé d'y aller ») parce que « aller chez », « naviguer » n'étaient pas reconnus, et qu'une phrase qui
+// commence par « je veux pas aller chez Bouygues » était refusée en entier. Une demande d'y aller se dit aussi comme ça.
+const DEMANDE_ALLER = /\b(je veux|je voudrais|j'aimerais|je souhaite|je dois|il faut que j'|on veut|on doit|on va|tu peux m'|peux-tu m'|tu m'emmenes|tu m'amenes|tu vas m'emmener|tu vas m'amener) ?(y )?aller\b|\b(navigue[rsz]?|naviguer|destination|direction)\b/;
+export function estDemandeAller(t) { return estItineraire(t) || DEMANDE_ALLER.test(plat(t)); }
+// Sa phrase parle-t-elle du guidage, et dans quel sens ? true : il veut y aller ; false : il n'en veut pas (ou veut l'arrêter) ;
+// null : rien sur le guidage (un nom seul, « oui »…). C'est sa DERNIÈRE proposition qui compte : « je veux pas aller chez
+// Bouygues, je veux aller chez FMA » est une demande ; « emmène-moi chez X… non, annule » est un refus.
+export function demandeItineraire(t) {
+  const parts = plat(t).split(/[.!?;,]+|\b(?:mais|plutot|par contre)\b/).map((x) => x.trim()).filter(Boolean);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (refusItineraire(parts[i])) return false;
+    if (estDemandeAller(parts[i])) return true;
+  }
+  return null;
+}
+// Il veut arrêter le guidage en cours (« supprime la destination », « enlève le GPS », « arrête la navigation »).
+export function arretGuidage(t) { const x = plat(t); return /\b(arrete|annule|coupe|enleve|ferme|supprim\w*|retire|efface|stop)\b/.test(x) && /\b(gps|guidage|destination|navigation|itineraire|maps|waze|le trajet)\b|\benleve[- ]le\b/.test(x); }
+// Il demande l'heure ou la date (journal du 12/11/26, 08h44:33, 08h45:34 et 08h46:58 : « お », « Voilà. », « Bah, c'est pas
+// trop tôt. » → date_et_heure et « Il est 8h44. » ; Timothée, furieux : « je t'ai pas demandé l'heure »). Aussi quand il faut
+// la date pour un rappel ou un minuteur (« demain », « ce soir », « dans 10 minutes »).
+export function demandeHeure(t) { return /\b(heures?|date|quel jour|on est (le|quel|quand)|sommes[- ]nous|quel mois|quelle annee|aujourd'hui|demain|hier|ce soir|ce matin|cet apres-midi|semaine|rappel\w*|rappelle|minuteur|reveil|dans \d+|combien de temps|quand)\b/.test(plat(t)); }
 // Un simple « oui » (à une proposition de Wilson).
 export function estOui(t) { const x = plat(t).trim(); return x.split(/\s+/).length <= 6 && /^(oui|ouais|ok|okay|d'accord|vas-y|vas y|allez|go|volontiers|bien sur|c'est parti|carrement|parfait|yes)\b/.test(x); }
 
@@ -89,10 +116,12 @@ export function jaroWinkler(a, b) {
 }
 
 // Un nom a-t-il une source (résultats d'outils, ce que Timothée a dit, sa mémoire) ? Chaque partie du nom doit s'y trouver.
+// Journal du 12/11/26, 08h46:03 : « Angibaud » coupé alors que Timothée venait de dire « Ongibaud » (une voyelle de différence,
+// 0,917) : pour un nom de 6 lettres ou plus, 0,90 suffit.
 export function nomAncre(nom, mots) {
   const parts = plat(nom).split(/[-' ]+/).filter((p) => p.length >= 3);
   if (!parts.length) return true;
-  return parts.every((p) => mots.has(p) || [...mots].some((w) => w.length >= 4 && Math.abs(w.length - p.length) <= 2 && jaroWinkler(p, w) >= 0.92));
+  return parts.every((p) => mots.has(p) || [...mots].some((w) => w.length >= 4 && Math.abs(w.length - p.length) <= 2 && jaroWinkler(p, w) >= (p.length >= 6 ? 0.9 : 0.92)));
 }
 export function motsDe(texte) { return new Set(plat(texte).split(/[^a-z0-9]+/).filter((w) => w.length >= 3)); }
 

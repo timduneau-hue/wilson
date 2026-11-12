@@ -108,7 +108,18 @@ export function estOui(txt) { const t = plat(txt); return OUI.test(t) && !NON.te
 // Ressemblance de noms dits à voix haute (même méthode que le CRM, section 53) : pour retrouver une fiche gardée.
 const VIDES = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'l', 'd', 'et', 'a', 'au', 'aux', 'chez', 'sarl', 'sas', 'sasu', 'eurl', 'sa', 'sci', 'snc', 'ets',
   'etablissements', 'etablissement', 'ste', 'societe', 'groupe', 'monsieur', 'madame', 'mr', 'mme', 'm', 'client', 'mon', 'ma']);
-export function mots(s) { return plat(String(s || '').replace(/ç/gi, 's')).replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter((m) => m && !VIDES.has(m)); }
+// Journal du 12/11/26, 08h41:57-08h46:37 : « FMA » menait chez BOUYGUES E ET S FM FRANCE (Verrières-en-Anjou), 5 guidages de
+// suite, parce que le client s'écrit « F M A » (lettres séparées, le « a » ôté comme article) et que « fm » ressemblait à
+// « fma ». Un sigle écrit lettre par lettre compte aussi en un seul mot (« F M A » → « fma »).
+export function mots(s) {
+  const tous = plat(String(s || '').replace(/ç/gi, 's')).replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  const out = tous.filter((m) => !VIDES.has(m));
+  let run = [];
+  const fin = () => { if (run.length >= 2) out.push(run.join('')); run = []; };
+  for (const m of tous) { if (/^[a-z]$/.test(m)) run.push(m); else fin(); }
+  fin();
+  return out;
+}
 export function phon(m) {
   let s = plat(String(m || '').replace(/ç/gi, 's')).replace(/[^a-z0-9]/g, '');
   if (!s || /^\d+$/.test(s)) return s;
@@ -140,6 +151,9 @@ export function sim(a, b) {
   if (/^\d+$/.test(a) || /^\d+$/.test(b)) return 0;
   const pa = phon(a), pb = phon(b);
   if (a.length >= 3 && b.length >= 3 && pa && pa === pb) return 0.93;
+  // mots très courts (sigles) : « fm » n'est pas « fma » ; 3 lettres : jamais plus de 0,85
+  if (Math.min(a.length, b.length) <= 2) return 0;
+  if (Math.min(a.length, b.length) === 3) return Math.min(0.85, jw(a, b));
   let s = jw(a, b);
   if (Math.min(a.length, b.length) >= 4 && (a.startsWith(b) || b.startsWith(a))) s = Math.max(s, 0.86);
   return pa.length >= 4 && pb.length >= 4 ? Math.max(s, jw(pa, pb) * 0.93) : s;
@@ -160,6 +174,22 @@ export function ressemblance(q, c) {
   return pds ? tot / pds : 0;
 }
 
+// Le nom dit se retrouve-t-il dans la fiche (texte compris : un contact cité dans un compte rendu) ?
+function dansFiche(q, e) {
+  const qm = mots(q).filter((m) => m.length >= 3); if (!qm.length) return false;
+  const W = mots(`${e.societe || ''} ${e.contact || ''} ${(e.contacts || []).map((c) => c.nom).join(' ')} ${e.ville || ''} ${e.texte || ''}`);
+  return qm.every((m) => W.some((w) => sim(m, w) >= 0.9));
+}
+// Un sigle dit d'un bloc (« FMA », « SMB ») : on le réessaie écrit lettre par lettre (« F M A »), comme dans le CRM.
+export function sigleEspace(q) { const t = String(q || '').trim(); return /^[A-Za-z]{2,5}$/.test(t) && !/[aeiouy]{2}/i.test(t) ? t.toUpperCase().split('').join(' ') : ''; }
+// Le contact de la fiche qui correspond à ce nom (« Yoann Rousseau » chez F M A), ou null.
+export function contactNomme(e, nom) {
+  if (!e || !nom) return null;
+  const L = [...(e.contact ? [{ nom: e.contact }] : []), ...(e.contacts || [])].filter((c) => c && c.nom);
+  const best = L.map((c) => ({ c, s: ressemblance(nom, { societe: '', noms: [c.nom] }) })).sort((a, b) => b.s - a.s)[0];
+  return best && best.s >= 0.8 ? best.c : null;
+}
+
 export const CRM_TOOLS = [
   { name: 'crm_client', behavior: 'BLOCKING',
     description: "Tout ce que le CRM de Timothée sait d'un client (société ou contact, même mal prononcé, avec la ville si elle aide) : contacts et téléphones, prochain rendez-vous, dernières visites, comptes rendus, tâches, chiffre d'affaires (exercice, mois en cours, comparaison avec l'an dernier), commandes, devis, articles achetés, réachats en retard, achats chez les concurrents, articles à proposer. Avant de l'appeler, dis « Je regarde dans le CRM… ».",
@@ -177,7 +207,7 @@ export const CRM_TOOLS = [
     parameters: { type: 'OBJECT', properties: { question: { type: 'STRING', description: 'la question complète, avec le nom du client et la période s\'il les a dits (ou le client dont vous parlez)' } }, required: ['question'] } },
   { name: 'itineraire', behavior: 'BLOCKING',
     description: "Aller chez un client : affiche un grand bouton qui ouvre le GPS (Google Maps ou Waze) avec l'adresse de sa fiche ; Timothée appuie dessus. SEULEMENT quand il demande d'y aller (« emmène-moi », « guide-moi », « lance le GPS », « l'itinéraire ») : jamais parce qu'il cite un client.",
-    parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou le contact' } }, required: ['client'] } },
+    parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou le contact, tel qu\'il l\'a dit (si le client trouvé avant n\'était pas le bon, le nom exact qu\'il a confirmé)' } }, required: ['client'] } },
   { name: 'appeler', behavior: 'BLOCKING',
     description: "Appeler un client : affiche sur l'écran un grand bouton vert avec son numéro ; Timothée appuie dessus pour lancer l'appel.",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou le contact' }, contact: { type: 'STRING', description: 'la personne à appeler, si elle est précisée' } }, required: ['client'] } },
@@ -186,6 +216,7 @@ export const CRM_TOOLS = [
     parameters: { type: 'OBJECT', properties: {
       type: { type: 'STRING', enum: ['tache', 'compte_rendu', 'rdv', 'note'] },
       client: { type: 'STRING', description: 'le client concerné (vide pour une tâche personnelle)' },
+      contact: { type: 'STRING', description: 'la personne vue ou appelée, s\'il la nomme (« Yoann Rousseau ») : la fiche porte alors son nom' },
       texte: { type: 'STRING', description: 'ce qu\'il a dit, mis au propre sans rien ajouter (vide pour un simple rendez-vous)' },
       date: { type: 'STRING', description: "tel qu'il l'a dit : « demain », « jeudi », « le 30 », « 30/10 »… (tâche : jour du rappel ; compte rendu : jour de l'échange, vide = aujourd'hui ; rdv : jour du rendez-vous)" },
       heure: { type: 'STRING', description: 'rendez-vous : « 10h00 »' },
@@ -272,7 +303,11 @@ export class Crm {
     const net = cle ? client : nomNet(client);
     if (net !== String(client || '').replace(/\s+/g, ' ').trim()) this.log(`nom cherché : « ${net} » (dit : « ${client} »)`);
     const hit = cle ? this.cache.get(cle) : this._fromCache(net);
-    if (hit && Date.now() - hit.at < CACHE_MS) { this.last = hit; this.lastAt = Date.now(); this.log(`fiche gardée : ${hit.societe}`); return { ok: true, e: hit, cached: true }; }
+    if (hit && Date.now() - hit.at < CACHE_MS) {
+      this.last = hit; this.lastAt = Date.now(); this.log(`fiche gardée : ${hit.societe}`);
+      const c = cle ? null : contactNomme(hit, net); if (c && c.nom !== hit.contact) this.contactDit = { cle: hit.cle, c, at: Date.now() };
+      return { ok: true, e: hit, cached: true };
+    }
     let r;
     try { r = await this.ask(cle ? { action: 'crm_client', cle } : { action: 'crm_client', client: net }, signal); }
     catch (e) {
@@ -294,9 +329,26 @@ export class Crm {
       }
       return { ok: true, texte: r.texte, choix: r.choix || [] };
     }
-    const e = this._keep(r);
+    let e = this._keep(r);
+    if (cle) return { ok: true, e, approx: false };
+    let s = ressemblance(net, e);
+    // Journal du 12/11/26 : « FMA » → BOUYGUES E ET S FM FRANCE. Le CRM rend parfois un client qui ne ressemble pas du tout
+    // au nom dit : un sigle est réessayé écrit lettre par lettre (« F M A ») ; sinon Wilson ne s'en sert pas sans le faire
+    // confirmer (ni guidage, ni écriture, ni appel).
+    const sig = s < 0.5 && !dansFiche(net, e) ? sigleEspace(net) : '';
+    if (sig) {
+      const r2 = await this.ask({ action: 'crm_client', client: sig }, signal).catch(() => null);
+      if (r2 && r2.ok && r2.cle && r2.cle !== e.cle && ressemblance(net, r2) > s) {
+        this.log(`« ${net} » → ${e.societe} ne ressemblait pas : réessayé en « ${sig} » → ${r2.societe}`);
+        e = this._keep(r2); s = ressemblance(net, e);
+      }
+    }
+    const faible = s < 0.5 && !dansFiche(net, e);
+    if (faible) this.log(`« ${net} » → ${e.societe} : ne ressemble pas au nom dit, à faire confirmer`, true);
+    const c = contactNomme(e, net);
+    if (c && c.nom !== e.contact) this.contactDit = { cle: e.cle, c, at: Date.now() };
     // nom entendu loin du client trouvé (son mauvais, nom écorché) : Wilson cite d'abord le client, pour qu'on le corrige (C10)
-    return { ok: true, e, approx: !cle && ressemblance(net, e) < 0.9 };
+    return { ok: true, e, approx: s < 0.9, faible };
   }
   async agenda(jour, signal, { frais = false } = {}) {
     const d = parseJour(jour || "aujourd'hui") || new Date();
@@ -352,6 +404,8 @@ export class Crm {
     const r = await this.client({ client }, signal);
     if (!r.ok) return { texte: `Le CRM ne répond pas : ${r.erreur || 'erreur'}. Dis-le simplement.` };
     if (!r.e) return { texte: r.texte || 'Client introuvable.', choix: r.choix };
+    // Client qui ne ressemble pas au nom dit (« FMA » → BOUYGUES…, journal du 12/11/26) : rien ne part sans sa confirmation.
+    if (r.faible) return { texte: `ATTENTION, rien n'est fait : pour « ${client} », le CRM ne trouve que ${r.e.societe}${r.e.ville ? ' (' + r.e.ville + ')' : ''}, qui ne ressemble pas à ce nom. Dis-le-lui en une phrase et demande le nom d'un contact ou la ville. S'il confirme que c'est bien ${r.e.societe}, rappelle l'outil avec exactement « ${r.e.societe} ».`, faible: true };
     return { e: r.e };
   }
 
@@ -364,11 +418,29 @@ export class Crm {
       if (!r.e) return { ok: false, dire: r.texte };
       e = r.e;
     }
-    const texte = String(a.texte || '').trim();
+    let texte = String(a.texte || '').trim();
     if (type !== 'rdv' && !texte) return { ok: false, dire: 'Il manque le texte à noter : demande-lui ce qu\'il veut noter.' };
+    // Journal du 12/11/26, 09h53-09h57 : compte rendu « pour Yoann Rousseau » préparé et affiché au nom de M ANGIBAULT Mathieu
+    // (le contact principal de F M A), quatre fois, et enregistré ainsi. La personne nommée (contact, ou nom donné comme
+    // client) porte la fiche ; sans nom, celle dont on vient de parler chez ce client (30 min).
+    let c = null;
+    if (e) {
+      const nomDit = String(a.contact || '').trim() || (this._isLast(a.client) ? '' : nomNet(a.client));
+      c = nomDit ? contactNomme(e, nomDit) : null;
+      if (!c && nomDit && a.contact) c = { nom: nomDit };                                  // nommé, mais pas dans la fiche
+      if (!c && nomDit && !a.contact && ressemblance(nomDit, { societe: e.societe, noms: [] }) < 0.6 && dansFiche(nomDit, e) && mots(nomDit).length >= 2) c = { nom: nomDit };
+      const D = this.contactDit;
+      if (!c && !String(a.contact || '').trim() && D && D.cle === e.cle && Date.now() - D.at < 30 * 60000 && (!nomDit || ressemblance(nomDit, { societe: e.societe, noms: [] }) >= 0.6 || this._isLast(a.client))) c = D.c;
+      if (c && c.nom !== e.contact) {
+        this.contactDit = { cle: e.cle, c, at: Date.now() };
+        const nm = mots(c.nom).filter((m) => m.length >= 3);
+        if (nm.length && !nm.every((m) => mots(texte).includes(m))) texte = /^visite\b\.?/i.test(texte) ? texte.replace(/^visite\b\.?\s*/i, `Visite avec ${c.nom}. `) : `Avec ${c.nom}. ${texte}`.trim();
+      }
+    }
+    const contact = c ? c.nom : e ? e.contact : '';
     // at / turn : moment et tour de parole de la préparation ; seul un « oui » dit APRÈS compte (verrou C2)
-    const p = { type, cle: e ? e.cle : '', societe: e ? e.societe : '', contact: e ? e.contact : '', texte, at: performance.now(), atMs: Date.now(), turn: this.app._turnN || 0 };
-    const qui = e ? `${e.societe}${e.contact ? ' (' + e.contact + ')' : ''}` : '';
+    const p = { type, cle: e ? (c && c.cle) || e.cle : '', societe: e ? e.societe : '', contact, texte, at: performance.now(), atMs: Date.now(), turn: this.app._turnN || 0 };
+    const qui = e ? `${e.societe}${contact ? ' (' + contact + ')' : ''}` : '';
     if (type === 'tache') {
       // sans jour dit, on demande (avant : rappel mis à aujourd'hui d'office, journal du 25/10/26)
       if (!String(a.date || '').trim()) return { ok: false, dire: 'Il manque le jour du rappel : demande-lui pour quand (aujourd\'hui, demain, un jour précis), sans rien préparer.' };
@@ -393,7 +465,7 @@ export class Crm {
     this.log(`à confirmer : ${p.relu}`, true);
     if (this.app.showConfirm) this.app.showConfirm(p);
     return { ok: true, pending: p,
-      dire: `Rien n'est encore écrit. Relis-lui exactement : « ${p.relu} » puis demande « Je l'enregistre ? ». N'appelle crm_confirmer qu'après son « oui » ; s'il corrige, rappelle crm_noter.` };
+      dire: `Rien n'est encore écrit. Relis-lui exactement : « ${p.relu} » puis demande « Je l'enregistre ? ». N'appelle crm_confirmer qu'après son « oui » ; s'il corrige, rappelle crm_noter (pour une autre personne du même client : paramètre contact).${this.app.showConfirm ? ' Cette fiche est AFFICHÉE à l\'écran, avec les boutons « Oui, enregistre » et « Non » : s\'il demande de la voir ou de l\'afficher, dis-lui qu\'elle est à l\'écran.' : ''}` };
   }
 
   // Verrou : y a-t-il un « oui » de Timothée APRÈS la préparation ? heard : [{ t, text, n }] (ce qu'il a dit, horodaté ;
@@ -420,7 +492,7 @@ export class Crm {
     const id = p.id || (p.id = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
     const payload = p.type === 'tache'
       ? { action: 'crm_tache', id, texte: p.texte, date: p.date, cle: p.cle, confirme: true }
-      : { action: 'crm_brouillon', id, type: p.type, cle: p.cle, texte: p.texte, date: p.date, heure: p.heure || '', echange: p.echange || '', confirme: true };
+      : { action: 'crm_brouillon', id, type: p.type, cle: p.cle, texte: p.texte, date: p.date, heure: p.heure || '', echange: p.echange || '', contact: p.contact || '', confirme: true };
     let r;
     try { r = await this.ask(payload, signal); }
     catch (e) {
