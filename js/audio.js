@@ -380,6 +380,7 @@ export class AudioIO {
       if (this.nextTime > 0 && this.sources.length) this.trous = (this.trous || 0) + 1;   // trou en pleine réponse (réseau en retard)
       this.nextTime = now + (this.mobile ? 0.18 : 0.06);
     }
+    src._debut = this.nextTime; src._duree = buf.duration;
     src.start(this.nextTime); this.nextTime += buf.duration; this.playedSec += buf.duration;
     this.sources.push(src);
     src.onended = () => {
@@ -388,6 +389,19 @@ export class AudioIO {
     };
   }
   get playing() { return this.sources.length > 0; }
+  // Coupe la FIN de ce qui reste à jouer (les `sec` dernières secondes, si elles ne sont pas encore commencées) : la question
+  // de trop à la fin d'une réponse (« Autre chose ? »). Ce qui est en train d'être dit n'est jamais coupé au milieu d'un mot
+  // déjà lancé. Rend le nombre de secondes retirées.
+  couperFin(sec) {
+    const now = this.ctx.currentTime, depuis = Math.max(this.nextTime - sec, now + 0.05);
+    const aOter = this.sources.filter((s) => s._debut != null && s._debut >= depuis);
+    if (!aOter.length) return 0;
+    let debut = this.nextTime, ote = 0;
+    for (const s of aOter) { try { s.onended = null; s.stop(); } catch (_) {} debut = Math.min(debut, s._debut); ote += s._duree || 0; }
+    this.sources = this.sources.filter((s) => !aOter.includes(s)); this.nextTime = debut; this.playedSec = Math.max(0, this.playedSec - ote);
+    if (!this.sources.length) this._emit('drained');
+    return ote;
+  }
   // Silence immédiat (on lui coupe la parole).
   flush() {
     for (const s of this.sources) { try { s.onended = null; s.stop(); } catch (_) {} }

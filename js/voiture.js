@@ -27,7 +27,82 @@ export function estTravail(t, { clients = [] } = {}) {
 export function estEcriture(t) {
   return /\b(note|notes|noter|enregistre|enregistrer|indique|indiquer|ajoute|ajouter|mets|mettre|marque|marquer|compte[- ]rendu|tache|cree|creer)\b|j'ai vu|je suis passe|je reviens de/.test(plat(t));
 }
-export function estItineraire(t) { return /\b(itineraire|gps|guide[- ]moi|emmene[- ]moi|amene[- ]moi|conduis[- ]moi|navigation|y aller|route vers|emmenes?|amenes?|me guides?|me guider|waze|google maps|guidage|on y va|allons chez|on va chez|comment aller)\b/.test(plat(t)); }
+export function estItineraire(t) {
+  const x = plat(t);
+  // Journal du 12/11/26, 08h43-08h46 : « Je veux aller chez … », « tu vas naviguer vers… », « définis la destination dans le
+  // GPS » n'étaient pas reconnus comme des demandes d'y aller.
+  return /\b(itineraire|gps|guide[- ]moi|emmene[- ]moi|amene[- ]moi|conduis[- ]moi|navigation|y aller|route vers|emmenes?|amenes?|me guides?|me guider|waze|google maps|guidage|on y va|allons chez|on va chez|comment aller|destination|navigue[sz]?|naviguer)\b/.test(x)
+    || /\b(je (veux|voudrais|souhaite|dois|voulais)|j'aimerais|il faut que j'aille|faut que j'aille)\b[^.!?]{0,12}\b(aller|me rendre|passer|aille)\b[^.!?]{0,8}\b(chez|a|au|aux|vers|voir)\b/.test(x)
+    || /\bfaut que j'aille (chez|a|au|aux|vers|voir)\b/.test(x);
+}
+// Il demande d'ARRÊTER le guidage (journal du 12/11/26, 08h45:08 et 08h45:17 : « tu supprimes la destination dans le GPS »,
+// « enlève-le » → Wilson a RELANCÉ le guidage, deux fois). Une page ne peut pas arrêter Maps : il le dit, et ne lance rien.
+export function estArretGuidage(t) {
+  const x = plat(t);
+  return /\b(supprime[sz]?|enleve[sz]?|arrete[sz]?|annule[sz]?|coupe[sz]?|stoppe[sz]?|vire[sz]?|retire[sz]?|efface[sz]?|ferme[sz]?|desactive[sz]?|eteins|stop)\b[^.!?]{0,40}\b(gps|guidage|navigation|itineraire|destination|trajet|maps|waze)\b/.test(x)
+    || /\b(gps|guidage|navigation|itineraire|destination)\b[^.!?]{0,25}\b(arrete[sz]?|coupe[sz]?|supprime[sz]?|enleve[sz]?|stop)\b/.test(x)
+    || /\b(plus|pas) besoin (du|de) (gps|guidage|l'itineraire)\b/.test(x);
+}
+// Dans ce qu'il vient de dire, demande-t-il d'y aller ? 'oui', 'non' (reproche, refus), 'arret' (arrêter le guidage) ou ''
+// (il n'en parle pas). Morceau par morceau, le dernier l'emporte : « Je veux pas aller chez A. Je veux aller chez B. » = oui
+// (08h45:25, refusé à tort : « Pardon, je ne lance rien »).
+const VOEU = /\b(je (veux|voudrais|souhaite|dois|voulais)|j'aimerais|faut que j'aille|emmene[- ]moi|amene[- ]moi|guide[- ]moi|conduis[- ]moi|lance|mets|met|definis?|on y va|allons|vas-y)\b/;
+export function guidageDit(t) {
+  if (estArretGuidage(t)) return 'arret';
+  const morceaux = plat(t).split(/[.!?;]+|,\s*|\bmais\b|\bplutot\b|\bpar contre\b/).map((c) => c.trim()).filter(Boolean);
+  const vus = morceaux.map((c) => {
+    const neg = refusItineraire(c) || /\b(pas|plus|jamais)\b/.test(c);
+    if (estItineraire(c)) return neg ? 'non' : VOEU.test(c) ? 'OUI' : 'oui';
+    return neg && /\b(aller|emmen|amen|guid|navig|gps|chez)/.test(c) ? 'non' : '';
+  }).filter(Boolean);
+  if (!vus.length) return refusItineraire(t) ? 'non' : '';
+  if (!vus.includes('non') && !vus.includes('OUI') && refusItineraire(t)) return 'non';       // « là, tu m'emmènes chez A, je veux pas ! »
+  // un reproche dans la phrase : « là, tu m'emmènes chez A » est un constat, pas une demande ; seul un vœu net compte
+  const d = vus.includes('non') ? vus.filter((v) => v !== 'oui').pop() : vus[vus.length - 1];
+  return d === 'non' ? 'non' : 'oui';
+}
+// Le client demandé à l'outil est-il celui dont il ne veut PAS ? (« je veux pas aller chez A, je veux aller chez B » : A refusé)
+export function clientRefuse(t, client) {
+  const mots = plat(client).split(/[^a-z0-9]+/).filter((m) => m.length >= 3); if (!mots.length) return false;
+  const morceaux = plat(t).split(/[.!?;]+|,\s*|\bmais\b|\bplutot\b|\bpar contre\b/).map((c) => c.trim()).filter(Boolean);
+  const dans = (c) => mots.some((m) => new RegExp('\\b' + m + '\\b').test(c));
+  const non = morceaux.filter((c) => (refusItineraire(c) || /\b(pas|plus)\b/.test(c)) && dans(c)), oui = morceaux.filter((c) => !(refusItineraire(c) || /\b(pas|plus)\b/.test(c)) && VOEU.test(c) && dans(c));
+  return non.length > 0 && !oui.length;
+}
+// Ce que Wilson vient de dire propose-t-il d'y aller ? (son « oui » vaut alors demande)
+export function proposeGuidage(t) { return /\b(guid\w*|itineraire|gps|y aller|emmen\w*|on y va|navigu\w*|aller chez|destination|te conduire)\b/.test(plat(t)) && /\?/.test(String(t || '')); }
+
+// A-t-il demandé l'heure ou la date (ou quelque chose qui en a besoin : rappel, minuteur, agenda) ? Journal du 12/11/26,
+// 08h44-08h47 : « Voilà. », « Bah, c'est pas trop tôt. » → date_et_heure → « Il est 8h46. », cinq fois ; « je m'en fous de
+// l'heure, arrête de me dire l'heure à chaque fois ».
+export function demandeHeure(t) {
+  const x = plat(t);
+  if (/\b(m'en fous|me fous|pas demande|arrete|t'ai rien demande)\b[^.!?]{0,40}\b(heure|date)\b/.test(x)) return false;
+  return /\b(heure|quel jour|quelle date|la date|on est (le )?(quel|combien)|quand est-ce|dans combien de temps|en retard|en avance|rappel|rappelle|minuteur|agenda|rendez-vous|rdv|tache|demain|ce soir|ce matin|cet apres-midi|aujourd'hui|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|semaine|mois)\b/.test(x);
+}
+
+// Une simple réaction (« Voilà. », « Bah, c'est pas trop tôt. », « Ah, tu bugues. », un bruit mal transcrit) : même juste
+// après une demande de travail, ce n'en est pas une — elle ne verrouille pas le tour. (Avant : verrou → il fallait un outil
+// → date_et_heure → « Il est 8h44 ».) Une question, un chiffre, un nom propre, un mot du métier ou une suite (« et lui ? »,
+// « son numéro ») restent du travail.
+export function estReaction(t) {
+  const brut = String(t || ''), x = plat(brut).replace(/[^a-z0-9' ?-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!x) return true;
+  if (MOTS_TRAVAIL.test(x) || RACINES_TRAVAIL.test(x) || /\d/.test(x)) return false;
+  if (/\b(tu bugues?|tu beugues?|ca (ne )?va pas|c'est nul|n'importe quoi|m'en fous|t'ai pas demande|pas demande|c'est pas (trop tot|possible|vrai|ca)|bordel|putain|merde|laisse tomber|tant pis|c'est quoi ce bazar|tu m'ecoutes pas|tu comprends rien)\b/.test(x)) return true;
+  if (/\?/.test(brut) || x.split(' ').length > 4 || nomsPropres(brut).length) return false;
+  return !/^(et|qui|que|quoi|quand|ou|combien|comment|pourquoi|quel|quelle|quels|quelles|est-ce|c'est quoi|son|sa|ses|leur|leurs|lui|elle|eux|hier|demain|pareil|meme chose|aussi|pour|avec|chez)\b/.test(x);
+}
+
+// Il finit par « Autre chose ? », « Tu as besoin d'autre chose ? », « Tu as une autre question ? » : Timothée l'a interdit
+// le 05/11 (19h23, 23h58), le 06/11 (08h47), et c'est revenu le 12/11 (08h47, 09h56, 09h57) malgré la consigne. L'appli
+// coupe cette fin de phrase elle-même. Rend la question de trop (texte), ou ''.
+export function finDeTrop(t) {
+  const x = String(t || '').trim(), m = /(?:^|[.!?…:;»"]\s*)([^.!?…]{0,70}\?)\s*$/.exec(x);
+  if (!m) return '';
+  const q = plat(m[1]);
+  return /\b(autre chose|quelque chose d'autre|autres? questions?|autre demande|besoin d'autre|d'autres? (questions?|choses?)|que puis-je faire d'autre|je peux (faire|t'aider)[^?]{0,20}(d'autre|autre chose)|encore besoin de moi)\b/.test(q) ? m[1].trim() : '';
+}
 // Didascalie lue à voix haute (journal du 09/11/26, 17h52:33 et 17h59:07 : « (Wilson reste silencieux car la conversation
 // ne semble pas s'adresser à lui.) ») : pour se taire, Gemini ne doit rien dire du tout ; l'appli coupe ce qui ressemble à ça.
 export function estDidascalie(t) {
@@ -144,3 +219,15 @@ export function questionSansFait(t, mots) {
   if (/\d/.test(x) || affirmeFait(x) || annonceRecherche(x)) return false;
   return nomsInventes(x, mots).length === 0;
 }
+
+// Une question sur les CONTACTS d'un client (qui, fonction, numéro, adresse) : l'annuaire gardé sur l'appareil y répond tout
+// de suite, sans IA (journal du 12/11/26, 09h26 : « qui est le magasinier de … ? » → 46 s par Claude ; remarque du 10/11,
+// 08h51 : « l'accès aux données du CRM devrait être possible sans passer par l'IA »). Pas une question sur l'activité.
+export function questionContacts(t) {
+  const x = plat(t);
+  if (/\b(commandes?|devis|chiffre|ca|visites?|vu|vus|dernier|derniere|dernieres|achete|achat|achats|comptes?[- ]rendus?|taches?|rendez-vous|rdv|quand|combien|sujets?|briefing|mails?|e-mails?|relance|objectif)\b/.test(x)) return false;
+  return /\b(qui (est|sont|s'occupe|gere|fait)|c'est qui|comment s'appelle|le nom d|numero|telephone|portable|adresse|ou (est|sont|se trouve)|quelle ville|contacts?|interlocuteurs?|magasinier|acheteu\w*|dirigeant\w*|gerant\w*|patron\w*|responsable|comptable|secretaire|fonction)\b/.test(x);
+}
+// crm_question avec une écriture (journal du 12/11/26, 09h55 : « Enregistre la visite chez … » envoyé à Claude, en lecture
+// seule : « je ne peux pas enregistrer »). Une demande d'écrire n'est jamais une question.
+export function ordreEcriture(t) { return /^\s*(enregistre[rsz]?|note[rsz]?|ajoute[rsz]?|indique[rsz]?|cree[rsz]?|saisi[srt]?|saisir|marque[rsz]?|inscri[srt]|mets|mettre)\b/.test(plat(t)); }

@@ -80,7 +80,7 @@ async def main():
         t0 = time.time()
         r = await page.evaluate(Q, ['AIzaTESTTESTTESTTESTTESTTESTTEST'])
         dt = time.time() - t0
-        check('Requête bloquée : abandonnée au bout du délai, relancée, réponse quand même', st['calls'] == ['crm_requete', 'crm_requete'] and '3 500' in r and dt < 15, f'{st["calls"]} {dt:.1f}s {r}')
+        check('Requête bloquée : abandonnée au bout du délai, relancée, réponse quand même', [c for c in st['calls'] if c != 'crm_annuaire'] == ['crm_requete', 'crm_requete'] and '3 500' in r and dt < 15, f'{st["calls"]} {dt:.1f}s {r}')
         check('… noté au journal', any('sans réponse au bout de 2 s' in l or 'sans réponse au bout de 1 s' in l for l in logs), str([l for l in logs if 'sans réponse' in l]))
         # 3. consignes « dernières commandes »
         sysm = await page.evaluate("wilson._system()")

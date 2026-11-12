@@ -14,7 +14,7 @@ import { Voice } from './voice.js';
 import { EcoBrain, ecoFormat, sentenceCut, sayable, warmUp } from './eco.js';
 import { RemoteLog, deviceName } from './remote.js';
 import { Oreille, nomDit } from './oreille.js';
-import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini, netErr } from './crm.js';
+import { Crm, CRM_TOOLS, CRM_TOOL_NAMES, pourGemini, netErr, parseJour } from './crm.js';
 import { Maison, MAISON_TOOLS, MAISON_TOOL_NAMES } from './maison.js';
 import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS, reglesCRM } from './analyste.js';
@@ -28,7 +28,7 @@ import { Questions, QUESTION_TOOL } from './questions.js';
 import * as VP from './voiture.js';
 
 // Protocole voiture (PLAN 2 quinquies) : les seuls outils déclarés à Gemini quand le téléphone est relié à la voiture.
-const OUTILS_VOITURE = ['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_question', 'question_difficile', 'mails', 'mail_envoyer','itineraire', 'appeler', 'crm_noter', 'crm_confirmer',
+const OUTILS_VOITURE = ['crm_client', 'crm_contacts', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_question', 'question_difficile', 'mails', 'mail_envoyer','itineraire', 'appeler', 'crm_noter', 'crm_confirmer',
   'date_et_heure', 'batterie', 'chercher', 'meteo', 'rappel', 'minuteur', 'remarque', 'mes_remarques', 'idees', 'bourse', 'messages', 'agenda', 'memoriser', 'oublier',
   'terminer_conversation', 'repondre_question'];
 // L'appli Android (PLAN 9) : son pont, s'il est là (null dans Chrome). Jamais d'erreur vers Wilson.
@@ -38,7 +38,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.41.1';
+const VERSION = '1.42.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -280,6 +280,7 @@ class App {
       'Appli Android': appli() ? `oui (appli ${pont('version')}), retour après le GPS : ${pont('peutRevenir') ? 'oui' : 'NON (autorisation « par-dessus les autres applis » manquante)'}, ${pont('premierPlan') === false ? 'derrière une autre appli' : 'à l\'écran'}, micro : ${this.audio && this.audio.natif ? 'celui de l\'appli (téléphone)' : 'celui de la page' + (+pont('version') < 3 ? ' (mets l\'appli à jour : même lien)' : '')}, mise à jour de l'appli : ${pont('majEtat') || 'à installer une dernière fois à la main (même lien), ensuite automatique'}` : 'non (navigateur)',
       'Protocole voiture': this._voitureBt ? `actif — caméra ${this.vision ? 'ALLUMÉE' : 'éteinte'}, verrou de vérité` : 'non (pas en voiture)',
       'Mode voiture': `${!VOITURE && !this.car ? 'supprimé' : this.car ? `oui (${this.car.why})` : 'non'}${VOITURE && this.settings.voitureAuto && deviceName() === 'téléphone' ? `, automatique en roulant${this._geoErr ? ' (GPS : ' + this._geoErr + ')' : this.speed != null ? `, vitesse ${Math.round(this.speed * 3.6)} km/h` : ''}` : ''}`,
+      'Annuaire du CRM (sur cet appareil)': this.crm.on ? this.crm.etatAnnuaire() : '—',
       'Oreille (voiture)': this.oreille.ready ? `apprise, ${this.oreille.templates.length} empreintes, limite ${this.oreille.limite.toFixed(1)} (${this.oreille.sens})${this.oreille.last.length ? ' — dernières phrases : ' + this.oreille.last.slice(-8).map((x) => x.s + (x.oui ? '✓' : '')).join(' ') : ''}` : 'pas apprise',
       'Réglages communs': this.remote.on ? (this.sync.state || 'pas encore vérifiés') : 'pas de script : réglages propres à cet appareil',
       'Phrases échangées dans le journal': s.logContent === false ? 'masquées' : 'envoyées',
@@ -361,7 +362,9 @@ class App {
   _nouveautes(mode) {
     const n = this._nv; if (!n) return '';
     let t = `\nTa dernière mise à jour (version ${VERSION}${n.date ? ', ' + n.date : ''}), faite d'après les remarques de Timothée et ton journal : ${n.texte} Si on te demande ce qui a changé, dis-le simplement.`;
-    if (n.aDire && mode === 'live') {
+    // Pas en voiture (journal du 12/11/26, 08h42:28 : 12 s de nouveautés enchaînées à « C'est parti, je te guide vers… », pendant qu'il
+    // cherchait à corriger la destination) : elles seront dites à la première discussion hors de la voiture, ou s'il les demande.
+    if (n.aDire && mode === 'live' && !this.enVoiture) {
       t += ' C\'est ta première discussion depuis : après avoir répondu à ce qu\'on te demande, dis en une phrase courte ce qui a changé (une seule fois).';
       n.aDire = false; try { localStorage.setItem('wilson.nouveautesDites', VERSION); } catch (_) {}
     }
@@ -543,7 +546,7 @@ class App {
     if (c.name === 'regarder') return /regard|vois|voir|montr|couleur|\blis\b|lire|decri|habill|qu.?est.?ce que|qu.?est.?ce qu|c.?est quoi|quoi ca|\bmain\b|tiens|ressemble|photo|devant toi|camera|doigts|reconnai|qui est|quelle marque|ceci|cela|combien d|objet|porte|tenue|coiffure/.test(d) ? '' : 'regarder';
     // « Répète » n'est pas « réaffiche » (journal du 05/11/26, 11h06:46 : « tu peux répéter ta dernière phrase ? » → reafficher).
     if (c.name === 'reafficher') return /affich|montr|ecran|remontr|revoi|image|photo|carte|meteo|plus longtemps|pas eu le temps/.test(d) ? '' : 'reafficher';
-    if (['crm_client', 'itineraire', 'appeler'].includes(c.name)) {
+    if (['crm_client', 'crm_contacts', 'itineraire', 'appeler'].includes(c.name)) {
       const mots = n(a.client || '').split(/[^a-z0-9]+/).filter((m) => m.length >= 3);
       if (mots.some((m) => d.includes(m) || d.includes(m.slice(0, 4)))) return '';
       // Journal du 05/11/26, 11h07:17-11h07:43 : « Pourquoi tu m'as parlé de Tech Metallu ? » (TECMETALU) refusé 3 fois.
@@ -1172,19 +1175,20 @@ En voiture : Timothée conduit. Il ne regarde pas l'écran et ne peut rien lire.
 LE PROTOCOLE DE LA VOITURE (règles de Timothée, à suivre à la lettre) :
 1. Il te réveille en touchant l'écran ; tu te rendors quand il retouche l'écran, ou tout seul après une minute sans qu'on te parle (ton micro n'est ouvert que pendant la discussion). Ne lui demande jamais de dire « Wilson » pour te réveiller.
 2. Ses questions de travail (un client, ses contacts, une visite, une commande, un devis, un chiffre, son agenda, ses tâches, son objectif, une adresse) : ${crm ? 'la réponse vient UNIQUEMENT du CRM, par un outil, À CHAQUE FOIS — même si tu crois savoir, même si vous en avez parlé il y a une minute. Appelle l\'outil TOUT DE SUITE, sans rien dire avant : un petit bip lui dit que tu cherches. Sans résultat d\'outil, tu ne sais rien : aucun nom, aucun chiffre, aucune date, aucune ville. Tout ce que tu dirais sans outil est retenu et n\'est jamais dit.' : 'le CRM n\'est pas relié sur ce téléphone : dis-le simplement.'}
-${crm ? `   - Un client, ses contacts, sa dernière visite, ses coordonnées : crm_client (le nom tel qu'il l'a dit).
+${crm ? `   - Qui est qui chez un client (« qui est le magasinier chez X ? », « comment s'appelle l'acheteur ? »), un numéro de téléphone, une adresse, une ville : crm_contacts (le nom tel qu'il l'a dit) — la réponse est IMMÉDIATE.
+   - Tout le dossier d'un client (dernière visite, comptes rendus, tâches, chiffre, commandes, devis) : crm_client (le nom tel qu'il l'a dit).
    - Toute autre question sur ses données : dernières commandes (il veut CE QU'IL A ACHETÉ, les articles et les quantités), devis à relancer, chiffre d'une période, listes, comparaisons, « qui… », « combien… », « quand… », briefing complet d'un client : crm_question avec la question complète. Claude (sur l'ordinateur de la maison) ou l'analyste cherche dans tout le CRM et calcule ; ça peut prendre une à deux minutes : dis seulement « Je cherche. » et rien d'autre (aucune question : il attend en silence, le bip lui dit que tu cherches) ; la réponse t'arrivera en message et tu la répètes telle quelle.
    - Une référence de produit à identifier, l'équivalent Boschat d'un produit concurrent, une comparaison de produits ou de fiches techniques, une question technique : question_difficile avec sa question complète (références, marques, dimensions). Claude cherche sur Internet et lit les fiches (une à deux minutes) : dis seulement « Je cherche. », puis répète sa réponse mot pour mot quand elle arrive.
    - « Où j'en suis de mes clients actifs ? », « combien il m'en manque ? » : crm_question avec une question qui commence par « OBJECTIF CLIENTS ACTIFS ».
-   - Sa journée, ses rendez-vous : crm_agenda. Son chiffre global : crm_bilan. Un article ou un fabricant : crm_produit.
+   - Sa journée, ses rendez-vous (le CRM et ses agendas Google réunis) : crm_agenda. Son chiffre global : crm_bilan. Un article ou un fabricant : crm_produit.
 3. Tu dis le résultat tel quel : seulement les noms, chiffres, dates et villes qui y sont. Ce qui n'y est pas : s'il le demande, appelle toi-même crm_question avec sa question (sans lui proposer ni lui demander) ; sinon n'en parle pas. Ne dis jamais le nom d'un outil à voix haute. Les chiffres : tu n'en connais AUCUN par cœur. Une recherche lancée « en arrière-plan » n'a pas encore de résultat : si on te la demande, dis « je cherche encore, je te le dis dès que je l'ai ». Si deux réponses du CRM se contredisent, dis-le tel quel ; n'invente jamais d'explication (« je l'ai vu dans un brouillon »…).
 4. Au moindre doute (nom mal entendu, plusieurs clients possibles, phrase coupée, son mauvais, autre langue dans la transcription), tu ne devines pas : tu reformules ce que tu as compris et tu demandes « c'est bien ça ? ». Plusieurs clients possibles : cite-les (nom et ville) et demande lequel. Le son de la voiture est souvent mauvais : si la transcription ne veut rien dire, demande-lui de répéter.
-5. Écrire dans le CRM (visite, compte rendu, rendez-vous, tâche, note) : JAMAIS sans son accord. crm_noter, puis tu lui relis mot pour mot la phrase préparée et tu demandes « Je l'enregistre ? » ; seulement après son « oui » : crm_confirmer. Tu ne dis « c'est enregistré » (ni « c'est noté », ni « j'ai ajouté ») que quand crm_confirmer l'a confirmé. « Indique que je suis passé chez X aujourd'hui », « note la visite » : crm_noter, type compte_rendu, échange visite, texte « Visite » suivi des personnes vues s'il les cite. Les comptes rendus et rendez-vous arrivent en brouillon dans son CRM : il les valide lui-même.
-6. « Emmène-moi chez X », « guide-moi vers X », « lance le GPS » : itineraire tout de suite, sans lui demander s'il le veut. Seulement s'il le demande : un nom de client, une question sur un client, ce n'est PAS une demande d'y aller (remarque de Timothée du 06/11/26) ; et ne propose jamais de lancer le GPS. ${appli() ? 'Le guidage part directement dans la voiture (Android Auto) et tu restes avec lui : dis « C\'est parti, je te guide vers … ».' : 'Un bouton s\'affiche : dis-lui d\'appuyer sur « Y aller » (le guidage passe aussi sur l\'écran de la voiture ; pour te reparler ensuite, il revient sur Wilson).'} « Appelle X » : appeler (bouton vert). Un bouton ne s'affiche QUE par ces outils : ne dis jamais « j'affiche » sans les appeler ; si le client change, rappelle l'outil pour le bon client.` : ''}
-7. Le reste : l'heure et la date : date_et_heure ; la météo : meteo ; une petite information sur Internet (actualité, horaires, prix, commerce) : chercher ; une recherche de produit ou technique : question_difficile ; sa batterie : batterie ; un rappel à une heure précise : rappel (quand au format 2026-10-30T18:00) ; un minuteur : minuteur ; « rappelle-nous ce soir à la maison », « dis à Camille que… » : messages (deposer ; pour un rappel à la maison : pour = « tous » ou son prénom, aussi_pour_moi = true, a_la_maison = true, apres = l'heure) ; l'agenda Famille (Google Agenda partagé avec Camille) : agenda ; « note cette idée » : idees ; sa bourse, son PEA, ses actions, son LDD : bourse ; « retiens que… » : memoriser.
+5. Écrire dans le CRM (visite, compte rendu, rendez-vous, tâche, note) : JAMAIS sans son accord. crm_noter (client = la société, contact = la personne vue ou appelée s'il la cite, texte = ce qu'il dicte, sans rien ajouter), puis tu lui relis mot pour mot la phrase préparée et tu demandes « Je l'enregistre ? » ; seulement après son « oui » : crm_confirmer. Tu ne dis « c'est enregistré » (ni « c'est noté », ni « j'ai ajouté ») que quand crm_confirmer l'a confirmé. « Indique que je suis passé chez X aujourd'hui », « note la visite » : crm_noter, type compte_rendu, échange visite, texte « Visite » suivi des personnes vues s'il les cite. Les comptes rendus et rendez-vous arrivent en brouillon dans son CRM : il les valide lui-même. S'il corrige la personne (« non, c'était Julien, pas Marc ») ou le texte : rappelle crm_noter avec la correction, la phrase à relire et la fenêtre à l'écran se mettent à jour toutes seules (ne dis jamais que tu ne peux pas modifier ou afficher). Une demande d'écrire ne passe JAMAIS par crm_question.
+6. « Emmène-moi chez X », « guide-moi vers X », « lance le GPS » : itineraire tout de suite, sans lui demander s'il le veut. Seulement s'il le demande : un nom de client, une question sur un client, ce n'est PAS une demande d'y aller (remarque de Timothée du 06/11/26) ; et ne propose jamais de lancer le GPS. Si l'outil te dit que le nom est incertain, pose seulement la question qu'il te donne (« Je te guide vers …, c'est bien ça ? ») et, après son « oui », rappelle itineraire. « Arrête le guidage », « supprime la destination », « enlève le GPS » : n'appelle PAS itineraire et ne relance rien ; tu ne peux pas arrêter Google Maps : dis-lui de dire « OK Google, arrête la navigation » ou de toucher la croix sur l'écran de la voiture. ${appli() ? 'Le guidage part directement dans la voiture (Android Auto) et tu restes avec lui : dis « C\'est parti, je te guide vers … ».' : 'Un bouton s\'affiche : dis-lui d\'appuyer sur « Y aller » (le guidage passe aussi sur l\'écran de la voiture ; pour te reparler ensuite, il revient sur Wilson).'} « Appelle X » : appeler (bouton vert). Un bouton ne s'affiche QUE par ces outils : ne dis jamais « j'affiche » sans les appeler ; si le client change, rappelle l'outil pour le bon client.` : ''}
+7. Le reste : l'heure et la date, SEULEMENT s'il les demande (jamais de toi-même, jamais pour meubler) : date_et_heure ; la météo : meteo ; une petite information sur Internet (actualité, horaires, prix, commerce) : chercher ; une recherche de produit ou technique : question_difficile ; sa batterie : batterie ; un rappel à une heure précise : rappel (quand au format 2026-10-30T18:00) ; un minuteur : minuteur ; « rappelle-nous ce soir à la maison », « dis à Camille que… » : messages (deposer ; pour un rappel à la maison : pour = « tous » ou son prénom, aussi_pour_moi = true, a_la_maison = true, apres = l'heure) ; l'agenda Famille (Google Agenda partagé avec Camille) : agenda ; « note cette idée » : idees ; sa bourse, son PEA, ses actions, son LDD : bourse ; « retiens que… » : memoriser.
 8. Une remarque sur ta façon de fonctionner (« pour la prochaine mise à jour… », « c'est un bug », « tu devrais… ») : remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. Ne dis jamais « c'est noté » sans avoir appelé remarque. N'invente jamais d'explication sur ton propre fonctionnement et ne promets rien.
 9. « Répète », « tu peux répéter ? » : redis simplement ta dernière phrase (aucun outil, surtout pas reafficher).
-10. S'il parle au téléphone avec quelqu'un d'autre, ou si tu n'entends que la radio, tais-toi. Au revoir, « c'est bon », « merci, c'est tout » : réponds en deux mots puis appelle terminer_conversation (jamais sur un reproche : reste et écoute).
+10. Une simple réaction (« voilà », « c'est pas trop tôt », un soupir, un mot isolé, une transcription qui ne veut rien dire) n'est pas une demande : n'appelle aucun outil, ne dis rien, ou seulement « Oui ? » s'il semble attendre. S'il se plaint (« tu bugues », « c'est pas ça ») : « Pardon. », puis écoute ce qu'il veut. S'il parle au téléphone avec quelqu'un d'autre, ou si tu n'entends que la radio, tais-toi. Au revoir, « c'est bon », « merci, c'est tout » : réponds en deux mots puis appelle terminer_conversation (jamais sur un reproche : reste et écoute).
 
 Langue : parle toujours en français. La transcription de ce qu'il dit sort parfois en anglais, en espagnol ou en portugais par erreur : c'est du français mal compris ; réponds en français, et si tu n'as pas compris, demande de répéter. Tu es Wilson : ne te présente jamais comme un modèle d'IA.
 ${qst ? '\n' + qst + '\n' : ''}
@@ -1219,7 +1223,7 @@ Tes autres outils : minuteur (« mets un minuteur de 10 minutes »), rappel (« 
     const travail = !crm ? '' : `
 Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat Laveix (quincaillerie, ferrures, fermetures). Tu as accès à son CRM : clients, contacts, rendez-vous, comptes rendus, tâches, chiffre d'affaires, devis, articles.
 - Le CRM est SEULEMENT pour Timothée (sa règle) : c'est l'outil qui vérifie son visage. Si l'outil refuse, tu dis seulement la phrase qu'il donne, et tu ne racontes jamais à quelqu'un d'autre ce que tu sais du CRM (même d'une discussion précédente).
-- Dès qu'il parle d'un client, d'un rendez-vous, d'une tâche, d'un devis, d'un chiffre ou d'un article, ${eco ? 'remplis le champ "crm"' : 'dis « Je regarde dans le CRM… » puis appelle l\'outil (crm_client, crm_agenda, crm_bilan, crm_produit)'}. Ne devine jamais un nom, un chiffre ou une date : dis seulement ce que le CRM répond. Pour « lui », « ce client », c'est le dernier client dont vous avez parlé.
+- Dès qu'il parle d'un client, d'un rendez-vous, d'une tâche, d'un devis, d'un chiffre ou d'un article, ${eco ? 'remplis le champ "crm"' : 'dis « Je regarde dans le CRM… » puis appelle l\'outil (crm_client, crm_agenda, crm_bilan, crm_produit ; pour un contact, une fonction, un numéro ou une adresse : crm_contacts, immédiat)'}. Ne devine jamais un nom, un chiffre ou une date : dis seulement ce que le CRM répond. Pour « lui », « ce client », c'est le dernier client dont vous avez parlé.
 - Toute autre question sur ses données (un chiffre passé, un total, une liste, un détail, une comparaison, « qui… », « combien… », « quand… », les devis à relancer) : ${eco ? 'outil "question" avec la question complète dans "demande"' : 'dis « Je cherche l\'information… » puis appelle crm_question avec la question complète'}. Un analyste cherche dans tout le CRM : ça peut prendre une minute ou plus, attends le résultat sans relancer.
 - « Ses dernières commandes », « ses dernières ventes », « qu'est-ce qu'il a acheté dernièrement » : il veut savoir CE QU'IL A ACHETÉ (les articles, les quantités), pas seulement la date ou le montant. ${eco ? 'Outil "question"' : 'Dis « Je regarde ses dernières commandes… » puis appelle directement crm_question'} en demandant « les articles des dernières commandes de <client> » (pas de fiche avant : c'est plus long). Donne d'abord les articles, la date et le montant après (remarque de Timothée du 04/11/26).
 - « Fais-moi un briefing », « prépare mon rendez-vous », « qu'est-ce que je dois savoir sur X » : ${eco ? 'outil "question"' : 'dis « Je prépare ton briefing, je te tiens au courant… » puis appelle crm_question'} en demandant un BRIEFING COMPLET du client (son nom) : ventes et tendance, ce qu'il achète, devis à relancer, derniers échanges, quoi proposer. Quand la réponse arrive, dis-la en entier, sans la raccourcir : tu es son coach commercial (remarque de Timothée du 04/11/26).
@@ -1427,7 +1431,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     this._liveAudio = (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
       // R1 (règle de Timothée du 01/11/26) : il ne parle que s'il est sûr qu'on le regardait en lui parlant.
-      if (this._retenu === this._turnN || this._doublon === this._turnN) return;
+      if (this._retenu === this._turnN || this._doublon === this._turnN || this._tropTour === this._turnN) return;
       if (!this._liveTurn && !this.audio.playing && !this._reponsePermise()) {
         this._retenu = this._turnN; this._nRetenues = (this._nRetenues || 0) + 1;
         this.log(`Réponse retenue : personne ne me regardait vraiment pendant la phrase (${this._etatRegard()})`);
@@ -1576,7 +1580,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       this.lastActivity = this._heardAt = performance.now(); this._noteHeard(t); this._noteChiffres(t, 'dit');
       if (this._protocole && String(t || '').trim()) {                   // protocole voiture : une demande de travail verrouille le tour
         const vv = this._vvTour(); vv.user = String(t);
-        const travail = VP.estTravail(t, { clients: [...this.crm.cache.values()].map((e) => e.societe) }) || (this._travailRecent() && !VP.horsTravail(t));
+        const travail = VP.estTravail(t, { clients: [...this.crm.cache.values()].map((e) => e.societe) }) || (this._travailRecent() && !VP.horsTravail(t) && !this._reaction(t));
         if (travail && !vv.travail) { vv.travail = true; this._travailAt = performance.now(); this._travailConv = this.convId; if (!vv.outil) this._vvRetenir(vv, 'demande de travail'); }
         else if (travail) { this._travailAt = performance.now(); this._travailConv = this.convId; }
       }
@@ -1602,6 +1606,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         $('subtitle').textContent = '';
         return;
       }
+      this._couperFinDeTrop(t);
       if (this.brain.syncTools) {                          // pas d'outil du visage sur ce modèle : l'expression suit le texte
         const e = emotionDuTexte(t);
         if (e && e !== this._emoTour) { this._emoTour = e; this.face.setEmotion(e, 6500, 0.8); }
@@ -1941,7 +1946,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     }
     if (VP.sansFait(wilson, mots)) {
       for (const [a, r] of vv.held) this.audio.play(a, r);
-      if (vv.held.length) { this.lastActivity = performance.now(); this.log(`Verrou de vérité : réponse qui n'affirme rien, dite (« ${wilson.slice(0, 80)} »)`); }
+      if (vv.held.length) { this.lastActivity = performance.now(); this.log(`Verrou de vérité : réponse qui n'affirme rien, dite (« ${wilson.slice(0, 80)} »)`); this._couperFinDeTrop(wilson, this._turnN - 1); }
       vv.held = [];
       return null;
     }
@@ -1958,6 +1963,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     const u = VP.plat(user);
     const quoi = VP.estItineraire(user) ? 'itineraire avec le nom du client'
       : VP.estEcriture(user) ? 'crm_noter (une visite : type compte_rendu, échange visite, texte « Visite » et les personnes vues), puis relis-lui la phrase préparée'
+      : VP.questionContacts(user) ? 'crm_contacts avec le nom du client'
       : /contact|telephone|numero|adresse|fiche|derniere visite|qui (est|sont)/.test(u) ? 'crm_client avec le nom du client'
       : 'crm_question avec sa question complète';
     if (S.n === 1) {
@@ -1994,6 +2000,22 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     vv.correction = inv;
     this.audio.flush(); this.discard = true; this.face.setTalk(0);
     this.log(`Verrou de vérité : « ${inv.join(' », « ')} » dit sans source (ni le CRM ni Timothée) : phrase coupée, je lui fais corriger`, true);
+  }
+  // Une simple réaction (« Voilà. », « Bah, c'est pas trop tôt. ») — sauf si c'est le nom d'un client ou d'un contact de l'annuaire.
+  _reaction(t) {
+    if (!VP.estReaction(t)) return false;
+    const A = this.crm.annuaire;
+    return !(A.pret && A.chercher(t, 1).some((x) => x.score >= 0.8));
+  }
+  // « Autre chose ? », « Tu as besoin d'autre chose ? » à la fin d'une réponse : interdit par Timothée (05/11, 06/11), revenu
+  // le 12/11 malgré la consigne. La fin de la réponse est coupée avant d'être jouée (le reste est dit normalement).
+  _couperFinDeTrop(t, tour = this._turnN) {
+    if (this._tropTour === tour) return;
+    const trop = VP.finDeTrop(cleanSpeech(t));
+    if (!trop) return;
+    this._tropTour = tour;
+    const ote = this.audio.couperFin(Math.min(4, 0.4 + trop.length * 0.065));
+    this.log(`Question de trop à la fin de sa réponse (« ${trop} ») : ${ote ? `coupée avant d'être dite (${ote.toFixed(1)} s)` : 'trop tard pour la couper'}`, true);
   }
   _travailRecent() { return !!this._travailAt && this._travailConv === this.convId && performance.now() - this._travailAt < 120000; }   // même discussion, 2 min
 
@@ -2069,7 +2091,9 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
           }
           this.memoire.ajouter(a.fait, { cat: a.categorie, qui: a.qui || this.famille._parle(), origine: 'demandé' }); this.log('Retenu (demandé) : ' + a.fait, true); this.face.play('nod'); out = { result: 'mémorisé' }; break;
         case 'oublier': { const g = this.memoire.oublier(a.sujet || ''); out = { result: g.length ? 'Oublié : ' + g.join(' ; ') : 'Aucun souvenir ne correspond.' }; silent = false; this.log('Oublier « ' + a.sujet + ' » : ' + g.length + (g.length ? ' (' + g.join(' ; ') + ')' : ''), true); break; }
-        case 'date_et_heure': out = { result: fmtDate() }; silent = false; break;
+        case 'date_et_heure':
+          if (this._protocole) { this._heureOutil(c); continue; }      // en voiture : seulement s'il l'a demandée (réponse envoyée quand sa phrase est transcrite)
+          out = { result: fmtDate() }; silent = false; break;
         // Journal du 05/11/26, 21h51:53-21h52:07 : « Non, je ne suis pas en charge », puis « Oui, il est branché » : inventé
         // (l'onglet État disait « 81 %, branchée »). La vraie batterie de l'appareil.
         case 'batterie': {
@@ -2092,6 +2116,22 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       res.push(r);
     }
     if (res.length) this.brain.respond(res);
+  }
+
+  // Journal du 12/11/26, 08h44-08h47 : « Voilà. », « Bah, c'est pas trop tôt. » → date_et_heure → « Il est 8h46. », cinq fois
+  // (« arrête de me dire l'heure à chaque fois »). L'heure n'est donnée que s'il l'a demandée (ou un rappel, un minuteur,
+  // l'agenda) — en voiture seulement : c'est le verrou de vérité (« pas de réponse sans outil ») qui lui faisait appeler cet
+  // outil pour une simple réaction. La transcription de sa phrase arrive souvent après l'appel de l'outil : elle est attendue 1,5 s au plus ; sans
+  // elle, ce qu'il a dit dans les 20 dernières secondes décide ; rien du tout : l'heure est donnée.
+  async _heureOutil(c) {
+    const conv = this.convId, tour = this._turnN;
+    const frais = () => ((this._heard || []).filter((h) => h.n === tour).map((h) => h.text).join(' ') + ' ' + String(this.brain.inText || '')).trim();
+    for (let i = 0; i < 6 && !frais(); i++) await sleep(250);
+    if (conv !== this.convId || !this.brain.open) return;
+    const dit = frais() || this._entenduRecent(20000).trim();
+    const refus = !!dit && !VP.demandeHeure(dit);
+    if (refus) this.log(`Outil date_et_heure : il n'a pas demandé l'heure (« ${dit.slice(-100)} ») — pas donnée`, true);
+    this.brain.respond([{ id: c.id, name: c.name, response: { result: refus ? "Il ne t'a PAS demandé l'heure ni la date : ne les dis pas. Réponds seulement à ce qu'il vient de dire ; si ce n'était pas une demande (une réaction, un bruit), ne dis rien du tout." : fmtDate() } }]);
   }
 
   // Durée d'un outil (recherche, CRM) : comptée dans le tour en cours (il a déjà dit « je regarde… »), sinon dans le suivant.
@@ -2463,18 +2503,34 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     const lu = (r) => (r.ok ? { info: pourGemini(r.texte, car) } : { info: `Le CRM ne répond pas : ${r.erreur || 'erreur'}. Dis-le simplement.`, dire: 'Le CRM ne répond pas pour le moment.' });
     switch (name) {
       case 'crm_client': {
-        const r = await C.client({ client: a.client || '' }, signal);
+        let r;
+        try { r = await C.client({ client: a.client || '' }, signal); }
+        catch (err) {
+          // Pas de réseau vers le CRM : l'annuaire gardé sur le téléphone donne au moins ses coordonnées et ses contacts.
+          if (!isNetErr(err) || !C.annuaire.pret) throw err;
+          const k = await C.contacts({ client: a.client || '' }, signal).catch(() => null);
+          if (!k || !k.ok) throw err;
+          this.log('CRM sans réseau : coordonnées et contacts donnés depuis l\'annuaire gardé sur le téléphone');
+          return { info: `(Pas de réseau vers le CRM pour l'instant : tu n'as que ses coordonnées et ses contacts, gardés sur le téléphone. Dis-le en quelques mots ; pour ses visites, ses commandes et ses chiffres, il faudra du réseau.)\n${k.texte}\nRéponds seulement avec ces informations, en une ou deux phrases.` };
+        }
         if (!r.ok) return lu(r);
         if (!r.e) return { info: r.texte };                                         // inconnu, ou plusieurs clients possibles
-        const e = r.e, qui = `${e.societe}${e.contact ? ' (' + e.contact + ')' : ''}${e.ville ? ', ' + e.ville : ''}`;
+        const P = r.contactDit;                                                     // la personne par laquelle il a désigné le client
+        const e = r.e, qui = `${e.societe}${P ? ' (' + P.nom + ')' : e.contact ? ' (' + e.contact + ')' : ''}${e.ville ? ', ' + e.ville : ''}`;
         // C10 : nom entendu approximatif → il cite d'abord le client trouvé ; C8 bis : fiche gardée faute de réseau
         const avant = [r.parmi ? `(Le CRM propose plusieurs clients pour « ${a.client} » : ${r.parmi.slice(0, 300)} J'ai pris ${qui}, celui dont vous parliez : commence par ce nom et demande-lui si c'est bien lui avant toute autre chose.)`
           : r.approx ? `(Nom entendu : « ${a.client} » ; le CRM a trouvé ${qui}. Commence ta réponse par ce nom, pour qu'il puisse te corriger si ce n'est pas le bon client.)` : '',
           r.vieux ? `(Pas de réseau vers le CRM : fiche telle qu'elle était à ${new Date(r.vieux).getHours()}h${pad(new Date(r.vieux).getMinutes())} ; dis-le s'il demande un chiffre récent.)` : '',
+          P && P.nom !== e.contact ? `(Il parle de ${P.nom}${P.fonction ? ', ' + P.fonction : ''}${P.tel ? ', tél. ' + P.tel : ''}, chez ${e.societe} : réponds pour cette personne.)` : '',
           await this._boutonSuit(e, signal)].filter(Boolean).join('\n');
         return { info: pourGemini((avant ? avant + '\n' : '') + e.texte, car) };
       }
-      case 'crm_agenda': return lu(await C.agenda(a.jour, signal));
+      case 'crm_contacts': {                                                         // l'annuaire gardé sur l'appareil : immédiat
+        const r = await C.contacts({ client: a.client || '' }, signal);
+        if (!r.ok) return { info: r.dire };
+        return { info: `${r.texte}\n${a.question ? `Sa question : « ${String(a.question).slice(0, 200)} ». ` : ''}Réponds à sa question avec ces informations seulement (n'invente rien) : ${car ? 'une ou deux phrases très courtes, il conduit' : 'une à deux phrases'} ; dis les noms comme on les dit (« Jean Dupont », pas « M DUPONT Jean ») et un numéro chiffre par chiffre seulement s'il le demande. Ce qui n'y est pas (visites, commandes, chiffres) : crm_client ou crm_question.` };
+      }
+      case 'crm_agenda': return lu(await this._journee(a.jour, signal));
       case 'crm_bilan': {
         const r = await C.bilan(signal), res = lu(r), A = r.ok ? actifsDuBilan(r.texte) : null;
         if (A) res.info += '\n' + this._actifsTexte(A).info;
@@ -2489,7 +2545,13 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         const q = String(a.demande || (/^(qui_achete|infos)$/.test(a.question || '') ? '' : a.question) || '').trim();
         if (!q) return { info: 'Il manque la question : demande-lui ce qu\'il veut savoir.', dire: 'Qu\'est-ce que tu veux savoir exactement ?' };
         if (actifsSimple(q)) { const r = await this._actifs(a, signal); if (r) return r; }
-        let last = C.last ? `Dernier client dont vous avez parlé : ${C.last.societe}${C.last.contact ? ' (' + C.last.contact + ')' : ''}.` : '';
+        const DR = C.dernier && Date.now() - C.dernier.at < 30 * 60000 ? C.dernier : null;
+        let last = DR ? `Dernier client dont vous avez parlé : ${DR.soc.societe}${DR.soc.ville ? ', ' + DR.soc.ville : ''}${DR.contact ? ` ; la personne : ${DR.contact.nom}${DR.contact.fonction ? ' (' + DR.contact.fonction + ')' : ''}` : ''}.`
+          : C.last ? `Dernier client dont vous avez parlé : ${C.last.societe}${C.last.contact ? ' (' + C.last.contact + ')' : ''}.` : '';
+        // Journal du 12/11/26, 09h35 : « je vais voir Yoann… il y a des sujets dont il faut que je lui parle ? » transmis « briefing
+        // Yoann … » : la vraie question était perdue. Ses mots exacts accompagnent maintenant la question reformulée.
+        const mots = (this._entenduRecent(20000) + ' ' + String(this.brain.inText || '')).replace(/\s+/g, ' ').trim();
+        if (mots && this.mode === 'live') last += `${last ? '\n' : ''}Ses mots exacts (transcription de sa voix, parfois imparfaite) : « ${mots.slice(-500)} ». La question ci-dessus en est un résumé fait par Wilson : réponds à ce qu'il a vraiment demandé.`;
         if (OBJECTIF_Q.test(q)) last = (await this._contexteObjectif(q, signal)) + (last ? '\n' + last : '');   // 7 sexies, O
         // PLAN 10 : Claude, sur le PC de la maison, d'abord ; l'analyste Gemini si le PC ne répond pas.
         const pc = await this._parClaude({ question: q, type: 'crm', contexte: last, regles: reglesCRM({ voiture: car }), voiture: car, crm: true }, signal);
@@ -2509,7 +2571,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         return { info: `${indispo}Réponse de l'analyste du CRM (après ${r.recherches} recherche(s) dans ses données) : ${r.reponse}\nDis-la-lui à l'oral, sans rien ajouter ni inventer${car ? ', en une ou deux phrases très courtes' : ''}.`, dire: (pc.indispo ? `${pc.indispo[0].toUpperCase() + pc.indispo.slice(1)}, c'est l'analyste qui a cherché. ` : '') + r.reponse };
       }
       case 'itineraire': {                                                            // C12
-        const r = await C.routeTarget(a, signal);
+        const r = await C.routeTarget(a, signal, { confirme: !!this._itiOui });
         // Appli Android (PLAN 9, A3) : le guidage part tout de suite, dans la voiture, et Wilson revient devant tout seul.
         if (r.ok && appli()) {
           const g = String(pont('naviguer', r.target.adresse || '', r.target.societe || '') || 'erreur');
@@ -2553,6 +2615,23 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       }
     }
     return { info: 'outil inconnu' };
+  }
+
+  // Sa journée (demande de Timothée du 12/11/26 : « une parfaite connaissance de mon agenda ») : les rendez-vous et tâches du
+  // CRM, et ce jour-là dans ses agendas Google (le sien, celui de Boschat Laveix, Famille) par son script. L'agenda Google
+  // ne retarde jamais la réponse (6 s au plus) et ne la fait jamais échouer ; un rendez-vous client déjà dans le CRM n'est pas redit.
+  async _journee(jour, signal) {
+    const d = parseJour(jour || "aujourd'hui") || new Date(), iso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const google = this.remote.on ? Promise.race([this.remote.ask({ action: 'agenda_lire', du: iso, jours: 1, tous: true }).catch(() => null), sleep(6000).then(() => null)]) : Promise.resolve(null);
+    const [r, g] = await Promise.all([this.crm.agenda(jour, signal), google]);
+    if (!r || !r.ok || !g || !g.ok) return r;
+    const n = (x) => VP.plat(x).replace(/[^a-z0-9]+/g, ' ').trim(), crm = (r.rdv || []).flatMap((x) => [n(x.societe), n(String(x.contact || '').replace(/^(m|mme|mr)\s+/i, ''))]).filter((x) => x.length >= 3);
+    const ev = (g.evenements || []).filter((e) => { const t = n(e.titre); return t && !crm.some((c) => t.includes(c) || c.includes(t)); });
+    const h = (t) => { const x = new Date(t); return `${x.getHours()}h${pad(x.getMinutes())}`; };
+    const lignes = ev.slice(0, 12).map((e) => `- ${e.journee ? 'toute la journée' : `${h(e.debut)}-${h(e.fin)}`} : ${e.titre}${e.lieu ? ' (' + e.lieu + ')' : ''}${e.agenda ? ` [agenda ${e.agenda}]` : ''}`);
+    const titre = g.tous ? 'Dans ses agendas Google ce jour-là (hors rendez-vous clients déjà cités)' : 'Dans l\'agenda Famille ce jour-là (ses autres agendas Google ne sont pas encore lus : script à mettre à jour)';
+    this.log(`Journée : ${(r.rdv || []).length} rendez-vous au CRM, ${ev.length} événement(s) dans ${g.tous ? 'ses agendas Google' : 'l\'agenda Famille'}`);
+    return { ...r, texte: `${r.texte}\n${titre} : ${lignes.length ? '\n' + lignes.join('\n') : 'rien.'}` };
   }
 
   // Écriture gardée faute de réseau, envoyée au retour du réseau (C8 bis) : Wilson le dit.
@@ -2733,16 +2812,23 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   // dit le nom, puis « pourquoi tu as activé le GPS alors que j'ai pas dit que on allait à Lèbre ? ») ; remarque de Timothée à
   // 08h45:47 : « quand je parle d'une entreprise, ça ne veut pas dire que je veux y aller ». Le guidage ne part que s'il l'a
   // demandé (GPS, itinéraire, emmène-moi… dans ses phrases des 90 dernières secondes), ou s'il dit oui à la proposition.
-  async _itinerairePermis() {
+  async _itinerairePermis(client = '') {
     const now = performance.now(), recents = () => (this._heard || []).filter((h) => now - h.t < 90000).map((h) => h.text);
     let ent = String(this.brain.inText || '').trim();
     for (let i = 0; !ent && !recents().length && i < 6; i++) { await sleep(250); ent = String(this.brain.inText || '').trim(); }   // transcription en route
     const H = recents(), dernier = ent || H[H.length - 1] || '';
     if (!dernier) return { ok: true, pourquoi: 'aucune transcription de sa phrase' };
-    if (VP.refusItineraire(dernier) && !VP.estItineraire(VP.plat(dernier).replace(/.*\b(mais|plutot|par contre)\b/, ''))) return { ok: false, dit: dernier };
-    if ([...H.slice(-3), ent].filter(Boolean).some((t) => VP.estItineraire(t) && !VP.refusItineraire(t))) return { ok: true };
-    const W = (this._ditWilson || []).filter((w) => now - w.t < 90000).pop();
-    if (W && /guide|itineraire|gps|y aller|emmene|on y va/.test(VP.plat(W.text)) && VP.estOui(dernier)) return { ok: true, pourquoi: 'oui à sa proposition' };
+    const suite = H.slice(-3).concat(ent && ent !== H[H.length - 1] ? [ent] : []);
+    // « oui » à ce que Wilson vient de proposer (« Je te guide vers …, c'est bien ça ? »), ou à un client à faire confirmer
+    const W = (this._ditWilson || []).filter((w) => now - w.t < 90000).pop(), AC = this.crm.aConfirmer;
+    if (!VP.guidageDit(dernier) && VP.estOui(dernier) && ((W && VP.proposeGuidage(W.text)) || (AC && Date.now() - AC.at < 120000))) return { ok: true, oui: true, pourquoi: 'oui à sa proposition' };
+    // sa dernière phrase qui en parle décide : demande, reproche, ou « arrête le guidage »
+    for (let i = suite.length - 1; i >= 0; i--) {
+      const g = VP.guidageDit(suite[i]);
+      if (g === 'arret') return { ok: false, arret: true, dit: suite[i] };
+      if (g === 'non') return { ok: false, dit: suite[i] };
+      if (g === 'oui') return VP.clientRefuse(suite[i], client) ? { ok: false, dit: suite[i], autre: true } : { ok: true };
+    }
     return { ok: false, dit: dernier };
   }
 
@@ -2760,16 +2846,33 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
 
   async _crmTool(call) {
     if (call.name === 'itineraire') {
-      const P = await this._itinerairePermis();
+      const P = await this._itinerairePermis((call.args || {}).client || '');
+      this._itiOui = !!P.oui;
+      if (!P.ok && P.arret) {
+        // « supprime la destination », « enlève le GPS » : rien n'est relancé ; il dit comment arrêter (une appli ne peut pas arrêter Maps).
+        this.log(`Itinéraire refusé : il demande d'ARRÊTER le guidage (« ${P.dit.slice(0, 120)} »)`, true);
+        if (this.brain.open) this.brain.respond([{ id: call.id, name: call.name, response: { result: "REFUSÉ, rien n'a été lancé : il demande d'ARRÊTER le guidage, pas d'y aller. Tu ne peux pas arrêter Google Maps toi-même. Dis-lui seulement : « Je ne peux pas arrêter le guidage moi-même : dis « OK Google, arrête la navigation », ou touche la croix sur l'écran de la voiture. » Ne relance aucun guidage." } }]);
+        return;
+      }
       if (!P.ok) {
         this.log(`Itinéraire vers « ${(call.args || {}).client || '?'} » refusé : il ne l'a pas demandé (il a dit : « ${P.dit.slice(0, 120)} »)`, true);
-        if (this.brain.open) this.brain.respond([{ id: call.id, name: call.name, response: { result: `REFUSÉ, rien n'a été lancé : il n'a pas demandé d'y aller (il a dit : « ${P.dit.slice(0, 160)} »). Citer un client n'est pas une demande de GPS. Ne lance pas le guidage et ne propose pas de le lancer : réponds seulement à ce qu'il a dit (s'il se plaint du GPS, dis « Pardon, je ne lance rien. »).` } }]);
+        if (this.brain.open) this.brain.respond([{ id: call.id, name: call.name, response: { result: `REFUSÉ, rien n'a été lancé : il n'a pas demandé d'y aller (il a dit : « ${P.dit.slice(0, 160)} »). Citer un client n'est pas une demande de GPS. Ne lance pas le guidage et ne propose pas de le lancer : réponds seulement à ce qu'il a dit (s'il se plaint du GPS, dis « Pardon, je ne lance rien. »)${P.autre ? " ; il a dit qu'il ne veut PAS aller chez ce client-là : s'il en a cité un autre, rappelle itineraire pour celui qu'il veut" : ''}.` } }]);
         return;
       }
       if (P.pourquoi) this.log(`Itinéraire permis : ${P.pourquoi}`);
     }
     if (call.name === 'crm_question') {
       const qa = String((call.args || {}).question || (call.args || {}).demande || '');
+      if (VP.ordreEcriture(qa)) {
+        this.log(`crm_question refusé : « ${qa.slice(0, 80)} » est une écriture, pas une question`, true);
+        if (this.brain.open) this.brain.respond([{ id: call.id, name: call.name, response: { result: "REFUSÉ : c'est une écriture, pas une question (crm_question ne peut rien enregistrer). Appelle crm_noter : type (compte_rendu pour une visite ou un appel), client = la société, contact = la personne vue s'il l'a citée, texte = ce qu'il a dicté ; puis relis-lui la phrase préparée et demande « Je l'enregistre ? »." } }]);
+        return;
+      }
+      // Qui, fonction, numéro, adresse : l'annuaire gardé sur l'appareil répond tout de suite, sans IA.
+      if (this.crm.on && this.crm.annuaire.pret && VP.questionContacts(qa) && this._crmAutorise().ok) {
+        const X = this.crm.annuaire.dansPhrase(qa);
+        if (X) return this._crmTool0({ ...call, args: { client: X.contact ? `${X.contact.nom} ${X.g.societe}` : X.g.societe, question: qa } }, null, 'crm_contacts');
+      }
       // Réponse tout de suite, sans IA, si le bilan du CRM donne les clients actifs (sinon : l'analyste, comme avant).
       if (this.crm.on && actifsSimple(qa) && this._crmAutorise().ok) {
         const b = await this.crm.bilan().catch(() => null);
@@ -2780,7 +2883,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     // Journal du 05/11/26, 15h53:24-15h53:34 : itineraire demandé 3 fois pour Miroiterie 35 (Google l'annulait quand
     // Timothée disait « oui » par-dessus) : 3 boutons, 2 messages « résultat », puis « C'est affiché, » coupé. La même
     // lecture demandée de nouveau dans les 20 s : même résultat, rien de réaffiché, rien de redit en message.
-    const lect = ['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit', 'itineraire', 'appeler'].includes(call.name);
+    const lect = ['crm_client', 'crm_contacts', 'crm_agenda', 'crm_bilan', 'crm_produit', 'itineraire', 'appeler'].includes(call.name);
     const R = this._crmRecents || (this._crmRecents = new Map()), nowD = performance.now();
     for (const [k, v] of R) if (nowD - v.at > 20000) R.delete(k);
     const cleD = call.name + ' ' + VP.plat(JSON.stringify(call.args || {})).replace(/[^a-z0-9]+/g, ' ').trim();
@@ -2800,7 +2903,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
     ctl.crm = call.name;                    // outil du CRM : jamais abandonné en route (voir 'toolcancel')
     this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
-    const lecture = ['crm_client', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_actifs'].includes(run);
+    const lecture = ['crm_client', 'crm_contacts', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_actifs'].includes(run);
     if (lecture) this.face.setEmotion('reflexion', CRM_MAX_MS + 2000, 0.6);
     this.log(`CRM (direct) : ${run} ${JSON.stringify(call.args || {}).slice(0, 160)}`, true);
     if (call.name === 'itineraire') this._itiTurn = this._turnN; else if (call.name === 'appeler') this._appelTurn = this._turnN;

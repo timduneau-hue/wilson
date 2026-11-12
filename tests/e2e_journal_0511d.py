@@ -222,7 +222,7 @@ async def main():
         parle(c, "Je regarde dans le CRM... En plus de Christophe et Sylvain Motel, il y a Marie-Laure Gallet et Sébastien Gallet.", sec=2.0)
         await page.wait_for_timeout(500)
         f = next((t for t in c['texts'][n0:] if "n'a PAS été dite" in t), '')
-        check('« Marie-Laure Gallet et Sébastien Gallet » sans outil : jamais dit ; crm_client exigé', not dit('En plus de Christophe') and 'crm_client' in f, f[:300])
+        check('« Marie-Laure Gallet et Sébastien Gallet » sans outil : jamais dit ; crm_contacts exigé (les contacts : annuaire, 12/11/26)', not dit('En plus de Christophe') and ('crm_contacts' in f or 'crm_client' in f), f[:300])
         outil(c, 'crm_client', {'client': 'Gallet'}, 'g1')
         await attendre(lambda: resp(c, 'g1') is not None, 6)
         r = resp(c, 'g1') or ''

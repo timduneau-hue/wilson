@@ -9,6 +9,7 @@
 
 import { Analyste } from './analyste.js';
 import { ecrireLocal } from './stockage.js';
+import { Annuaire, personneParmi, motsNom, sim as simNom, nomDit, cleContact } from './annuaire.js';
 
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
@@ -21,7 +22,7 @@ const minuit = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const plus = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const CACHE_KEY = 'wilson.crm.cache', QUEUE_KEY = 'wilson.crm.attente', PENDING_MS = 5 * 60000, CACHE_MS = 6 * 3600000;
 const JOURNEE_MS = 10 * 60000, BILAN_MS = 15 * 60000;      // journée et bilan récents : réponse immédiate (et sans réseau)
-const LECTURES = { crm_requete: 60000, crm_schema: 30000, crm_client: 45000, crm_journee: 45000, crm_bilan: 45000, crm_produit: 45000, crm_etat: 30000, crm_trouver: 30000 };
+const LECTURES = { crm_requete: 60000, crm_schema: 30000, crm_client: 45000, crm_journee: 45000, crm_bilan: 45000, crm_produit: 45000, crm_etat: 30000, crm_trouver: 30000, crm_annuaire: 60000 };
 const hm = (t) => { const d = new Date(t); return `${d.getHours()}h${pad(d.getMinutes())}`; };
 // Nom de client dit à voix haute, débarrassé des mots qui ne le désignent pas (journal du 05/11/26, 14h36-14h37 :
 // « entreprise Galet » → le CRM proposait ENTREPRISE CREZE et ENTREPRISE VIOLIN, jamais GALLAIS SARL, deux fois de suite ;
@@ -160,10 +161,23 @@ export function ressemblance(q, c) {
   return pds ? tot / pds : 0;
 }
 
+// Le CRM a rendu cette fiche pour ce qui a été dit : chaque mot dit se retrouve-t-il nettement dans la société, ses contacts
+// ou sa ville ? (Un sigle est le même ou rien : le 12/11/26, un sigle de trois lettres a été pris pour une autre société
+// dont un mot lui ressemblait.) Sinon Wilson fait confirmer avant d'agir.
+export function confiant(q, e) {
+  const Q = motsNom(q); if (!Q.length) return false;
+  const noms = [...motsNom(e.societe), ...[e.contact, ...(e.contacts || []).map((c) => c.nom), ...(e.noms || [])].flatMap(motsNom), ...motsNom(e.ville)];
+  const k = Q.join(''); if (k.length >= 2 && k === motsNom(e.societe).join('')) return true;
+  return Q.every((w) => noms.some((t) => simNom(w, t) >= 0.86));
+}
+
 export const CRM_TOOLS = [
   { name: 'crm_client', behavior: 'BLOCKING',
     description: "Tout ce que le CRM de Timothée sait d'un client (société ou contact, même mal prononcé, avec la ville si elle aide) : contacts et téléphones, prochain rendez-vous, dernières visites, comptes rendus, tâches, chiffre d'affaires (exercice, mois en cours, comparaison avec l'an dernier), commandes, devis, articles achetés, réachats en retard, achats chez les concurrents, articles à proposer. Avant de l'appeler, dis « Je regarde dans le CRM… ».",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'le nom de la société ou du contact, tel que Timothée l\'a dit' } }, required: ['client'] } },
+  { name: 'crm_contacts', behavior: 'BLOCKING',
+    description: "Les contacts d'un client, TOUT DE SUITE (annuaire du CRM gardé sur l'appareil, sans attente) : qui est le magasinier, l'acheteur, le dirigeant…, le nom de quelqu'un, sa fonction, son numéro de téléphone, l'adresse ou la ville de la société. Pour « qui est… chez X », « c'est quoi le numéro de… », « comment s'appelle… », « où est… » : cet outil, pas crm_question. Pour tout le reste (visites, comptes rendus, chiffres, commandes, devis) : crm_client ou crm_question.",
+    parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou la personne, tel que Timothée l\'a dit' } }, required: ['client'] } },
   { name: 'crm_agenda', behavior: 'BLOCKING',
     description: "Rendez-vous et tâches d'un jour dans le CRM (« qui je vois aujourd'hui », « ma journée de demain », « jeudi »).",
     parameters: { type: 'OBJECT', properties: { jour: { type: 'STRING', description: "aujourd'hui, demain, un jour de la semaine ou une date" } } } },
@@ -185,7 +199,8 @@ export const CRM_TOOLS = [
     description: "Prépare une écriture dans le CRM : tache (un rappel à une date), compte_rendu (visite ou appel), rdv (prochain rendez-vous avec date et heure), note. RIEN n'est écrit : l'outil renvoie la phrase exacte à relire à Timothée. N'appelle crm_confirmer qu'après son « oui ».",
     parameters: { type: 'OBJECT', properties: {
       type: { type: 'STRING', enum: ['tache', 'compte_rendu', 'rdv', 'note'] },
-      client: { type: 'STRING', description: 'le client concerné (vide pour une tâche personnelle)' },
+      client: { type: 'STRING', description: 'le client concerné : la société (vide pour une tâche personnelle)' },
+      contact: { type: 'STRING', description: "la personne vue, appelée ou concernée, s'il la cite (« j'ai vu Julien », « avec le magasinier ») : son nom tel qu'il l'a dit" },
       texte: { type: 'STRING', description: 'ce qu\'il a dit, mis au propre sans rien ajouter (vide pour un simple rendez-vous)' },
       date: { type: 'STRING', description: "tel qu'il l'a dit : « demain », « jeudi », « le 30 », « 30/10 »… (tâche : jour du rappel ; compte rendu : jour de l'échange, vide = aujourd'hui ; rdv : jour du rendez-vous)" },
       heure: { type: 'STRING', description: 'rendez-vous : « 10h00 »' },
@@ -201,6 +216,9 @@ export class Crm {
     this.app = app; this.delais = { ...LECTURES }; this.cache = new Map(); this.pending = null; this.last = null; this.journee = null; this._bilan = null;
     this.state = ''; this.etat = null; this.call = null; this.queue = [];
     this.analyste = new Analyste({ ask: (p, s) => this.ask(p, s), log: (m) => this.app.log(m) });
+    this.annuaire = new Annuaire({ log: (m) => this.log(m) });      // tous les contacts du CRM, gardés sur l'appareil (PLAN 2 sexies)
+    this.dernier = null;                                           // le dernier client dont on a parlé : { soc, contact, at }
+    setTimeout(() => this.chargerAnnuaire(), 6000);
     this._load();
     try { this.queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]') || []; } catch (_) { this.queue = []; }
     if (this.queue.length) setTimeout(() => this.flushQueue(), 8000);
@@ -240,6 +258,78 @@ export class Crm {
     return this.etat;
   }
 
+  // ---- annuaire du CRM gardé sur l'appareil (PLAN 2 sexies) ----
+  // Relu au plus toutes les 6 h (au démarrage, quand le téléphone se relie à la voiture), en arrière-plan : jamais d'attente
+  // pour Timothée. Un CRM pas encore à jour (« action inconnue ») : Wilson continue comme avant, et réessaie 6 h après.
+  async chargerAnnuaire({ force = false } = {}) {
+    const A = this.annuaire;
+    if (!this.on || this._annuaireEnCours) return false;
+    if (!force && !A.aRelire()) return true;
+    if (!force && this._annuaireNon && Date.now() - this._annuaireNon < 6 * 3600000) return false;
+    this._annuaireEnCours = true; const t0 = performance.now();
+    try {
+      const r = await this.ask({ action: 'crm_annuaire' });
+      if (r && r.ok && A.charger(r)) { this._annuaireNon = 0; this.log(`annuaire : ${A.n} contacts, ${A.groupes.length} sociétés gardés sur l'appareil en ${((performance.now() - t0) / 1000).toFixed(1)} s`); return true; }
+      this._annuaireNon = Date.now();
+      this.log(/action inconnue/.test((r && r.erreur) || '') ? "annuaire : le CRM ne le donne pas encore (CRM à mettre à jour) — je retrouve les clients par le CRM, comme avant"
+        : `annuaire : pas lu (${(r && r.erreur) || 'réponse vide'})${A.pret ? ` — je garde celui du ${A.date()}` : ''}`);
+      return false;
+    } catch (e) { this.log(`annuaire : pas lu (${e.message})${A.pret ? ` — je garde celui du ${A.date()}` : ''}`); return false; }
+    finally { this._annuaireEnCours = false; }
+  }
+  etatAnnuaire() {
+    const A = this.annuaire;
+    return A.pret ? `${A.n} contacts, ${A.groupes.length} sociétés, lu le ${A.date()}` : this._annuaireNon ? 'pas disponible (CRM à mettre à jour ?)' : 'pas encore lu';
+  }
+  // La société et ses contacts, d'après une fiche du CRM (quand l'annuaire n'est pas là).
+  _socDeFiche(e) {
+    const contacts = (e.contacts && e.contacts.length ? e.contacts : [{ nom: e.contact, cle: e.cle }]).filter((c) => c && c.nom).map((c) => ({ nom: c.nom, fonction: c.fonction || '', tel: c.tel || '', mail: c.mail || '', cle: c.cle || cleContact(c.nom, e.societe) }));
+    return { societe: e.societe, ville: e.ville || '', adresse: e.adresse || '', code: '', contacts, principal: contacts.find((c) => c.nom === e.contact) || contacts[0] || null };
+  }
+  _socDeGroupe(g) {
+    const contacts = g.contacts.map((c) => ({ nom: c.nom, fonction: c.fonction, tel: c.tel, mail: c.mail, cle: c.cle, adresse: c.adresse }));
+    const P = this.annuaire.principal(g);
+    return { societe: g.societe, ville: g.ville, adresse: g.adresse, code: g.code, contacts, principal: contacts.find((c) => c.cle === P.cle) || contacts[0], g };
+  }
+  _plusieursTexte(dit, liste) {
+    const qui = (x) => this.annuaire.qui(x.g, x.contact);
+    return `Plusieurs clients possibles pour « ${dit} » : ${liste.map(qui).join(' ; ')}. Demande-lui lequel (cite le nom et la ville de chacun), puis rappelle l'outil avec le nom exact et la ville.`;
+  }
+  // De qui parle-t-il ? { soc, contact (la personne reconnue, ou null), sur, e (fiche, si elle a été lue) } — ou { dire } :
+  // ce qu'il faut lui dire (plusieurs clients possibles, client inconnu, CRM muet). L'annuaire d'abord (immédiat, sans
+  // réseau) ; à défaut, le CRM. sur : assez certain pour agir sans redemander (P8).
+  async _qui(client, signal) {
+    if (this._isLast(client) && this.dernier) { this.dernier.at = Date.now(); return { ...this.dernier, sur: true }; }
+    if (this._isLast(client) && this.last) return { soc: this._socDeFiche(this.last), contact: null, sur: true, e: this.last };
+    const net = nomNet(client), A = this.annuaire;
+    if (net !== String(client || '').replace(/\s+/g, ' ').trim()) this.log(`nom cherché : « ${net} » (dit : « ${client} »)`);
+    if (A.pret) {
+      const r = A.choisir(net);
+      if (r.plusieurs) {
+        const texte = this._plusieursTexte(client, r.plusieurs);
+        this.dernierChoix = { at: Date.now(), dit: client, texte };
+        // parmi les clients possibles, celui dont on parle depuis moins de 30 min est pris, à faire confirmer (P8)
+        const D = this.dernier, pris = D && Date.now() - D.at < 30 * 60000 && r.plusieurs.find((x) => x.g.societe === D.soc.societe);
+        if (pris) { this.log(`plusieurs clients possibles pour « ${net} » : je prends ${D.soc.societe}, celui dont on parlait (à faire confirmer)`); return this._retenir({ soc: this._socDeGroupe(pris.g), contact: pris.contact ? this._contactDe(pris) : null, sur: false, parmi: texte }); }
+        this.log(`plusieurs clients possibles pour « ${net} » (annuaire) : ${r.plusieurs.map((x) => x.g.societe).join(' | ')}`);
+        return { dire: texte, choix: r.plusieurs.map((x) => ({ societe: x.g.societe, ville: x.g.ville })) };
+      }
+      if (r.un) {
+        this.log(`annuaire : « ${net} » → ${A.qui(r.un.g, r.un.contact)}${r.sur ? '' : ' (à faire confirmer)'}`);
+        return this._retenir({ soc: this._socDeGroupe(r.un.g), contact: r.un.contact ? this._contactDe(r.un) : null, sur: r.sur });
+      }
+      this.log(`annuaire : rien pour « ${net} » — je demande au CRM`);
+    }
+    const r = await this.client({ client, parCrm: true }, signal);
+    if (!r.ok) return { dire: `Le CRM ne répond pas : ${r.erreur || 'erreur'}. Dis-le simplement.` };
+    if (!r.e) return { dire: r.texte || 'Client introuvable.', choix: r.choix };
+    const soc = this._socDeFiche(r.e), P = personneParmi(soc.contacts, net).contact || null;
+    // Le CRM a répondu : est-ce bien ce qui a été dit ? Chaque mot dit doit se retrouver dans la société, ses contacts ou sa ville.
+    return this._retenir({ soc, contact: P, sur: !r.approx && confiant(net, r.e), e: r.e, parmi: r.parmi || '' });
+  }
+  _contactDe(x) { const c = x.contact; return { nom: c.nom, fonction: c.fonction, tel: c.tel, mail: c.mail, cle: c.cle, adresse: c.adresse }; }
+  _retenir(R) { this.dernier = { soc: R.soc, contact: R.contact || null, e: R.e || null, at: Date.now() }; return R; }
+
   // ---- fiches gardées pour la journée ----
   _load() {
     try {
@@ -255,6 +345,8 @@ export class Crm {
       noms: [r.contact, ...(r.contacts || []).map((c) => c.nom)].filter(Boolean) };
     this.cache.delete(r.cle); this.cache.set(r.cle, e); this._save();
     this.last = e; this.lastAt = Date.now();
+    if (!this.dernier || this.dernier.soc.societe !== e.societe) this.dernier = { soc: this._socDeFiche(e), contact: null, e, at: Date.now() };
+    else { this.dernier.at = Date.now(); this.dernier.e = e; }
     return e;
   }
   // Fiche gardée qui correspond clairement à ce qui a été dit (sinon null : on demande au CRM).
@@ -267,8 +359,33 @@ export class Crm {
   // « lui », « ce client », vide : le dernier client dont on a parlé.
   _isLast(q) { return !q || /^(lui|elle|ce client|cette societe|le meme|la meme|il|eux)$/i.test(plat(q).trim()); }
 
-  async client({ client = '', cle = '' } = {}, signal) {
-    if (!cle && this._isLast(client) && this.last) { this.lastAt = Date.now(); return { ok: true, e: this.last, cached: true }; }
+  // Fiche gardée d'une société (quel que soit le contact sous lequel elle a été lue).
+  _ficheDeSociete(societe) {
+    const k = motsNom(societe).join('');
+    return (k && [...this.cache.values()].reverse().find((e) => motsNom(e.societe).join('') === k && Date.now() - e.at < CACHE_MS)) || null;
+  }
+  async client({ client = '', cle = '', parCrm = false } = {}, signal) {
+    // « lui », « ce client » : le dernier dont on a parlé — même s'il n'a été vu que dans l'annuaire (GPS, appel, contacts).
+    const D = this.dernier;
+    if (!cle && !parCrm && this._isLast(client) && D && (!this.last || this.last.societe !== D.soc.societe)) {
+      const r = await this.client({ cle: (D.contact || D.soc.principal || {}).cle || '', client: D.soc.societe }, signal);
+      return r.e ? { ...r, contactDit: D.contact || null } : r;
+    }
+    if (!cle && this._isLast(client) && this.last) { this.lastAt = Date.now(); return { ok: true, e: this.last, cached: true, contactDit: (D && D.contact) || null }; }
+    // L'annuaire d'abord : il sait de qui on parle (société ET personne), tout de suite ; le CRM ne donne plus que la fiche.
+    if (!cle && !parCrm && this.annuaire.pret) {
+      const Q = await this._qui(client, signal);
+      if (Q.dire) return { ok: true, texte: Q.dire, choix: Q.choix || [] };
+      if (Q.e) return { ok: true, e: Q.e, approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact };
+      const garde = this._ficheDeSociete(Q.soc.societe);
+      if (garde) { this.last = garde; this.lastAt = Date.now(); this.log(`fiche gardée : ${garde.societe}`); return { ok: true, e: garde, cached: true, approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact }; }
+      const c = Q.contact || Q.soc.principal;
+      const r = await this.ask({ action: 'crm_client', cle: c.cle }, signal);      // (pas de réseau : l'appelant donne les contacts de l'annuaire)
+      if (r.ok && r.cle) return { ok: true, e: this._keep(r), approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact };
+      // fiche renommée ou supprimée depuis la lecture de l'annuaire : le CRM cherche lui-même, et l'annuaire est relu
+      this.log(`annuaire : la fiche de ${c.nom} (${Q.soc.societe}) n'est plus dans le CRM (${(r && r.erreur) || 'introuvable'}) — je demande au CRM et je relis l'annuaire`);
+      this.chargerAnnuaire({ force: true });
+    }
     const net = cle ? client : nomNet(client);
     if (net !== String(client || '').replace(/\s+/g, ' ').trim()) this.log(`nom cherché : « ${net} » (dit : « ${client} »)`);
     const hit = cle ? this.cache.get(cle) : this._fromCache(net);
@@ -296,7 +413,7 @@ export class Crm {
     }
     const e = this._keep(r);
     // nom entendu loin du client trouvé (son mauvais, nom écorché) : Wilson cite d'abord le client, pour qu'on le corrige (C10)
-    return { ok: true, e, approx: !cle && ressemblance(net, e) < 0.9 };
+    return { ok: true, e, approx: !cle && (ressemblance(net, e) < 0.9 || !confiant(net, e)) };
   }
   async agenda(jour, signal, { frais = false } = {}) {
     const d = parseJour(jour || "aujourd'hui") || new Date();
@@ -331,6 +448,8 @@ export class Crm {
   async prefetch() {
     if (!this.on || this._prefetching) return;
     this._prefetching = true; const t0 = performance.now();
+    this.chargerAnnuaire();                                              // en arrière-plan, s'il a plus de 6 h
+    const L0 = this.last, LA0 = this.lastAt, D0 = this.dernier;
     try {
       const j = await this.agenda("aujourd'hui");
       if (!j.ok) return;
@@ -343,26 +462,52 @@ export class Crm {
       }
       this.log(`journée préparée : ${(j.rdv || []).length} rendez-vous, ${n} fiche(s) chargée(s) en ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     } catch (e) { this.log('préparation de la journée impossible : ' + e.message); }
-    finally { this._prefetching = false; }
+    finally { this._prefetching = false; this.last = L0; this.lastAt = LA0; this.dernier = D0; }
   }
 
   // Résout un client pour écrire ou appeler : { e } (fiche), ou { texte, choix } à dire.
   async _resolve(client, signal) {
-    if (this._isLast(client) && this.last) return { e: this.last };
-    const r = await this.client({ client }, signal);
-    if (!r.ok) return { texte: `Le CRM ne répond pas : ${r.erreur || 'erreur'}. Dis-le simplement.` };
-    if (!r.e) return { texte: r.texte || 'Client introuvable.', choix: r.choix };
-    return { e: r.e };
+    const Q = await this._qui(client, signal);
+    return Q.dire ? { texte: Q.dire, choix: Q.choix } : Q;
+  }
+
+  // crm_contacts : les contacts d'un client, tout de suite (annuaire), sinon par sa fiche.
+  async contacts({ client = '' } = {}, signal) {
+    const Q = await this._qui(client, signal);
+    if (Q.dire) return { ok: false, dire: Q.dire };
+    const S = Q.soc, un = (c) => `${c.nom}${c.fonction ? ' (' + c.fonction + ')' : ''}${c.tel ? ', tél. ' + c.tel : ''}`;
+    const avant = Q.parmi ? `(${Q.parmi} J'ai pris ${S.societe}, celui dont vous parliez : commence par ce nom et demande-lui si c'est bien lui.)\n`
+      : !Q.sur ? `(Nom entendu : « ${client} » ; j'ai trouvé ${S.societe}${S.ville ? ', ' + S.ville : ''}. Commence ta réponse par ce nom, pour qu'il puisse te corriger.)\n` : '';
+    const texte = S.g ? this.annuaire.texte(S.g, { contact: Q.contact && S.g.contacts.find((c) => c.cle === Q.contact.cle) })
+      : [`Client : ${S.societe}${S.ville ? ', ' + S.ville : ''}`, S.adresse ? 'Adresse : ' + S.adresse : '', Q.contact ? 'La personne dont il parle : ' + un(Q.contact) : '', `Contacts (${S.contacts.length}) : ` + S.contacts.slice(0, 14).map(un).join(' ; ')].filter(Boolean).join('\n');
+    return { ok: true, texte: avant + texte, soc: S, contact: Q.contact };
   }
 
   // ---- écritures (C2, C3) ----
   async prepare(a, signal) {
     const type = ['tache', 'compte_rendu', 'rdv', 'note'].includes(a.type) ? a.type : 'tache';
-    let e = null;
-    if (a.client || type !== 'tache') {
-      const r = await this._resolve(a.client || '', signal);
-      if (!r.e) return { ok: false, dire: r.texte };
-      e = r.e;
+    let e = null, habituel = false, nbContacts = 0;
+    if (a.client || a.contact || type !== 'tache') {
+      // Journal du 12/11/26, 09h53-09h57 : le compte rendu dicté pour une personne était préparé au nom du premier contact
+      // de la fiche, et rien ne permettait de le corriger (« c'est nul »). Le client ET la personne viennent maintenant de ce
+      // qu'il a dit : la personne citée (contact), ou celle par laquelle il a désigné le client.
+      const Q = await this._qui(a.client || a.contact || '', signal);
+      if (Q.dire) return { ok: false, dire: Q.dire };
+      const S = Q.soc; let c = Q.contact || null; nbContacts = S.contacts.length;
+      const libre = /^(peu importe|n'importe|je (ne )?sais pas|personne|le contact (habituel|principal)|comme d'habitude)/.test(plat(a.contact || '').trim());
+      if (a.contact && a.client && !libre) {
+        const P = personneParmi(S.contacts, a.contact);
+        if (P.contact) c = P.contact;
+        else if (P.plusieurs) return { ok: false, dire: `Chez ${S.societe}, « ${a.contact} » peut être ${P.plusieurs.map((x) => nomDit(x.nom) + (x.fonction ? ' (' + x.fonction + ')' : '')).join(' ou ')}. Demande-lui lequel, sans rien préparer, puis rappelle crm_noter avec ce contact.` };
+        else if (!c) return { ok: false, dire: `Je ne trouve pas « ${a.contact} » parmi les contacts de ${S.societe} dans le CRM (${S.contacts.slice(0, 5).map((x) => nomDit(x.nom)).join(', ')}${S.contacts.length > 5 ? '…' : ''}). Dis-le-lui et demande-lui avec qui c'était (un nouveau contact se crée dans le CRM, pas ici), sans rien préparer.` };
+      }
+      // Personne citée nulle part, société à plusieurs contacts : le contact habituel est pris, et la relecture le nomme —
+      // d'un mot (« non, avec Julien »), Timothée le corrige (le CRM compte les visites par contact).
+      if (!c && S.contacts.length > 1 && type !== 'tache') habituel = true;
+      else if (this.dernier && this.dernier.soc.societe === S.societe) this.dernier.contact = c;       // la personne dont on parle
+      if (!c) c = S.principal;
+      e = { cle: (c && c.cle) || (Q.e && Q.e.cle) || '', societe: S.societe, contact: c ? c.nom : '' };
+      if (!e.cle) return { ok: false, dire: `Je n'ai pas de contact pour ${S.societe} dans le CRM. Dis-le simplement.` };
     }
     const texte = String(a.texte || '').trim();
     if (type !== 'rdv' && !texte) return { ok: false, dire: 'Il manque le texte à noter : demande-lui ce qu\'il veut noter.' };
@@ -393,7 +538,7 @@ export class Crm {
     this.log(`à confirmer : ${p.relu}`, true);
     if (this.app.showConfirm) this.app.showConfirm(p);
     return { ok: true, pending: p,
-      dire: `Rien n'est encore écrit. Relis-lui exactement : « ${p.relu} » puis demande « Je l'enregistre ? ». N'appelle crm_confirmer qu'après son « oui » ; s'il corrige, rappelle crm_noter.` };
+      dire: `Rien n'est encore écrit. Relis-lui exactement : « ${p.relu} » puis demande « Je l'enregistre ? ». N'appelle crm_confirmer qu'après son « oui » ; s'il corrige, rappelle crm_noter.${habituel ? ` (Il n'a cité personne : c'est le contact habituel, ${nomDit(p.contact)}, parmi ${nbContacts} contacts. Dis bien son nom en relisant ; s'il en cite un autre, rappelle crm_noter avec contact = cette personne.)` : ''}` };
   }
 
   // Verrou : y a-t-il un « oui » de Timothée APRÈS la préparation ? heard : [{ t, text, n }] (ce qu'il a dit, horodaté ;
@@ -476,13 +621,25 @@ export class Crm {
   }
 
   // ---- itinéraire (C12) ----
-  async routeTarget({ client = '' } = {}, signal) {
-    const r = await this._resolve(client, signal);
-    if (!r.e) return { ok: false, dire: r.texte };
-    let e = r.e;
-    if (!e.adresse) {                                         // fiche gardée avant la 1.15.0 : sans adresse, on la redemande
-      const c = await this.ask({ action: 'crm_client', cle: e.cle }, signal);
-      if (c.ok && c.cle) e = this._keep(c);
+  async routeTarget({ client = '' } = {}, signal, { confirme = false } = {}) {
+    const Q = await this._qui(client, signal);
+    if (Q.dire) return { ok: false, dire: Q.dire };
+    const S = Q.soc, ou = `${S.societe}${S.ville && !plat(S.ville).includes(plat(S.societe)) ? ' à ' + S.ville : ''}`;
+    // P8, journal du 12/11/26, 08h42 : nom entendu approximatif → le guidage ne part pas ; il demande d'abord (un « oui » suffit).
+    const AC = this.aConfirmer, attendu = !!(AC && Date.now() - AC.at < 120000 && AC.societe === S.societe);
+    if (Q.sur || (confirme && attendu)) this.aConfirmer = null;
+    else {
+      this.aConfirmer = { at: Date.now(), societe: S.societe, ville: S.ville || '', dit: client };
+      this.log(`itinéraire : « ${client} » ressemble à ${ou}, pas assez pour lancer le guidage — je fais confirmer`);
+      return { ok: false, aConfirmer: true, dire: `RIEN N'EST LANCÉ. Ce que tu as entendu (« ${client} ») ressemble à ${ou}, sans certitude. Demande-lui seulement : « Je te guide vers ${ou}, c'est bien ça ? ». S'il dit oui : rappelle itineraire avec client = « ${S.societe}${S.ville ? ' ' + S.ville : ''} ». Sinon, redemande-lui le nom du client.` };
+    }
+    let e = { societe: S.societe, cle: (Q.contact || S.principal || {}).cle || '', contact: (Q.contact || S.principal || {}).nom || '', adresse: (Q.contact && Q.contact.adresse) || S.adresse || '' };
+    if (!e.adresse) {                                         // pas d'adresse dans l'annuaire (ou fiche ancienne) : la fiche du CRM
+      const c = await this.ask({ action: 'crm_client', cle: e.cle }, signal).catch(() => null);
+      if (c && c.ok && c.cle) e = this._keep(c);
+    } else if (!this._ficheDeSociete(S.societe) && e.cle) {
+      // Il y va : sa fiche est lue d'avance, en arrière-plan, pour que la question suivante n'attende pas le CRM.
+      this.ask({ action: 'crm_client', cle: e.cle }).then((c) => { if (c && c.ok && c.cle) { const D = this.dernier; this._keep(c); if (D && D.soc.societe === c.societe) this.dernier = { ...D, e: this.last, at: Date.now() }; this.log(`fiche lue d'avance : ${c.societe}`); } }).catch(() => {});
     }
     if (!e.adresse) return { ok: false, dire: `La fiche de ${e.societe} n'a pas d'adresse dans le CRM. Dis-le simplement.` };
     const q = encodeURIComponent(e.adresse);
@@ -496,11 +653,14 @@ export class Crm {
 
   // ---- appeler (C4) ----
   async callTarget({ client = '', contact = '' } = {}, signal) {
-    const r = await this._resolve(client, signal);
-    if (!r.e) return { ok: false, dire: r.texte };
-    const e = r.e, cs = (e.contacts || []).filter((c) => c.tel && String(c.tel).replace(/\D/g, '').length >= 9);
+    const Q = await this._qui(client, signal);
+    if (Q.dire) return { ok: false, dire: Q.dire };
+    const S = Q.soc, e = { societe: S.societe, cle: (S.principal || {}).cle || '', contact: (S.principal || {}).nom || '' };
+    const cs = S.contacts.filter((c) => c.tel && String(c.tel).replace(/\D/g, '').length >= 9);
     let c = null;
-    if (contact) c = cs.map((x) => ({ x, s: ressemblance(contact, { societe: '', noms: [x.nom] }) })).sort((a, b) => b.s - a.s).filter((y) => y.s >= 0.7).map((y) => y.x)[0] || null;
+    if (contact) c = personneParmi(cs, contact).contact || null;
+    if (c && this.dernier && this.dernier.soc.societe === S.societe) this.dernier.contact = c;
+    if (!c && Q.contact) c = cs.find((x) => x.cle === Q.contact.cle) || null;      // la personne par laquelle il a désigné le client
     if (!c) c = cs.find((x) => x.nom === e.contact) || cs[0];
     if (!c) return { ok: false, dire: `Le CRM n'a pas de numéro pour ${e.societe}. Dis-le simplement.` };
     const tel = String(c.tel).replace(/[^\d+]/g, '');

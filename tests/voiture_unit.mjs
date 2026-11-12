@@ -100,5 +100,41 @@ check('… mais gardée dans le lien de copie des réglages (geste volontaire)',
   check('W9 : et ceux des autres appareils ne remplacent pas ceux de l’appareil', l2.haToken === 'local' && !l2.haUrl && l2.voice === 'Aoede');
   check('W9 : mais le lien de copie les garde (geste volontaire)', 'haToken' in S.shareable(m)); }
 
+
+// ---------- Journal du 12/11/26, 08h41-09h57 (téléphone en voiture, 1.41.1) ; noms de clients changés ----------
+// Demander d'y aller
+for (const u of ['Wilson, amène-moi chez ABM.', 'Je veux aller chez ABM.', 'Défini la destination dans le GPS là.', 'Maintenant, tu vas naviguer vers euh', 'Oui, je veux y aller.', "Il faut que j'aille chez Lebre"])
+  check(`demande d'y aller : « ${u} »`, V.guidageDit(u) === 'oui', V.guidageDit(u));
+check('« Je veux pas aller chez Grandbat. Je veux aller chez ABM. » : demande (refusée à tort le 12/11, 08h45:25)', V.guidageDit('Je veux pas aller chez Grandbat Telecom France. Je veux aller chez ABM.') === 'oui');
+check("« tu m'emmènes pas au bon endroit… je veux pas aller voir Grandbat, je veux aller voir la société ABM » : demande (08h44:11)",
+  V.guidageDit("Et ben, tu m'emmènes pas au bon endroit. Là, tu m'emmènes chez Grandbat. Moi, je veux pas aller voir Grandbat, je veux aller voir la société ABM.") === 'oui');
+check('… et le client refusé est Grandbat, pas ABM', V.clientRefuse("Moi, je veux pas aller voir Grandbat, je veux aller voir la société ABM.", 'Grandbat E et S') && !V.clientRefuse("Moi, je veux pas aller voir Grandbat, je veux aller voir la société ABM.", 'ABM'));
+check('« Là, tu m\'emmènes chez Grandbat, je veux pas ! » : reproche', V.guidageDit("Là, tu m'emmènes chez Grandbat, je veux pas !") === 'non');
+check('« pourquoi tu as activé le GPS alors que j\'ai pas dit qu\'on allait à Lèbre ? » : reproche (06/11)', V.guidageDit("Et pourquoi tu as activé le GPS alors que j'ai pas dit que on allait à Lèbre ?") === 'non');
+check('« Tu m\'emmènes chez Lebre ? » : demande', V.guidageDit("Tu m'emmènes chez Lebre ?") === 'oui');
+for (const u of ['tu supprime la destination dans le GPS là.', 'Tu supprimes toutes les le GPS là, enlève-le.', 'Arrête le guidage', 'Coupe la navigation', "J'ai plus besoin du GPS"])
+  check(`arrêter le guidage : « ${u} » (relancé deux fois le 12/11)`, V.guidageDit(u) === 'arret' && V.estArretGuidage(u), V.guidageDit(u));
+for (const u of ['Mathieu Onjubaud', 'Oui. Oui.', 'Voilà.', 'Qui est le magasinier chez ABM ?', 'Je vais voir Yoann là, il y a des sujets à aborder ?'])
+  check(`ni demande ni refus de guidage : « ${u} »`, V.guidageDit(u) === '', V.guidageDit(u));
+check('Wilson propose d\'y aller : « Tu veux que j\'essaie de naviguer vers Mathieu Onjubaud finalement ? » (son « oui » refusé le 12/11, 08h46:17)',
+  V.proposeGuidage("Pardon, je me suis trompé. Je ne lance rien. Tu veux que j'essaie de naviguer vers Mathieu Onjubaud finalement ?") && V.proposeGuidage('Je te guide vers ABM à La Roche, c\'est bien ça ?') && !V.proposeGuidage("C'est parti, je te guide vers ABM."));
+// L'heure non demandée
+for (const u of ['Voilà.', "Bah, c'est pas trop tôt.", 'お', 'Défini la destination dans le GPS là.', "Et je m'en fous de l'heure. Je t'ai pas demandé l'heure.", "Arrête de me dire l'heure à chaque fois, bordel."])
+  check(`il n'a pas demandé l'heure : « ${u} »`, !V.demandeHeure(u));
+for (const u of ['Il est quelle heure ?', 'On est quel jour ?', 'Rappelle-moi à 18h de sortir les poubelles', "C'est quoi la date d'aujourd'hui ?", 'Mets un minuteur de dix minutes'])
+  check(`il a demandé l'heure, ou un outil qui en a besoin : « ${u} »`, V.demandeHeure(u));
+// Réactions : pas des demandes de travail, même juste après une
+for (const u of ['Voilà.', "Bah, c'est pas trop tôt.", 'お', 'Bon maintenant euh', 'Ah, tu bugues, hein. Et tu mettras ça dans les mises à jour. Ça va pas du tout.', "Et je m'en fous de l'heure. Je t'ai pas demandé l'heure.", "Mais c'est nul ça."])
+  check(`réaction (ne verrouille pas le tour) : « ${u} »`, V.estReaction(u));
+for (const u of ['Mathieu Onjubaud', 'Et son numéro ?', 'Et lui ?', 'Il y a aucun sujet concernant des boîtes ?', 'Oui, vas-y, enregistre-le.', 'Combien ?', 'Chez Lebre', 'Et hier ?', 'Je viens de rencontrer Yohan Moreau.'])
+  check(`pas une simple réaction (reste du travail après une demande de travail) : « ${u} »`, !V.estReaction(u));
+// « Autre chose ? »
+for (const u of ["C'est noté. Je comprends. Excuse-moi. Tu as besoin de quelque chose d'autre maintenant ?", "C'est noté. j'ai pris en note ta remarque pour l'amélioration de Wilson. Tu as besoin d'autre chose ?",
+  "C'est prêt dans le CRM, dans tes tâches : tu pourras le valider quand tu seras garé. Autre chose ?", 'Tu as une autre question ?', 'Je cherche. Tu veux autre chose pendant ce temps ?', "Est-ce que je peux faire autre chose pour toi ?"])
+  check(`fin de trop : « …${u.slice(-45)} »`, !!V.finDeTrop(u), V.finDeTrop(u));
+check('… et c\'est seulement la question finale', V.finDeTrop("C'est noté. Tu as besoin d'autre chose ?") === "Tu as besoin d'autre chose ?");
+for (const u of ['Pour quel client ?', "Je l'enregistre ?", 'Je te guide vers ABM à La Roche, c\'est bien ça ?', 'Avec qui, chez ABM ?', "Tu as trois non lus, et aucun n'est important.", 'Tu veux noter autre chose. Je le relis.', "Qu'est-ce que tu veux changer dans ce compte rendu ?"])
+  check(`pas une fin de trop : « ${u} »`, !V.finDeTrop(u), V.finDeTrop(u));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

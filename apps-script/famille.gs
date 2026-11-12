@@ -131,6 +131,9 @@ function agenda_(d) {
     var du = d.du ? jour_(d.du) : new Date(), jours = Math.max(1, Math.min(+d.jours || 7, 62));
     if (d.du) du.setHours(0, 0, 0, 0);
     var au = new Date(du.getTime() + jours * 86400000);
+    // Demande de Timothée du 12/11/26 (« une parfaite connaissance de mon agenda ») : tous : true → l'agenda Famille ET ses
+    // propres agendas (le sien, BOSCHAT LAVEIX…), en lecture seule. Wilson le demande pour « ma journée » (avec le CRM).
+    if (d.tous) return { ok: true, tous: true, evenements: agendaTous_(du, au) };
     return { ok: true, evenements: cal.getEvents(du, au).slice(0, 40).map(function (e) {
       return { id: e.getId(), titre: e.getTitle(), debut: +e.getStartTime(), fin: +e.getEndTime(), journee: e.isAllDayEvent(), lieu: e.getLocation() || '' };
     }) };
@@ -166,6 +169,23 @@ function agenda_(d) {
     return { ok: true, titre: t };
   }
   return { ok: false, erreur: 'action inconnue : ' + a };
+}
+// Tout ce qui est prévu sur [debut, fin[ : agenda Famille + agendas que Timothée possède, sans les agendas d'anniversaires
+// et de jours fériés ni les événements qu'il a refusés ; le même événement présent dans deux agendas n'est donné qu'une fois.
+// Lecture seule. 60 événements au plus, dans l'ordre.
+function agendaTous_(debut, fin) {
+  var fam = agendaFamille_(), cals = [fam], vus = {}, deja = {}, l = [];
+  try { CalendarApp.getAllOwnedCalendars().forEach(function (c) { cals.push(c); }); } catch (e) {}
+  cals.forEach(function (c) {
+    var id = c.getId(); if (vus[id]) return; vus[id] = 1;
+    if (id !== fam.getId() && /anniv|birthday|f[ée]ri|holiday/i.test(c.getName())) return;
+    c.getEvents(debut, fin).forEach(function (ev) {
+      try { if (ev.getMyStatus && ev.getMyStatus() === CalendarApp.GuestStatus.NO) return; } catch (e) {}
+      var k = ev.getTitle() + '|' + (+ev.getStartTime()); if (deja[k]) return; deja[k] = 1;
+      l.push({ titre: ev.getTitle(), debut: +ev.getStartTime(), fin: +ev.getEndTime(), journee: ev.isAllDayEvent(), lieu: ev.getLocation() || '', agenda: c.getName() });
+    });
+  });
+  return l.sort(function (x, y) { return x.debut - y.debut; }).slice(0, 60);
 }
 // Ce qui est déjà prévu sur [debut, fin[ : agenda Famille + agendas de Timothée (ceux qu'il possède : le sien, BOSCHAT
 // LAVEIX…), sans les événements qu'il a refusés. Les agendas d'anniversaires et de jours fériés, et les événements « toute la

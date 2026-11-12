@@ -243,6 +243,13 @@ check('Agenda : jour entier déjà occupé (le week-end chez mamie) → conflit'
 fa = JF({ action: 'agenda_ajouter', titre: 'Cinéma', debut: new Date(2026, 10, 12, 20, 30).getTime() });
 check('Agenda : créneau libre → ajouté directement', fa.ok && !fa.conflit && evs.length === 3, JSON.stringify(fa));
 evs.pop();
+// Tous ses agendas, pour « ma journée » (demande du 12/11/26) : Famille + les siens, sans anniversaires ni événements refusés
+fa = JF({ action: 'agenda_lire', du: '2026-11-13', jours: 1, tous: true });
+check('Agenda (tous) : le jour demandé dans l\'agenda Famille et le sien, avec le nom de l\'agenda', fa.ok && fa.tous === true && fa.evenements.some((e) => e.titre === 'Dentiste' && e.agenda === 'Timothée') && fa.evenements.some((e) => e.titre === 'Anniversaire Paul' && e.journee), JSON.stringify(fa));
+check('Agenda (tous) : ni l\'événement refusé, ni l\'agenda des anniversaires, ni un autre jour', !fa.evenements.some((e) => /refusée|Léa|Médecin|mamie/.test(e.titre)), JSON.stringify(fa.evenements.map((e) => e.titre)));
+fa = JF({ action: 'agenda_lire', du: '2026-11-12', jours: 1, tous: true });
+check('Agenda (tous) : le même événement n\'est donné qu\'une fois, dans l\'ordre', fa.evenements.filter((e) => e.titre === 'Médecin Louis').length === 1 && fa.evenements.every((e, i, l) => !i || l[i - 1].debut <= e.debut), JSON.stringify(fa.evenements.map((e) => e.titre)));
+check('Agenda (sans « tous ») : toujours l\'agenda Famille seul (ancien Wilson)', !JF({ action: 'agenda_lire', du: '2026-11-13', jours: 1 }).tous && !JF({ action: 'agenda_lire', du: '2026-11-13', jours: 1 }).evenements.some((e) => e.titre === 'Dentiste'));
 fa = JF({ action: 'agenda_annuler', id: evs[1].id });
 check('Agenda : annuler un événement', fa.ok && evs.length === 1);
 check('Agenda : titre manquant refusé', JF({ action: 'agenda_ajouter', debut: t1 }).ok === false);
