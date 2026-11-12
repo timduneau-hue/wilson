@@ -66,7 +66,7 @@ async def main():
             ws.on_message(on_msg)
 
         async def setup_page(settings):
-            ctx = await b.new_context(viewport={'width': 412, 'height': 860}, permissions=['microphone', 'camera'], service_workers='block')
+            ctx = await b.new_context(bypass_csp=True, viewport={'width': 412, 'height': 860}, permissions=['microphone', 'camera'], service_workers='block')
             await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps(settings))
             await ctx.add_init_script(FAKE_TTS)
             page = await ctx.new_page(); logs = []

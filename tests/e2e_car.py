@@ -75,7 +75,7 @@ async def main():
             except Exception as e: conn['after'] = {'err': str(e)[:200]}
             ws.send(json.dumps({'serverContent': {'outputTranscription': {'text': 'Demain tu vois Jean Gaudin à 14h00.'}, 'turnComplete': True}}))
 
-        ctx = await b.new_context(viewport={'width': 412, 'height': 860}, user_agent=UA, is_mobile=True, has_touch=True,
+        ctx = await b.new_context(bypass_csp=True, viewport={'width': 412, 'height': 860}, user_agent=UA, is_mobile=True, has_touch=True,
                                   permissions=['microphone', 'camera', 'geolocation'], geolocation={'latitude': 47.06, 'longitude': -0.88}, service_workers='block')
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps(
             {'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'logUrl': URL, 'crm': True, 'voitureAuto': True, 'v': 3}))

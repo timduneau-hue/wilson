@@ -79,7 +79,7 @@ async def main():
                 {'name': 'France Inter ', 'url_resolved': 'https://icecast.radiofrance.fr/franceinter-hifi.aac', 'codec': 'AAC', 'countrycode': 'FR'}]))
 
         async def page_with(settings):
-            ctx = await b.new_context(viewport={'width': 800, 'height': 1000}, permissions=['microphone', 'camera'], service_workers='block')
+            ctx = await b.new_context(bypass_csp=True, viewport={'width': 800, 'height': 1000}, permissions=['microphone', 'camera'], service_workers='block')
             await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps(settings))
             await ctx.add_init_script(FAKE_TTS)
             page = await ctx.new_page(); logs = []
@@ -120,6 +120,14 @@ async def main():
             return ''
         r = await tool('a1', 'maison_commande', {'appareil': 'light.grande_lumiere_salon', 'action': 'allumer'})
         check('Allumer : service light.turn_on, état relu (« Grande lumière salon : allumé »)', ('light', 'turn_on', {'entity_id': 'light.grande_lumiere_salon'}) in st['svc'] and r.startswith('OK') and 'Grande lumière salon : allumé' in r, r)
+        # Journal du 11/11/26 (21h18:22 « eteindre → ok — allumé », remarques de 20h59:35 et 21h00:45) : la lampe restée
+        # allumée est un échec dit tel quel ; et le petit son de réflexion part pendant cette attente (remarque de 20h58:09).
+        await page.evaluate("wilson._heardAt = 0; wilson._ticAt = 0")
+        t_dep = await page.evaluate("performance.now()")
+        r = await tool('a1b', 'maison_commande', {'appareil': 'light.lumiere_jaune_salon', 'action': 'eteindre'})
+        check('Lampe restée allumée après « éteindre » : Échec, « resté allumé », jamais OK (11/11/26, 21h18)', r.startswith('Échec') and 'resté allumé' in r and "ne dis surtout pas que c'est fait" in r, r)
+        tic = await page.evaluate("wilson._ticAt || 0")
+        check('… et le petit son de réflexion pendant l\'attente, à la maison (remarque du 11/11/26, 20h58)', tic > t_dep and any('Je cherche : petit son de réflexion (maison)' in l for l in logs), str(tic))
         r = await tool('a2', 'maison_commande', {'appareil': 'grande lumière', 'action': 'luminosite', 'valeur': '40'})
         check('Luminosité sur une lampe branchée sur prise : refus expliqué, rien envoyé', r.startswith('Échec') and 'prise' in r and not any('brightness_pct' in x[2] for x in st['svc']), r)
         r = await tool('a3', 'maison_commande', {'appareil': 'Plafonnier cuisine', 'action': 'luminosite', 'valeur': '40'})

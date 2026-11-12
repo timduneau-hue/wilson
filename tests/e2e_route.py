@@ -66,7 +66,7 @@ async def main():
             try: await route.fulfill(status=200, content_type='application/json', headers=H, body=json.dumps(body, ensure_ascii=False))
             except Exception: pass
 
-        ctx = await b.new_context(viewport={'width': 412, 'height': 860}, user_agent=UA, is_mobile=True, has_touch=True,
+        ctx = await b.new_context(bypass_csp=True, viewport={'width': 412, 'height': 860}, user_agent=UA, is_mobile=True, has_touch=True,
                                   permissions=['microphone', 'camera'], service_workers='block')
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps(
             {'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'listenMode': 'regard', 'convTimeout': 12, 'voitureAuto': False, 'crm': True, 'logUrl': URL, 'v': 3}))

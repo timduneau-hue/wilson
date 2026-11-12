@@ -73,7 +73,7 @@ async def main():
             ws.on_message(on_msg)
 
         async def ouvrir(ua, settings, init=''):
-            ctx = await b.new_context(viewport={'width': 1138, 'height': 712}, permissions=['microphone', 'camera'], service_workers='block', user_agent=ua)
+            ctx = await b.new_context(bypass_csp=True, viewport={'width': 1138, 'height': 712}, permissions=['microphone', 'camera'], service_workers='block', user_agent=ua)
             await ctx.add_init_script("if (!localStorage.getItem('wilson.settings')) { localStorage.setItem('wilson.settings', JSON.stringify(%s)); %s }" % (json.dumps(settings), init))
             await ctx.add_init_script(FAKE_TTS)
             page = await ctx.new_page(); logs = []

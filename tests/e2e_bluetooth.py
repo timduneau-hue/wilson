@@ -68,7 +68,7 @@ def audio_chunks(seconds):
 async def run(p, bt, noms, label, ua=None, conns=None):
     b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
         f'--use-file-for-fake-audio-capture={S}/fixtures/quiet.wav', '--autoplay-policy=no-user-gesture-required'])
-    ctx = await b.new_context(viewport={'width': 412, 'height': 900}, permissions=['microphone', 'camera'], service_workers='block', **({'user_agent': ua} if ua else {}))
+    ctx = await b.new_context(bypass_csp=True, viewport={'width': 412, 'height': 900}, permissions=['microphone', 'camera'], service_workers='block', **({'user_agent': ua} if ua else {}))
     await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify({apiKey:'AIzaTESTTESTTESTTESTTESTTESTTEST', listenMode:'regard', v:4}));")
     await ctx.add_init_script(STUB % ('true' if bt else 'false', 'true' if noms else 'false', "'default'"))
     if ua: await ctx.add_init_script(GAZE)

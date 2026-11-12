@@ -36,7 +36,7 @@ async def main():
             await route.fulfill(status=200, content_type='application/json', headers=H, body=json.dumps(body, ensure_ascii=False))
 
         async def device(settings, name):
-            ctx = await b.new_context(viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'], service_workers='block')
+            ctx = await b.new_context(bypass_csp=True, viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'], service_workers='block')
             if settings is not None:
                 await ctx.add_init_script("if (!sessionStorage.getItem('init')) { sessionStorage.setItem('init', '1'); localStorage.setItem('wilson.settings', %s); }" % json.dumps(json.dumps(settings)))
             await ctx.add_init_script("Object.defineProperty(navigator, 'share', { value: async (d) => { window.__shared = d; }, configurable: true });")
@@ -77,7 +77,8 @@ async def main():
         await tab.goto(link)
         await tab.wait_for_selector('#codecopie:not([hidden])', timeout=10000)
         await tab.fill('#cc-code', '0000' if code != '0000' else '1111'); await tab.click('#cc-go')
-        await tab.wait_for_selector('#cc-status:not([hidden])', timeout=10000)
+        # (« Vérification… » s'affiche d'abord : on attend la fin du déchiffrement, sinon le bon code tapé ensuite était effacé)
+        await tab.wait_for_function("document.getElementById('cc-status').textContent.includes('incorrect')", timeout=10000)
         check('Tablette : mauvais code → refusé, on peut réessayer', 'incorrect' in await tab.inner_text('#cc-status'))
         await tab.fill('#cc-code', code); await tab.click('#cc-go')
         await tab.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)

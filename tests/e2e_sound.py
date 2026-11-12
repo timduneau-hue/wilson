@@ -32,7 +32,7 @@ async def main():
         # Micro : rafales de bruit fort (comme quelqu'un qui parle, ou l'écho de Wilson sans annulation d'écho).
         b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
             f'--use-file-for-fake-audio-capture={S}/fixtures/bursts.wav', '--autoplay-policy=no-user-gesture-required'])
-        ctx = await b.new_context(viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'], service_workers='block')
+        ctx = await b.new_context(bypass_csp=True, viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'], service_workers='block')
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify({apiKey:'AIzaTESTTESTTESTTESTTESTTESTTEST', listenMode:'toujours', convTimeout: 30, logUrl:'%s', v:3}));" % URL)
         await ctx.add_init_script(SPY)
         page = await ctx.new_page(); logs = []

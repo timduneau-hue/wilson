@@ -55,7 +55,7 @@ async def main():
             elif a == 'reglages_lire': body = {'ok': True, 'reglages': None, 't': 0}
             else: body = {'ok': True}
             await route.fulfill(status=200, content_type='application/json', headers=H, body=json.dumps(body, ensure_ascii=False))
-        ctx = await b.new_context(viewport={'width': 1138, 'height': 712}, permissions=['microphone', 'camera'], service_workers='block')
+        ctx = await b.new_context(bypass_csp=True, viewport={'width': 1138, 'height': 712}, permissions=['microphone', 'camera'], service_workers='block')
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps(
             {'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'camera': False, 'listenMode': 'toujours', 'city': 'Angers', 'haUrl': HA, 'haToken': 'jeton', 'logUrl': 'https://script.google.com/macros/s/AKfycbTESTTESTTESTTESTTESTTESTTEST/exec', 'v': 3}))
         await ctx.add_init_script(FAKE_TTS)

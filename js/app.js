@@ -38,7 +38,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.41.0';
+const VERSION = '1.41.1';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -1455,7 +1455,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         // (plus de 60 s : ce n'était pas une attente, mais une phrase bien plus ancienne — « 90,7 s » après un essai de voix, 04/11/26)
         const dl = end && end > (this._convAt || 0) - 15000 ? Math.round((now - end) / 100) / 10 : null;   // « 34,1 s » après un toucher (04/11/26, 11h37)
         this._liveTurn = { t: now, sec: 0, delay: dl != null && dl <= 60 ? dl : null, search: this._searchMs || 0 };
-        this._searchMs = 0;
+        this._searchMs = 0; this._tourPermis = this._turnN;            // ce tour a eu le droit de parler (R1) : son outil aussi
       }
       this._liveTurn.sec += i16.length / (rate || 24000); this._apresOutil = null; this._voixDepuis = performance.now();
       this.audio.play(i16, rate); this.lastActivity = performance.now();
@@ -2023,7 +2023,11 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (this.brain.syncTools ? calls.length : calls.some((c) => c.name !== 'exprimer_emotion' && c.name !== 'memoriser')) { this._toolTurn = this._turnN; this._toolAt = performance.now(); }
     for (const c of calls) {
       const a = c.args || {};
-      if (!['exprimer_emotion'].includes(c.name) && !this._reponsePermise()) {
+      // Journal du 11/11/26, 11h55:28 et 21h03:30 : « Je regarde où tu en es… » / « Je prépare ton briefing… » dit (permis),
+      // puis l'outil du MÊME tour refusé (« voix 0.0 s ») : la fin de cette petite phrase remettait le compte à zéro, et
+      // Timothée a dû redemander. Un outil appelé dans un tour qui a déjà eu le droit de parler est permis.
+      const memeTour = this._tourPermis === this._turnN && !!this._liveTurn;
+      if (!['exprimer_emotion'].includes(c.name) && !this._reponsePermise() && !memeTour) {
         this.log(`Outil ${c.name} refusé : personne ne me regardait vraiment pendant la phrase (${this._etatRegard()})`, true);
         res.push({ id: c.id, name: c.name, response: { result: "Personne ne te regardait : ce n'était pas pour toi. Ne fais rien et ne dis rien." } });
         continue;
@@ -2565,7 +2569,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
   // La maison (PLAN 7 bis) : la demande part à Home Assistant, sa réponse revient à Gemini qui la dit.
   async _maisonTool(call, demande) {
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
-    ctl.maison = true;                                                                // pas de bip pour une lampe
+    ctl.maison = true;                                                                // (petit son seulement après 1 s d'attente)
     this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
     let res;
     try { res = await this.maison.dire(demande, ctl.signal); }
@@ -2701,7 +2705,7 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
 
   async _maisonCmd(call) {
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now(), a = call.args || {};
-    ctl.maison = true;                                                                // pas de bip pour une lampe
+    ctl.maison = true;                                                                // (petit son seulement après 1 s d'attente)
     // Journal du 05/11/26, 20h18:43-20h18:52 : « Éteins toutes les lumières » → Gemini a d'abord ALLUMÉ les trois, puis envoyé
     // « allumer » et « éteindre » ensemble pour les mêmes lumières. Une commande contraire à sa dernière demande est refusée.
     const voulu = call.name === 'maison_commande' && ['allumer', 'eteindre'].includes(a.action) ? this._intentionMaison() : null;
@@ -3443,8 +3447,11 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     // Question de Timothée du 06/11/26, 00h11 (« pourquoi je n'ai pas le bip-bip pendant qu'il recherche, comme sur le
     // téléphone ? ») : à la maison aussi, pendant une vraie recherche (Claude, analyste, CRM, Internet) — pas pour une lampe —,
     // même s'il a détourné les yeux et que la discussion s'est mise en veille, jusqu'à la réponse.
+    // Remarque de Timothée du 11/11/26, 20h58:09 (« rajoute le petit son que tu fais quand tu recherches une information pour
+    // toutes les requêtes ») : à la maison aussi pour les autres outils qui font attendre (maison, météo, bourse…) ; il ne
+    // part qu'après 1 s d'attente, donc jamais pour une lampe qui répond tout de suite.
     const rechMaison = !vb && this.settings.bipMaison !== false && (this.state === 'conversation' || this.state === 'veille')
-      && ((this._analyses && this._analyses.size > 0) || (this.state === 'conversation' && this._searches && [...this._searches.values()].some((c) => !c.maison)));
+      && ((this._analyses && this._analyses.size > 0) || (this.state === 'conversation' && ((this._searches && this._searches.size > 0) || this._outilsEnCours > 0)));
     if (((cherche && vb) || rechMaison) && !this.audio.playing && !this.voice.speaking && now - (this._heardAt || 0) > 1200) {
       if (!this._chercheDepuis) this._chercheDepuis = now;
       if (now - this._chercheDepuis > (vvAttend ? 0 : 1000) && now - (this._ticAt || 0) > 2500) { this._ticAt = now; try { this.audio.tone('reflexion'); } catch (_) {} if (!this._ticN++) this.log(`Je cherche : petit son de réflexion (${vb ? 'voiture' : 'maison'})`); }

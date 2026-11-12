@@ -43,7 +43,7 @@ async def main():
             if '/api/services/' in u: await asyncio.sleep(0.6)
             await route.fulfill(status=200, content_type='application/json', headers=H, body=json.dumps(body))
 
-        ctx = await b.new_context(viewport={'width': 800, 'height': 1000}, permissions=['microphone', 'camera'], service_workers='block')
+        ctx = await b.new_context(bypass_csp=True, viewport={'width': 800, 'height': 1000}, permissions=['microphone', 'camera'], service_workers='block')
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps(
             {'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'listenMode': 'regard', 'convTimeout': 12, 'voitureAuto': False, 'home': 'Timothée, sa femme Julie et Louis', 'haUrl': HA, 'haToken': 'jeton', 'prenomMaison': True, 'v': 3}))
         await ctx.add_init_script(FAKE_TTS); await ctx.add_init_script(GAZE)

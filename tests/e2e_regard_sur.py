@@ -39,7 +39,7 @@ async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
             f'--use-file-for-fake-audio-capture={S}/fixtures/quiet.wav', '--autoplay-policy=no-user-gesture-required'])
-        ctx = await b.new_context(viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'], service_workers='block')
+        ctx = await b.new_context(bypass_csp=True, viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'], service_workers='block')
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify({apiKey:'AIzaTESTTESTTESTTESTTESTTESTTEST', listenMode:'regard', brainMode:'live', convTimeout: 12, subtitles: true, v:3}));")
         await ctx.add_init_script(GAZE)
         page = await ctx.new_page(); logs = []
@@ -167,6 +167,21 @@ async def main():
         await page.wait_for_timeout(250)
         check('Après la suite de l\'outil : phrase sans regard (« I have to go ») → réponse retenue',
               not await page.evaluate('wilson.audio.playing') and await page.evaluate('wilson._nRetenues') == n0 + 1)
+        # Journal du 11/11/26, 11h55:28 et 21h03:30 : il dit « Je regarde où tu en es… » (permis), puis appelle l'outil dans
+        # le MÊME tour, après la fin de cette petite phrase : l'outil ne doit pas être refusé (« voix 0.0 s »).
+        await page.wait_for_timeout(900); await page.evaluate("window.__look = true; window.__parle(900)"); await page.wait_for_timeout(1000)
+        for c in audio_chunks(0.5):
+            conn['ws'].send(json.dumps({'serverContent': {'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]}}}))
+        await page.wait_for_timeout(250)
+        await page.wait_for_function('!wilson.audio.playing', timeout=5000)
+        await page.evaluate("window.__look = false"); await page.wait_for_timeout(700)
+        conn['ws'].send(json.dumps({'toolCall': {'functionCalls': [{'id': 't3', 'name': 'date_et_heure', 'args': {}}]}}))
+        await page.wait_for_timeout(300)
+        tr = [x for x in conn['tools'] if x.get('id') == 't3']
+        check('Petite phrase permise (« Je regarde… ») puis outil dans le même tour : accepté (11/11/26, 11h55:28)', tr and 'Personne' not in json.dumps(tr[0], ensure_ascii=False), json.dumps(tr, ensure_ascii=False)[:160])
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': 'Je regarde.'}}}))
+        conn['ws'].send(json.dumps({'serverContent': {'turnComplete': True}}))
+        await page.wait_for_timeout(300)
         await page.evaluate("wilson.endConversation('test')")
         await page.wait_for_timeout(400)
 
@@ -184,7 +199,7 @@ async def main():
         mg = await page.evaluate("""import('./js/settings.js').then((m) => {
           const k = 'wilson.settings', old = localStorage.getItem(k), r = {};
           r.def = m.DEFAULTS.face;
-          localStorage.setItem(k, JSON.stringify({ face: 'lumiere', v: 3, _t: 5 })); const a = m.loadSettings(); r.lum = [a.face, a.v, a._t > 5];
+          localStorage.setItem(k, JSON.stringify({ face: 'lumiere', v: 3, _t: 5 })); const a = m.loadSettings(); r.lum = [a.face, a.v, a._sale === true];   // W19 (1.39.0) : « changement à envoyer » (l'heure vient du script)
           localStorage.setItem(k, JSON.stringify({ face: 'led', v: 3, _t: 5 })); const c = m.loadSettings(); r.led = [c.face, c._t];
           localStorage.setItem(k, old); return r; })""")
         check('Visage Miel par défaut ; « Lumière » (ancien défaut) → Miel, daté pour la synchro ; un autre choix (Rétro) est gardé',

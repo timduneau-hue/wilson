@@ -19,7 +19,7 @@ BIPS = """(async () => {   // détecteur de fumée (3,1 kHz, motif T3) : 12 s de
 
 async def ouvrir(b, video, st, store=None):
     args_ctx = dict(viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'], service_workers='block', user_agent=TABLETTE)
-    ctx = await b.new_context(**args_ctx)
+    ctx = await b.new_context(bypass_csp=True, **args_ctx)
     init = "localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps({'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'logUrl': URL, 'gardeAuto': False, 'v': 4})
     if store: init += "localStorage.setItem('wilson.visages', %s);" % json.dumps(store)
     await ctx.add_init_script(init)

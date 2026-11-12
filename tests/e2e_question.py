@@ -58,7 +58,7 @@ async def main():
                 elif 'realtimeInput' in d and 'text' in d['realtimeInput']: conn['texts'].append(d['realtimeInput']['text'])
             ws.on_message(on_msg)
 
-        ctx = await b.new_context(viewport={'width': 412, 'height': 860}, permissions=['microphone', 'camera'], service_workers='block')
+        ctx = await b.new_context(bypass_csp=True, viewport={'width': 412, 'height': 860}, permissions=['microphone', 'camera'], service_workers='block')
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify(%s));" % json.dumps(
             {'apiKey': 'AIzaTESTTESTTESTTESTTESTTESTTEST', 'listenMode': 'toujours', 'convTimeout': 60, 'logUrl': URL, 'crm': True, 'voitureAuto': False, 'v': 3}))
         await ctx.add_init_script(FAKE_TTS)

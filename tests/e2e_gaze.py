@@ -22,7 +22,7 @@ async def run(video, expect_reply):
     async with async_playwright() as p:
         b = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
             f'--use-file-for-fake-audio-capture={S}/fixtures/bursts.wav', f'--use-file-for-fake-video-capture={S}/fixtures/{video}.y4m', '--autoplay-policy=no-user-gesture-required'])
-        ctx = await b.new_context(viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'])
+        ctx = await b.new_context(bypass_csp=True, viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'])
         await ctx.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify({apiKey:'AQ.Ab8RN6ExampleExampleExampleExampleExample12345', brainMode:'eco', v:3}));")
         await ctx.add_init_script(FAKE_TTS)
         page = await ctx.new_page(); logs = []

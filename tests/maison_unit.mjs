@@ -101,4 +101,41 @@ t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'deman
   t(/clé à l'intérieur/.test(motVoiture('return code: 8, message: The key is detected inside the vehicle. Please adjust and try again.(64)')) && /appli MG/.test(motVoiture('return code: 401, message: {"code":401}')), 'refus de la voiture traduits (clé dedans, appli MG ouverte)');
   globalThis.fetch = f0;
 }
+// Journal du 11/11/26 (18h44:47, 20h58:53, 21h16:55, 21h18:22) : « allumer → ok — éteint ». La lumière qui reste éteinte
+// est un échec ; une prise Wi-Fi qui met 2 s à dire son nouvel état est attendue ; le clignotement s'arrête si on lui
+// redonne un ordre (remarque de 21h02:14) et une prise clignote 3 fois au plus, toutes les 2 s.
+{
+  const L = { entity_id: 'switch.balcon', state: 'off', attributes: { friendly_name: 'Éclairage balcon' } };
+  let marche = false, retard = 0, appelsB = [];
+  const f0 = globalThis.fetch;
+  globalThis.fetch = async (url, o) => {
+    if (url.endsWith('/api/config')) return { status: 200, ok: true, json: async () => ({}) };
+    if (url.endsWith('/api/states')) return { status: 200, ok: true, json: async () => [L] };
+    if (url.includes('/api/states/')) return { status: 200, ok: true, json: async () => L };
+    if (url.endsWith('/api/template')) return { status: 200, ok: true, text: async () => 'switch.balcon|Balcon|False|False' };
+    if (url.includes('/api/services/')) {
+      const svc = url.split('/api/services/')[1]; appelsB.push([svc, Date.now()]);
+      if (marche) { const v = /turn_on/.test(svc) ? 'on' : /turn_off/.test(svc) ? 'off' : /toggle/.test(svc) ? (L.state === 'on' ? 'off' : 'on') : L.state; if (retard) setTimeout(() => { L.state = v; }, retard); else L.state = v; }
+      return { status: 200, ok: true, json: async () => [] };
+    }
+    return { status: 404, ok: false, json: async () => ({}) };
+  };
+  const b = new Maison({ settings: { haUrl: 'https://ha.exemple.ts.net', haToken: 'bon' } });
+  await b.rafraichir();
+  let r = await b.commande({ appareil: 'switch.balcon', action: 'allumer' });
+  t(!r.ok && /resté éteint/.test(r.info) && /ne dis surtout pas que c'est fait/.test(r.info), 'lumière restée éteinte après « allumer » : échec, jamais « ok — éteint » (11/11/26) : ' + r.info);
+  marche = true; retard = 1500; L.state = 'off';
+  r = await b.commande({ appareil: 'switch.balcon', action: 'allumer' });
+  t(r.ok && /Éclairage balcon : allumé/.test(r.info), 'prise Wi-Fi qui dit son nouvel état 1,5 s plus tard : attendue, « allumé » : ' + r.info);
+  retard = 0; L.state = 'on'; appelsB = [];
+  r = await b.commande({ appareil: 'switch.balcon', action: 'clignoter', valeur: '5' });
+  t(r.ok && /clignote 3 fois/.test(r.info), 'prise : 3 clignotements au plus : ' + r.info);
+  await new Promise((z) => setTimeout(z, 2500));
+  t(appelsB.length === 2 && appelsB[1][1] - appelsB[0][1] >= 1900, 'prise : une bascule toutes les 2 s : ' + JSON.stringify(appelsB));
+  r = await b.commande({ appareil: 'switch.balcon', action: 'eteindre' });
+  const n0 = appelsB.length;
+  await new Promise((z) => setTimeout(z, 3000));
+  t(r.ok && L.state === 'off' && appelsB.length === n0, 'éteindre pendant le clignotement : il s\'arrête et ne rallume pas la lampe ensuite : ' + JSON.stringify(appelsB.slice(n0)) + ' ' + L.state);
+  globalThis.fetch = f0;
+}
 console.log(`${ok}/${ok + ko} OK`); process.exit(ko ? 1 : 0);

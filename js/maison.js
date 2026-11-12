@@ -230,11 +230,13 @@ export class Maison {
   // Journal du 05/11/26, 20h18:52 : « allumer → Lumière jaune salon : ok — Lumière jaune salon : éteint » (Gemini avait
   // envoyé « allumer » et « éteindre » en même temps). Une lumière ou une prise qui n'est pas dans l'état demandé après la
   // commande : échec, dit tel quel (jamais « c'est allumé » quand c'est éteint).
+  // Journal du 11/11/26 (18h44:47, 20h58:53, 21h16:55, 21h18:22 ; remarques de Timothée de 20h59:35 et 21h00:45) : « allumer →
+  // ok — éteint » revenait encore : l'inventaire range l'état dans `etat`, la vérification lisait `state` (toujours vide).
   _verifie(e, allume, info) {
     if (e.domaine !== 'light' && e.domaine !== 'switch') return { ok: true, info };
-    const n = (this.inv || []).find((x) => x.id === e.id);
-    if (!n || !n.state || n.state === 'unavailable' || n.state === 'unknown') return { ok: true, info };
-    if (allume ? n.state === 'off' : n.state === 'on') return { ok: false, info: `${info} (commande envoyée, mais ${e.nom} est resté${allume ? ' éteint' : ' allumé'})` };
+    const n = (this.inv || []).find((x) => x.id === e.id), st = n && n.etat;
+    if (!st || st === 'unavailable' || st === 'unknown') return { ok: true, info };
+    if (allume ? st === 'off' : st === 'on') return { ok: false, info: `${info} (commande envoyée, mais Home Assistant indique que ${e.nom} est resté${allume ? ' éteint' : ' allumé'} : ne dis surtout pas que c'est fait ; dis-lui que ça n'a pas marché)` };
     return { ok: true, info };
   }
 
@@ -248,10 +250,14 @@ export class Maison {
     };
     const apres = async (cible = e, attendu) => {
       if (attendu && cible.domaine === 'media_player') await this._attendre(cible.id, (x) => attendu(x.state), 8000);   // une télé met quelques secondes
+      else if (attendu && (cible.domaine === 'light' || cible.domaine === 'switch')) { await sleep(400); await this._attendre(cible.id, (x) => attendu(x.state), 3500); }   // une prise Wi-Fi met parfois 2-3 s à dire son nouvel état
       else await sleep(900);
       await this.rafraichir(signal).catch(() => {}); const n = (this.inv || []).find((x) => x.id === cible.id) || cible; return `${n.nom} : ${this._decrire(n, true)}`;
     };
     const onoff = ['light', 'switch', 'media_player', 'fan', 'input_boolean', 'remote'].includes(d) ? d : null;
+    // Remarque de Timothée du 11/11/26, 21h02:14 (« tu l'as fait clignoter et ça l'a fait bugger ») : une autre commande sur
+    // l'appareil qui clignote arrête le clignotement, sans le remettre ensuite dans son état de départ.
+    if (this._blink && this._blink.id === id && action !== 'clignoter') { this._blink.stop = this._blink.annule = true; this._blink = null; }
     // Prise ou lumière « injoignable » (journal du 30/10/26 : la prise du balcon ne répondait plus) : on relance sa
     // liaison dans Home Assistant, une fois, avant de dire qu'elle ne répond pas.
     if ((d === 'light' || d === 'switch') && action !== 'clignoter') {
@@ -411,14 +417,23 @@ export class Maison {
   }
 
   // Clignoter : bascule n fois (1 s), puis remet l'état de départ. En arrière-plan : la réponse part tout de suite.
+  // Journal du 11/11/26, 20h59-21h02 : l'éclairage du balcon (prise Wi-Fi) n'a pas clignoté, puis ne répondait plus à temps ;
+  // l'état de départ venait de l'inventaire (parfois en retard). Désormais : état relu juste avant, une prise (switch) bascule
+  // toutes les 2 s et 3 fois au plus, et le retour à l'état de départ est vérifié (une fois de plus s'il le faut).
   _clignoter(e, n) {
     if (!['light', 'switch'].includes(e.domaine)) return { ok: false, info: `${e.nom} ne peut pas clignoter.` };
     if (this._blink) this._blink.stop = true;
-    const job = { stop: false }; this._blink = job;
-    const depart = e.etat;
+    const prise = e.domaine === 'switch', pas = prise ? 2000 : 1000; if (prise) n = Math.min(n, 3);
+    const job = { stop: false, id: e.id }; this._blink = job;
     (async () => {
-      for (let i = 0; i < n * 2 && !job.stop; i++) { await this._service(e.domaine, 'toggle', { entity_id: e.id }).catch(() => {}); await sleep(1000); }
-      await this._service(e.domaine, depart === 'on' ? 'turn_on' : 'turn_off', { entity_id: e.id }).catch(() => {});
+      const x = await this._etatDe(e.id).catch(() => null);
+      const depart = x && (x.state === 'on' || x.state === 'off') ? x.state : e.etat;
+      for (let i = 0; i < n * 2 && !job.stop; i++) { await this._service(e.domaine, 'toggle', { entity_id: e.id }).catch(() => {}); await sleep(pas); }
+      if (job.annule) return;                                                   // une autre commande a pris la main
+      const remettre = () => this._service(e.domaine, depart === 'on' ? 'turn_on' : 'turn_off', { entity_id: e.id }).catch(() => {});
+      await remettre();
+      const y = await this._attendre(e.id, (z) => z.state === depart, 3000);
+      if (!job.annule && y && y.state !== depart && y.state !== 'unavailable') { await remettre(); if (this.log) this.log(`Maison : ${e.nom} pas revenu ${depart === 'on' ? 'allumé' : 'éteint'} après le clignotement : commande renvoyée`); }
       if (this._blink === job) this._blink = null;
     })();
     return { ok: true, info: `${e.nom} clignote ${n} fois, puis revient comme avant.` };
