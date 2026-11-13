@@ -99,6 +99,9 @@ t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'deman
   r = await m2.commande({ appareil: 'climate.voiture_chauffage', action: 'eteindre' });
   t(r.ok && appels.slice(n2).some((a) => a[0] === 'climate/set_hvac_mode' && a[1].hvac_mode === 'off') && appels.slice(n2).some((a) => a[0] === 'switch/turn_off'), 'éteindre le chauffage de la voiture coupe aussi les dégivrages');
   t(/clé à l'intérieur/.test(motVoiture('return code: 8, message: The key is detected inside the vehicle. Please adjust and try again.(64)')) && /appli MG/.test(motVoiture('return code: 401, message: {"code":401}')), 'refus de la voiture traduits (clé dedans, appli MG ouverte)');
+  // Journal du 12/11/26, 08h26:10 : l'anglais du module n'est plus jamais dit tel quel
+  t(/service MG/.test(motVoiture('API call POST /vehicle/control failed unexpectedly')) && !/API|failed/.test(motVoiture('API call POST /vehicle/control failed unexpectedly'))
+    && !/[A-Za-z]{4,} [a-z]{3,} [a-z]{4,}ly/.test(motVoiture('Something odd happened unexpectedly')), 'refus de la voiture inconnu ou en anglais : une phrase en français (12/11/26, 08h26)');
   globalThis.fetch = f0;
 }
 // Journal du 11/11/26 (18h44:47, 20h58:53, 21h16:55, 21h18:22) : « allumer → ok — éteint ». La lumière qui reste éteinte

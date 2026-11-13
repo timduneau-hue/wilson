@@ -24,8 +24,24 @@ async def main():
                 elif 'realtimeInput' in d and 'text' in d['realtimeInput']: conn['texts'].append(d['realtimeInput']['text'])
             ws.on_message(on_msg)
         CORS = {'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type'}
+        IMG = 'http://127.0.0.1:8765/icons/'
+        st_img = {'commons': 0, 'commons_ko': False}
         async def wiki(route):
-            await route.fulfill(status=200, content_type='application/json', headers=CORS, body=json.dumps({'query': {'pages': {'1': {'index': 1, 'title': 'Koala', 'thumbnail': {'source': 'http://127.0.0.1:8765/icons/icon-192.png'}}}}}))
+            u = route.request.url
+            if '/page/summary/Koala' in u: body = {'type': 'standard', 'title': 'Koala', 'thumbnail': {'source': IMG + 'koala/900px-Koala.jpg'}, 'originalimage': {'source': IMG + 'Koala.jpg', 'width': 1200}}
+            elif '/page/summary/Ferrari' in u: body = {'type': 'standard', 'title': 'Ferrari', 'thumbnail': {'source': IMG + 'f/900px-Ferrari-Logo.svg.png'}, 'originalimage': {'source': IMG + 'Ferrari-Logo.svg', 'width': 600}}
+            elif '/page/summary/' in u: await route.fulfill(status=404, headers=CORS, body='{}'); return
+            elif 'Ferrari' in u: body = {'query': {'pages': {'1': {'index': 1, 'title': 'Ferrari', 'thumbnail': {'source': IMG + 'f/900px-Ferrari-Logo.svg.png'}}, '2': {'index': 2, 'title': 'Scuderia Ferrari', 'thumbnail': {'source': IMG + 'f/900px-Scuderia_Ferrari_Logo.png'}}}}}
+            else: body = {'query': {'pages': {'1': {'index': 1, 'title': 'Koala', 'thumbnail': {'source': IMG + 'icon-192.png'}}}}}
+            await route.fulfill(status=200, content_type='application/json', headers=CORS, body=json.dumps(body))
+        async def commons(route):
+            st_img['commons'] += 1
+            if st_img['commons_ko']: await route.abort(); return
+            body = {'query': {'pages': {
+                '-1': {'index': 1, 'title': 'File:Ferrari logo rouge.jpg', 'imageinfo': [{'mime': 'image/jpeg', 'width': 800, 'thumburl': IMG + 'c/Ferrari_logo_rouge.jpg', 'url': IMG + 'c/Ferrari_logo_rouge.jpg'}]},
+                '-2': {'index': 2, 'title': 'File:Petite.jpg', 'imageinfo': [{'mime': 'image/jpeg', 'width': 120, 'thumburl': IMG + 'c/Petite.jpg', 'url': IMG + 'c/Petite.jpg'}]},
+                '-3': {'index': 3, 'title': 'File:Ferrari F8 Tributo rouge.jpg', 'imageinfo': [{'mime': 'image/jpeg', 'width': 3000, 'thumburl': IMG + 'c/1000px-Ferrari_F8_Tributo.jpg', 'url': IMG + 'c/Ferrari_F8_Tributo.jpg'}]}}}}
+            await route.fulfill(status=200, content_type='application/json', headers=CORS, body=json.dumps(body))
         async def geo(route):
             await route.fulfill(status=200, content_type='application/json', headers=CORS, body=json.dumps({'results': [{'name': 'Angers', 'latitude': 47.47, 'longitude': -0.55}]}))
         async def meteo(route):
@@ -62,6 +78,7 @@ async def main():
         page = await ctx.new_page(); logs = []
         await page.route(re.compile(r'.*/vendor/(face_detection|models|mediapipe)/.*'), lambda r: asyncio.ensure_future(r.abort()))
         await page.route(re.compile(r'https://fr\.wikipedia\.org/.*'), wiki)
+        await page.route(re.compile(r'https://commons\.wikimedia\.org/.*'), commons)
         await page.route(re.compile(r'https://geocoding-api\.open-meteo\.com/.*'), geo)
         await page.route(re.compile(r'https://api\.open-meteo\.com/.*'), meteo)
         await page.route(re.compile(r'https://homeassistant\.exemple\.ts\.net/.*'), ha)
@@ -95,6 +112,18 @@ async def main():
         check('Afficher : titre, puces et étapes à l\'écran', not e[0] and 'Pâtes carbonara' in e[1] and '200 g de pâtes' in e[1] and await page.evaluate("document.querySelectorAll('#ecran ul li').length === 2 && document.querySelectorAll('#ecran ol li').length === 2") and 'essentiel' in r, r)
         r = await tool('t2', 'afficher', {'titre': 'Un koala', 'image': 'koala'})
         check('Afficher une image : photo Wikipédia', await page.evaluate("!!document.querySelector('#ecran img')") and 'Koala' in r, r)
+        src = await page.evaluate("document.querySelector('#ecran img').getAttribute('src')")
+        check('… article illustré par une photo : prise directement, sans aller sur Commons', src.endswith('Koala.jpg') and st_img['commons'] == 0, src)
+        # Réponse de Timothée du 12/11/26 (q261112a) : une vraie photo de ce qu'il demande, pas le logo (11/11/26, 18h24 : Ferrari)
+        r = await tool('t2f', 'afficher', {'titre': 'Une Ferrari', 'image': 'Ferrari'})
+        src = await page.evaluate("document.querySelector('#ecran img') && document.querySelector('#ecran img').getAttribute('src')") or ''
+        cap = await page.evaluate("(document.querySelector('#ecran figcaption') || {}).innerText || ''")
+        check('« Montre-moi une Ferrari » (q261112a) : pas le logo de l\'article, une vraie photo (Commons), ni « logo » ni trop petite', 'F8_Tributo' in src and 'Logo' not in src and 'Commons' in cap and 'Ferrari' in r, src + ' | ' + cap + ' | ' + r)
+        st_img['commons_ko'] = True
+        r = await tool('t2g', 'afficher', {'titre': 'Une Ferrari', 'image': 'Ferrari'})
+        src = await page.evaluate("document.querySelector('#ecran img') && document.querySelector('#ecran img').getAttribute('src')") or ''
+        check('… photothèque injoignable : le logo en secours plutôt que rien', 'Ferrari-Logo' in src, src + ' | ' + r)
+        r = await tool('t2', 'afficher', {'titre': 'Un koala', 'image': 'koala'})
         e5 = await page.evaluate("wilson.outils._ecranMs")
         check('… la photo reste 5 s', e5 == 5000, str(e5))
         r = await tool('t2b', 'reafficher', {})

@@ -67,7 +67,10 @@ export function motVoiture(detail) {
   if (/\b401\b|logged out|token|authenticat/i.test(d)) return "le lien avec la voiture est coupé pour un quart d'heure (l'appli MG a été ouverte sur le téléphone) : redemande dans un moment.";
   if (/door|porte/i.test(d)) return 'la voiture refuse : une porte est ouverte.';
   if (/battery|soc|power/i.test(d)) return 'la voiture refuse : sa batterie est trop faible.';
-  return `la voiture a refusé (${d.replace(/return code: \d+, message: /, '').slice(0, 120) || 'sans raison donnée'}).`;
+  // Journal du 12/11/26, 08h26:10 : « API call POST /vehicle/control failed unexpectedly », lu tel quel en anglais : incompris.
+  // Le détail brut reste dans le journal ; à voix haute, une phrase en français.
+  if (/failed unexpectedly|api call|timeout|timed out|unavailable|server error|\b5\d\d\b/i.test(d)) return "la voiture n'a pas répondu à la commande : le service MG a eu un souci. Tu peux redemander dans une minute.";
+  return "la voiture a refusé la commande, sans raison claire. Tu peux redemander dans une minute.";   // détail (anglais) au journal
 }
 
 export class Maison {
@@ -110,7 +113,7 @@ export class Maison {
       await sleep(i ? 8000 : 4000);
       if (err) {
         const x = await this._etatDe(err.entity_id, signal).catch(() => null), t = x && Date.parse(x.state);
-        if (t && t >= depuis) return { ok: false, texte: motVoiture((x.attributes || {}).detail) };
+        if (t && t >= depuis) return { ok: false, texte: motVoiture((x.attributes || {}).detail), detail: (x.attributes || {}).detail || '' };
       }
       if (chauffage && clim) { const c = await this._etatDe(clim.entity_id, signal).catch(() => null); if (c && c.state && !/^(off|unknown|unavailable)$/.test(c.state)) return { ok: true, texte: 'la voiture confirme : le chauffage est en route.' }; }
     }

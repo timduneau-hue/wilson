@@ -37,11 +37,16 @@ async def main():
             f'--use-file-for-fake-audio-capture={S}/fixtures/quiet.wav', '--autoplay-policy=no-user-gesture-required'])
 
         def handler(ws):
-            conn = {'setup': None, 'tool': []}; conns.append(conn)
+            conn = {'setup': None, 'tool': [], 'texts': []}; conns.append(conn)
             def on_msg(m):
                 d = json.loads(m)
                 if 'setup' in d: conn['setup'] = d['setup']; ws.send(json.dumps({'setupComplete': {}}))
                 elif 'toolResponse' in d: conn['tool'].append(d['toolResponse'])
+                elif 'realtimeInput' in d and 'text' in d['realtimeInput']: conn['texts'].append(d['realtimeInput']['text'])
+                elif 'clientContent' in d:
+                    for t in d['clientContent'].get('turns', []):
+                        for p in t.get('parts', []):
+                            if 'text' in p: conn['texts'].append(p['text'])
             ws.on_message(on_msg)
 
         async def ha(route):
@@ -174,6 +179,31 @@ async def main():
         await page.evaluate("wilson.settings.haToken = 'faux'; wilson.maison.inv = null")
         r = await page.evaluate("wilson.maison.commande({ appareil: 'Télé', action: 'allumer' })")
         check('Jeton refusé : il faut le recréer', not r['ok'] and 'jeton' in r['info'], str(r))
+        # Journal du 12/11/26, 08h26:10 : « la voiture a refusé (API call POST /vehicle/control failed unexpectedly) » arrivé 3 s
+        # après la fin de la discussion, lu en anglais alors que personne ne le regardait (R1) ; « Tu dis quoi là ? » (08h26:43),
+        # « Concernant la voiture, tu disais quoi ? » (08h27:28) : Gemini ne le savait pas.
+        from_mot = await page.evaluate("import('./js/maison.js').then((m) => m.motVoiture('API call POST /vehicle/control failed unexpectedly'))")
+        check('Refus de la voiture en anglais (« failed unexpectedly ») : dit en français, sans l\'anglais', 'service MG' in from_mot and 'API' not in from_mot and 'failed' not in from_mot, from_mot)
+        await page.evaluate("wilson.continuous = false; wilson.endConversation('silence')")
+        await page.wait_for_function("wilson.state === 'veille'", timeout=5000)
+        await page.evaluate("""() => { window._ditTablette = []; wilson._say = (t) => { window._ditTablette.push(t); return Promise.resolve(); };
+            wilson.maison.suiviVoiture = async () => ({ ok: false, texte: "la voiture n'a pas répondu à la commande : le service MG a eu un souci. Tu peux redemander dans une minute.", detail: 'API call POST /vehicle/control failed unexpectedly' });
+            return wilson._suiviVoiture({ appareil: 'climate.voiture_chauffage', action: 'allumer' }); }""")
+        await page.wait_for_timeout(1500)
+        dit = await page.evaluate("window._ditTablette")
+        check('… réponse de la voiture arrivée en veille, personne ne le regarde : rien dit à voix haute (R1), gardée', not dit and await page.evaluate("!!wilson._nouvelleVoiture") and any('je le dirai au début de la prochaine discussion' in l for l in logs) and any('réponse du module : API call' in l for l in logs), str(dit))
+        n = len(conns)
+        await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000)
+        await page.wait_for_timeout(500)
+        tx = conns[-1]['texts'] if len(conns) > n else []
+        check('… discussion suivante (toucher) : la nouvelle de la voiture passe en premier, sans le « salue-le »', any('Nouvelles de la voiture' in t and 'service MG' in t for t in tx) and not any('Salue-le' in t for t in tx) and not await page.evaluate("wilson._nouvelleVoiture"), str(tx))
+        await page.evaluate("wilson.endConversation('silence')")
+        await page.wait_for_function("wilson.state === 'veille'", timeout=5000)
+        await page.evaluate("Object.defineProperty(wilson, 'enVoiture', { get: () => true, configurable: true }); wilson._suiviVoiture({ appareil: 'climate.voiture_chauffage', action: 'allumer' })")
+        await page.wait_for_timeout(1500)
+        dit = await page.evaluate("window._ditTablette")
+        await page.evaluate("delete wilson.enVoiture")
+        check('… en voiture (accord du 03/11/26) : dite tout de suite', len(dit) == 1 and 'service MG' in dit[0], str(dit))
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await ctx.close(); await b.close()
     print(f'\n{sum(results)}/{len(results)} OK'); raise SystemExit(0 if all(results) else 1)

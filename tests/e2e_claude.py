@@ -238,6 +238,14 @@ async def main():
         await asyncio.sleep(9)
         check('Réponse attendue en train d\'être dite : pas de relance qui la coupe', has('pas de relance') and not has('Réponse attendue pas encore dite : relance'), '\n'.join(logs[-8:]))
 
+        # 11. Journal du 12/11/26, 19h47:43 : la réponse sur ses e-mails était annoncée à Gemini comme « la recherche dans le CRM »
+        n_txt = len(conn['texts'])
+        await page.evaluate("wilson._aDire = null; wilson._lateAnswer({ id: 'm1', quoi: 'mail', question: 'lire les derniers mails', t0: performance.now() - 23000 }, { dire: 'Tu as dix mails non lus.' }, 23)")
+        await asyncio.sleep(0.5)
+        tx = conn['texts'][n_txt:]
+        check('Réponse sur ses e-mails : « la recherche dans ses e-mails », pas « dans le CRM »', any('La recherche dans ses e-mails que tu avais lancée' in t for t in tx) and not any('dans le CRM que tu avais lancée' in t for t in tx), str(tx)[:300])
+        await page.evaluate("wilson._aDire = null")
+
         check('Aucune erreur JavaScript', not any('PAGEERROR' in l for l in logs), [l for l in logs if 'PAGEERROR' in l])
         await b.close()
     print(f'\n{sum(results)}/{len(results)} vérifications OK')

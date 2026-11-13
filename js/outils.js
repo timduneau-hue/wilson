@@ -11,7 +11,7 @@ export const OUTILS = [
     parameters: { type: 'OBJECT', properties: {
       titre: S,
       texte: { type: 'STRING', description: 'le contenu demandé ; une ligne par élément ; « - » au début pour une puce, « 1. » pour une étape' },
-      image: { type: 'STRING', description: "ce qu'il faut illustrer par une photo (cherchée sur Wikipédia), ex. « koala », « tour Eiffel » ; vide sinon" } }, required: ['titre'] } },
+      image: { type: 'STRING', description: "ce qu'il faut montrer en photo, précisément ce qu'il demande, ex. « koala », « tour Eiffel », « voiture Ferrari » (une voiture, pas la marque) ; vide sinon" } }, required: ['titre'] } },
   { name: 'fermer_ecran', behavior: 'BLOCKING', description: "Ferme ce qui est affiché à l'écran." },   // sans paramètres : un objet vide est refusé par Google (tests/e2e_conn.py)
   { name: 'reafficher', behavior: 'BLOCKING',   // demande de Timothée du 04/11/26 (« réaffiche la photo, j'ai pas eu le temps de voir »)
     description: "Réaffiche ce qui vient d'être montré (photo, météo, texte), plus longtemps : « réaffiche la photo », « remontre-moi la météo, j'ai pas eu le temps de voir ». Jamais pour « répète » ou « tu peux répéter ? » : là, redis simplement ta dernière phrase. duree_sec : combien de temps s'il le dit (60 s sinon).",
@@ -53,6 +53,12 @@ const PHOTO_MS = 5000;   // photo seule à l'écran : 5 s (remarque de Timothée
 // Règle de Timothée du 04/11/26 : photos, météo et autres images 5 s par défaut (« réaffiche » pour les revoir plus
 // longtemps) ; du texte à l'écran seulement s'il le demande (« montre-moi », « affiche », « mets-le par écrit »).
 const IMAGE_MS = 5000, REAFFICHE_MS = 60000;
+// Une photo (jpg) et pas un logo, un blason, une carte ou un dessin (svg, png) : réponse de Timothée du 12/11/26 (q261112a).
+const PAS_PHOTO = /logo|blason|emblem|coat[_ ]of[_ ]arms|drapeau|flag|carte|map|signature|icon|ic[oô]ne|diagram|sch[eé]ma/i;
+const nomFichier = (u) => { const f = String(u || '').split('?')[0].split('/').pop() || ''; try { return decodeURIComponent(f); } catch (_) { return f; } };
+const estPhoto = (u) => /\.(jpe?g|webp)$/i.test(nomFichier(u)) && !PAS_PHOTO.test(nomFichier(u));
+// Chaque recherche d'image attend 4 s au plus (trois au pire : la photo vaut un peu d'attente, pas une minute).
+const getJson = async (u) => { const c = new AbortController(), t = setTimeout(() => c.abort(), 4000); try { const r = await fetch(u, { signal: c.signal }); return r.ok ? await r.json() : null; } finally { clearTimeout(t); } };
 const plat = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[’ʼ]/g, "'");
 export const DEMANDE_ECRAN = /(montr|affich|par ecrit|ecri[st]\b|ecrire|a l'?ecran|sur l'?ecran|sur ton ecran|fais(-| )?(moi )?voir|que je (le |la |les )?voie|je veux (le |la |les )?voir|fais-moi une liste|note(-le)? a l'ecran)/;
 export const demandeEcran = (t) => DEMANDE_ECRAN.test(plat(t));
@@ -148,7 +154,7 @@ export class Outils {
     }
     let img = null;
     if (image) img = await this._image(image).catch(() => null);
-    const html = (img ? `<figure class="ecran-img"><img src="${esc(img.src)}" alt="${esc(img.titre)}"><figcaption>${esc(img.titre)} — Wikipédia</figcaption></figure>` : '') + this._texteHtml(texte);
+    const html = (img ? `<figure class="ecran-img"><img src="${esc(img.src)}" alt="${esc(img.titre)}"><figcaption>${esc(img.titre)} — ${esc(img.source || 'Wikipédia')}</figcaption></figure>` : '') + this._texteHtml(texte);
     if (!html) return image ? `Pas de photo trouvée pour « ${image} » : dis-le simplement.` : "Rien à afficher : il faut un texte ou une image.";
     const lignes = String(texte || '').split(/\n+/).filter((l) => l.trim()).length;
     // Photo : 5 s (remarques du 01/11/26 et du 04/11/26) ; texte demandé : 90 s, 4 min s'il est long.
@@ -157,18 +163,38 @@ export class Outils {
     return `Affiché à l'écran${image && !img ? ` (sans image : rien trouvé pour « ${image} »)` : img ? ` avec une photo de « ${img.titre} »` : ''}${texte ? '' : ', pendant 5 secondes (il peut te dire « réaffiche » pour la revoir plus longtemps)'}. Ne relis pas tout : dis l'essentiel en une phrase.`;
   }
   async _image(sujet) {
-    // D'abord l'article qui porte ce nom (« vaisselle » → Vaisselle), sinon une recherche (journal du 30/10/26 : « la
-    // vaisselle » avait donné la photo de l'article « Marche en avant »).
+    // Réponse de Timothée du 12/11/26 (question q261112a) : « une vraie photo qui correspond précisément à sa demande (par
+    // exemple une voiture et pas un logo), même si c'est un peu plus lent » (11/11/26, 18h24 : « Ferrari » → le logo).
+    // 1. l'article qui porte ce nom (« vaisselle » → Vaisselle, journal du 30/10/26) s'il est illustré par une PHOTO ;
+    // 2. sinon une recherche dans Wikipédia, première page illustrée par une photo ;
+    // 3. sinon une photo de Wikimedia Commons (la photothèque de Wikipédia) ; 4. en dernier, le logo ou le dessin trouvé.
     const nom = String(sujet).trim().replace(/^(une?|la|le|les|l'|des|du)\s+/i, '');
+    let secours = null;
     try {
-      const r = await fetch(`https://fr.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(nom.charAt(0).toUpperCase() + nom.slice(1))}`);
-      if (r.ok) { const j = await r.json(); if (j.type !== 'disambiguation' && j.thumbnail && j.thumbnail.source) return { src: (j.originalimage && j.originalimage.width <= 1600 ? j.originalimage.source : j.thumbnail.source), titre: j.title }; }
+      const r = await getJson(`https://fr.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(nom.charAt(0).toUpperCase() + nom.slice(1))}`);
+      if (r && r.type !== 'disambiguation' && r.thumbnail && r.thumbnail.source) {
+        const src = r.originalimage && r.originalimage.width <= 1600 && estPhoto(r.originalimage.source) ? r.originalimage.source : r.thumbnail.source;
+        const img = { src, titre: r.title, source: 'Wikipédia' };
+        if (estPhoto(r.originalimage ? r.originalimage.source : src)) return img;
+        secours = img;
+      }
     } catch (_) {}
-    const u = `https://fr.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(nom)}&gsrlimit=5&prop=pageimages&piprop=thumbnail&pithumbsize=900&format=json&origin=*`;
-    const j = await fetch(u).then((r) => r.json());
-    const pages = Object.values((j.query && j.query.pages) || {}).sort((a, b) => a.index - b.index);
-    const p = pages.find((x) => x.thumbnail && x.thumbnail.source);
-    return p ? { src: p.thumbnail.source, titre: p.title } : null;
+    try {
+      const j = await getJson(`https://fr.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(nom)}&gsrlimit=6&prop=pageimages&piprop=thumbnail|original&pithumbsize=900&format=json&origin=*`);
+      const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => a.index - b.index).filter((x) => x.thumbnail && x.thumbnail.source);
+      const p = pages.find((x) => estPhoto(x.original ? x.original.source : x.thumbnail.source));
+      if (p) return { src: p.thumbnail.source, titre: p.title, source: 'Wikipédia' };
+      if (!secours && pages[0]) secours = { src: pages[0].thumbnail.source, titre: pages[0].title, source: 'Wikipédia' };
+    } catch (_) {}
+    try {
+      const q = `${secours ? secours.titre : nom} filetype:bitmap`;
+      const j = await getJson(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(q)}&gsrlimit=10&prop=imageinfo&iiprop=url|mime|size&iiurlwidth=1000&format=json&origin=*`);
+      const f = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => a.index - b.index)
+        .map((x) => ({ t: x.title || '', i: (x.imageinfo || [])[0] }))
+        .find((x) => x.i && /jpe?g|webp/i.test(x.i.mime || '') && (x.i.width || 0) >= 400 && !PAS_PHOTO.test(x.t));
+      if (f) return { src: f.i.thumburl || f.i.url, titre: secours ? secours.titre : f.t.replace(/^(File|Fichier):/, '').replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ').slice(0, 80), source: 'Wikimedia Commons' };
+    } catch (_) {}
+    return secours;
   }
 
   // ---------- F2 : minuteurs ----------

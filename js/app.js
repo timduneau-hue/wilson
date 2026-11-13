@@ -38,7 +38,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.42.0';
+const VERSION = '1.42.1';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -747,7 +747,17 @@ class App {
     for (let i = 0; i < flat.length; i += 3200) this.brain.sendAudio(flat.subarray(i, i + 3200));
     this._derniereReponse = null; this._doublon = null;      // nouvelle discussion : rien à comparer
     if (reason === 'test') this.brain.sendText('Présente-toi en une phrase, avec chaleur.');
-    if (reason === 'toucher' && !this._aDire) this.brain.sendText(this.enVoiture ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
+    // Journal du 12/11/26, 08h26:10 : « la voiture a refusé » est arrivé 3 s après la fin de la discussion ; dit à voix haute
+    // alors que personne ne le regardait (R1), incompris (« Tu dis quoi là ? », 08h26:43), et Gemini ne le savait pas
+    // (« Concernant la voiture, tu disais quoi ? », 08h27:28). Gardé, il passe en premier à la discussion suivante.
+    const NV = this._nouvelleVoiture; this._nouvelleVoiture = null;
+    const nouvelleVoiture = NV && reason !== 'test' && Date.now() - NV.at < 15 * 60000 ? NV : null;
+    if (nouvelleVoiture) {
+      const min = Math.max(1, Math.round((Date.now() - nouvelleVoiture.at) / 60000));
+      this.brain.sendText(`[Nouvelles de la voiture, arrivées il y a ${min} min, pendant que personne ne te regardait : ${nouvelleVoiture.phrase} Dis-le-lui d'abord, en une phrase, sans rien ajouter.]`);
+      this.log('Voiture : nouvelle gardée, donnée au début de la discussion', true);
+    }
+    if (reason === 'toucher' && !this._aDire && !nouvelleVoiture) this.brain.sendText(this.enVoiture ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
     if (reason === 'apres_appel') this.brain.sendText(this._apresAppelTexte());
     if (reason === 'apres_appel_entrant') this.brain.sendText(this._apresAppelEntrantTexte());
     if (reason === 'reponse_tardive' && !this._aDireEnvoyer() && this._lateText) this.brain.sendText(this._lateText);
@@ -2838,10 +2848,14 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     let s = null;
     try { s = await this.maison.suiviVoiture(Date.now() - 3000, { chauffage: /chauffage/i.test(String(a.appareil || '')) && a.action !== 'eteindre' }); } catch (_) { return; }
     if (!s) return;
-    this.log(`Voiture : ${s.texte}`, true);
+    this.log(`Voiture : ${s.texte}${s.detail ? ` — réponse du module : ${String(s.detail).slice(0, 160)}` : ''}`, true);
     const phrase = s.texte[0].toUpperCase() + s.texte.slice(1);
     if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Nouvelles de la voiture : ${phrase} Dis-le-lui en une phrase, sans rien ajouter.]`);
-    else this._sayAfter(phrase);
+    else if (this.state === 'conversation' || this.enVoiture) this._sayAfter(phrase);
+    else {                                                     // R1 : personne ne le regarde → à la prochaine discussion
+      this._nouvelleVoiture = { phrase, at: Date.now() };
+      this.log('Voiture : personne ne me regarde, je le dirai au début de la prochaine discussion (R1)', true);
+    }
   }
 
   async _crmTool(call) {
@@ -3062,7 +3076,9 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     const dire = res.dire || res.info;
     if (!n) {                                                                              // à dire, quoi qu'il arrive
       const P0 = this._aDire;                                                              // une autre réponse attend encore : les deux ensemble
-      const ou = A.quoi === 'claude' && !(P0 && P0.ou) ? '' : 'dans le CRM ';
+      // journal du 12/11/26, 19h47:43 : une réponse sur ses e-mails était annoncée à Gemini comme « la recherche dans le CRM »
+      const propre = A.quoi === 'mail' ? 'dans ses e-mails ' : A.quoi === 'claude' ? '' : 'dans le CRM ';
+      const ou = P0 && P0.ou !== propre ? '' : propre;
       this._aDire = P0 ? { question: `${P0.question} » puis « ${A.question}`, dire: `${P0.dire} Et pour ta question « ${A.question} » : ${dire}`, s, at: Date.now(), conv: null, envoyeAt: 0, cle: A.id, ou }
         : { question: A.question, dire, s, at: Date.now(), conv: null, envoyeAt: 0, cle: A.id, ou };
       this._noteChiffres(dire);
