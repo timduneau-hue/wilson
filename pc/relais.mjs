@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 7';
+export const VERSION = 'relais 8';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
 const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md', 'mail-mcp.mjs', 'garde-chrome.mjs', 'consigne-mail.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
@@ -125,7 +125,7 @@ export function argumentsClaude({ mcp, consigne, modele = 'sonnet', effort = 'hi
 // { "url": "http://…:8123", "vm": "nom de la machine" }.
 export const HA_VERIF_MS = 5 * 60000, HA_ACTION_MS = 30 * 60000;
 export class GardeHA {
-  constructor({ cfg = {}, journal = () => {}, fetchImpl = globalThis.fetch, vbox, run, maintenant = () => Date.now(), pauseMs = 5000 } = {}) {
+  constructor({ cfg = {}, journal = () => {}, fetchImpl = globalThis.fetch, vbox, run, maintenant = () => Date.now(), pauseMs = 5000, lookup4 } = {}) {
     const c = cfg.ha === false ? null : (cfg.ha || {});
     // 11/11/26 : ce Home Assistant répond sur le port 80 (http://homeassistant.local), pas sur 8123 : les deux sont essayés.
     this.on = !!c; this.urls = (c && c.url ? [c.url] : ['http://homeassistant.local', 'http://homeassistant.local:8123']).map((u) => String(u).replace(/\/+$/, ''));
@@ -135,6 +135,19 @@ export class GardeHA {
       'C:\\Program Files\\Oracle\\VirtualBox\\VBoxManage.exe'].filter(Boolean).find((x) => { try { return fs.existsSync(x); } catch (_) { return false; } }) || '';
     this.run = run || ((args) => new Promise((ok) => execFile(this.vbox, args, { timeout: 60000, windowsHide: true }, (e, out, err) => ok({ ok: !e, out: String(out || ''), err: String(err || (e && e.message) || '') }))));
     this.muet = 0; this.actionAt = 0; this.ip = ''; this.enPanne = 0; this.dit = ''; this.pauseMs = pauseMs; this.dejaVu = false;
+    this.dejaVu4 = false; this.sansV4 = false;
+    this.lookup4 = lookup4 || (async (h) => { const d = await import('node:dns'); return (await d.promises.lookup(h, { family: 4 })).address; });
+  }
+  // Panne du 14/11/26 (15h02) : Home Assistant répondait (en IPv6, et par Tailscale), mais sa machine virtuelle n'avait plus
+  // d'adresse IPv4 (« ipv4 address: [] », DHCP perdu sur le pont Wi-Fi) : télé, Chromecast et prises Tapo, qui ne parlent
+  // qu'en IPv4, étaient tous « injoignables » pendant que tous les voyants étaient au vert. On vérifie donc aussi l'IPv4.
+  async repondV4() {
+    let v4 = '';
+    try { v4 = await this.lookup4(new URL(this.url).hostname); } catch (_) {}
+    const ip = v4 || this.ip; if (!ip) return false;
+    const port = new URL(this.url).port;
+    if (await this.repond(`http://${ip}${port ? ':' + port : ''}`)) { this.ip = ip; return true; }
+    return false;
   }
   async repond(url) {
     try { const r = await this.fetch(url + '/manifest.json', { signal: AbortSignal.timeout(8000) }); return r.status > 0; } catch (_) { return false; }
@@ -152,11 +165,17 @@ export class GardeHA {
     let ok = false;
     for (const u of [this.url, ...this.urls.filter((x) => x !== this.url)]) if (await this.repond(u)) { ok = true; this.url = u; break; }
     if (!ok && this.ip) { const port = new URL(this.url).port; ok = await this.repond(`http://${this.ip}${port ? ':' + port : ''}`); }
-    if (ok) {
-      if (this.enPanne) this.journal(`Home Assistant répond de nouveau (muet depuis ${Math.round((this.maintenant() - this.enPanne) / 60000)} min)`);
-      this.muet = 0; this.enPanne = 0; this.dejaVu = true;
-      if (!this.ip) { try { const d = await import('node:dns'); this.ip = (await d.promises.lookup(new URL(this.url).hostname, { family: 4 })).address; } catch (_) {} }
+    // Répond, mais plus en IPv4 ? Seulement si le PC l'a déjà jointe en IPv4 (le pont Wi-Fi ne se laisse pas toujours joindre).
+    const v4 = ok ? await this.repondV4() : false;
+    if (ok && (v4 || !this.dejaVu4)) {
+      if (this.enPanne) this.journal(this.sansV4 ? `Home Assistant a retrouvé son adresse IPv4 : les appareils de la maison lui répondent de nouveau (coupé depuis ${Math.round((this.maintenant() - this.enPanne) / 60000)} min)`
+        : `Home Assistant répond de nouveau (muet depuis ${Math.round((this.maintenant() - this.enPanne) / 60000)} min)`);
+      this.muet = 0; this.enPanne = 0; this.dejaVu = true; this.sansV4 = false; if (v4) this.dejaVu4 = true;
       return 'ok';
+    }
+    if (ok && !v4) {
+      if (!this.sansV4) this.journal('Home Assistant répond, mais plus en IPv4 : il ne joint plus les appareils de la maison (télé, prises), qui seront « injoignables »');
+      this.sansV4 = true; this.dejaVu = true;
     }
     this.muet++; if (!this.enPanne) this.enPanne = this.maintenant();
     if (!pcEnLigne) return 'pc hors ligne';
@@ -177,7 +196,7 @@ export class GardeHA {
     const a = await this.run(['controlvm', nom, 'setlinkstate1', 'off']);
     await new Promise((ok) => setTimeout(ok, this.pauseMs));
     const b = await this.run(['controlvm', nom, 'setlinkstate1', 'on']);
-    this.journal(a.ok && b.ok ? `Home Assistant muet depuis ${Math.round((this.maintenant() - this.enPanne) / 60000)} min alors que sa machine virtuelle tourne : câble réseau virtuel débranché puis rebranché (il reprend une adresse)`
+    this.journal(a.ok && b.ok ? `Home Assistant ${this.sansV4 ? 'sans IPv4' : 'muet'} depuis ${Math.round((this.maintenant() - this.enPanne) / 60000)} min alors que sa machine virtuelle tourne : câble réseau virtuel débranché puis rebranché (il reprend une adresse)`
       : `Home Assistant muet, câble réseau virtuel impossible à rebrancher : ${(a.err || b.err).slice(0, 160)}`);
     return a.ok && b.ok ? 'câble rebranché' : 'échec';
   }

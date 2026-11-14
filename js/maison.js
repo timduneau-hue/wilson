@@ -53,6 +53,10 @@ export const HA_VM = "Home Assistant ne répond pas, alors que l'ordinateur de l
 // Journal du 06/11/26, 08h26:33 : une lumière n'a pas répondu en 15 s (« signal is aborted without reason ») alors que les
 // autres répondaient en 1 à 4 s, et Wilson a dit « l'ordinateur de la maison est sans doute éteint ».
 const HA_LENT = "Home Assistant a mis trop de temps à répondre pour cet appareil (il répond pour les autres) : la commande est peut-être passée quand même.";
+// Journal du 14/11/26, 15h02-15h03 : télé, Chromecast et lumière jaune « injoignables » ensemble, alors que Home Assistant
+// répondait (VPN et PC au vert). Sa machine virtuelle avait perdu son adresse IPv4 : elle ne voyait plus aucun appareil.
+// Quand tous les appareils de la maison sont injoignables en même temps, c'est Home Assistant, pas chaque appareil.
+export const HA_SANS_RESEAU = "Tous les appareils de la maison sont injoignables en même temps alors que Home Assistant répond : ce ne sont pas les appareils, c'est Home Assistant qui a perdu le réseau de la maison. L'ordinateur de la maison le répare tout seul en moins de 15 minutes ; si ça dure, il faut rebrancher le câble réseau de la machine virtuelle Home Assistant (VirtualBox, Périphériques, Réseau). Dis-le-lui simplement, sans parler de chaque appareil.";
 const SERVICE_MS = 25000;
 const netErr = (e) => !navigator.onLine || (e && e.name === 'TypeError') || /Failed to fetch|NetworkError|Load failed/i.test(String((e && e.message) || ''));
 const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9+]+/g, ' ').trim();
@@ -184,6 +188,7 @@ export class Maison {
   // Pour la consigne de Wilson : une ligne par appareil.
   texteInventaire() {
     if (!this.inv || !this.inv.length) return '';
+    if (this._sansReseau(this.inv)) return '(' + HA_SANS_RESEAU + ' Appelle quand même maison_etat ou maison_commande si on te le demande : la panne est peut-être déjà réparée.)';
     return this.inv.filter((e) => e.domaine !== 'remote' && !/^script\.reveil/.test(e.id)).map((e) => `- ${e.nom} [${e.id}] : ${TYPE[e.domaine]}${e.piece ? ', ' + e.piece : ''} ; ${this._possible(e)} ; actuellement ${this._decrire(e)}`).join('\n');
   }
 
@@ -204,9 +209,16 @@ export class Maison {
     return `${nom} : ${VERBE[action] || action}…`;
   }
 
+  // Appareils de la maison joints par le réseau local (pas la voiture, qui passe par Internet, ni les scripts).
+  _sansReseau(inv) {
+    const l = (inv || []).filter((e) => ['light', 'switch', 'media_player', 'fan', 'cover'].includes(e.domaine) && !this._voiture(e));
+    return l.length >= 2 && l.every((e) => e.etat === 'unavailable');
+  }
+
   // ---------- Outils ----------
   async etat(appareils = [], signal) {
     const inv = await this._inv(signal, 3000);
+    if (this._sansReseau(inv)) { this.log('Maison : tous les appareils injoignables en même temps → Home Assistant sans réseau local'); return HA_SANS_RESEAU; }
     const l = (appareils && appareils.length ? appareils.map((q) => this._trouver(inv, q)).filter(Boolean) : inv.filter((e) => e.domaine !== 'remote' && e.domaine !== 'script'));
     if (!l.length) return 'Aucun appareil ne correspond. Appareils : ' + inv.map((e) => e.nom).join(', ');
     return l.map((e) => `${e.nom}${e.piece ? ' (' + e.piece + ')' : ''} : ${this._decrire(e, true)}`).join(' ; ');
@@ -265,6 +277,7 @@ export class Maison {
     // liaison dans Home Assistant, une fois, avant de dire qu'elle ne répond pas.
     if ((d === 'light' || d === 'switch') && action !== 'clignoter') {
       const x = await this._etatDe(id).catch(() => null);
+      if (x && x.state === 'unavailable' && this._sansReseau(inv)) return { ok: false, info: HA_SANS_RESEAU };
       if (x && x.state === 'unavailable' && !(await this._relancer(e))) return { ok: false, info: `${e.nom} ne répond pas : la prise a sans doute perdu le Wi-Fi. Il faut la débrancher puis la rebrancher ; si ça revient souvent, elle est trop loin de la box.` };
     }
     try {

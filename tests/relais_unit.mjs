@@ -52,7 +52,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 7 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 8 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -79,7 +79,7 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 7');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 8');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
 
 // ---------- Lot 4 : arrêt de tout l'arbre (W15), limite signalée au script (W16), effort réduit (W16) ----------
@@ -128,7 +128,7 @@ check('Relais : la question prise est traitée', envoyes.some((x) => x.action ==
 // ---------- Home Assistant surveillé par le relais (11/11/26 : machine virtuelle sans adresse du 07/11 au 11/11) ----------
 {
   let t = 1e9, haOk = false, enRoute = true; const cmds = [], notes = [];
-  const G = new GardeHA({ cfg: {}, vbox: 'VBoxManage', pauseMs: 0, maintenant: () => t, journal: (m) => notes.push(m),
+  const G = new GardeHA({ cfg: {}, vbox: 'VBoxManage', pauseMs: 0, maintenant: () => t, journal: (m) => notes.push(m), lookup4: async () => { throw new Error('ENOTFOUND'); },
     fetchImpl: async () => { if (!haOk) throw new TypeError('fetch failed'); return { status: 200 }; },
     run: async (a) => { cmds.push(a.join(' ')); return { ok: true, out: a[1] === 'vms' ? '"HomeAssistant" {1234}\n"Autre" {5678}\n' : a[1] === 'runningvms' ? (enRoute ? '"HomeAssistant" {1234}\n' : '') : '', err: '' }; } });
   haOk = false; enRoute = true;
@@ -148,6 +148,23 @@ check('Relais : la question prise est traitée', envoyes.some((x) => x.action ==
   check('HA : PC sans réseau → on ne touche à rien', (await G.verifier({ pcEnLigne: false })) === 'pc hors ligne' && cmds.length === n1);
   haOk = true;
   check('HA : de nouveau là → noté au journal', (await G.verifier()) === 'ok' && notes.some((n) => /répond de nouveau/.test(n)));
+  // 14/11/26 : Home Assistant répond (IPv6, Tailscale) mais n'a plus d'IPv4 → appareils « injoignables », voyants au vert.
+  {
+    let t4 = 1e9, v6 = true, v4 = true; const c4 = [], n4 = [];
+    const G4 = new GardeHA({ cfg: {}, vbox: 'VBoxManage', pauseMs: 0, maintenant: () => t4, journal: (m) => n4.push(m),
+      lookup4: async () => { if (!v4) throw new Error('ENOTFOUND'); return '192.0.2.10'; },
+      fetchImpl: async (u) => { const ip4 = /192\.0\.2\.10/.test(u); if (ip4 ? !v4 : !v6) throw new TypeError('fetch failed'); return { status: 200 }; },
+      run: async (a) => { c4.push(a.join(' ')); return { ok: true, out: a[1] === 'vms' ? '"HomeAssistant" {1}\n' : a[1] === 'runningvms' ? '"HomeAssistant" {1}\n' : '', err: '' }; } });
+    check('HA IPv4 : répond en IPv4 → ok, IPv4 vue', (await G4.verifier()) === 'ok' && G4.dejaVu4);
+    v4 = false; t4 += 5 * 60000;
+    check('HA IPv4 : répond encore mais plus en IPv4 → noté, on attend un 2e constat', (await G4.verifier()) === 'muet' && n4.some((n) => /plus en IPv4/.test(n)) && !c4.some((c) => /controlvm/.test(c)), n4.join(' | '));
+    t4 += 5 * 60000;
+    check('HA IPv4 : toujours sans IPv4 → câble virtuel rebranché', (await G4.verifier()) === 'câble rebranché' && c4.includes('controlvm HomeAssistant setlinkstate1 off') && n4.some((n) => /sans IPv4 depuis/.test(n)), c4.join(' | '));
+    v4 = true; t4 += 5 * 60000;
+    check('HA IPv4 : IPv4 revenue → noté au journal', (await G4.verifier()) === 'ok' && n4.some((n) => /retrouvé son adresse IPv4/.test(n)));
+    const G5 = new GardeHA({ cfg: {}, vbox: 'VBoxManage', lookup4: async () => { throw new Error('x'); }, fetchImpl: async (u) => { if (/192\.0\.2/.test(u)) throw new TypeError('f'); return { status: 200 }; }, run: async () => ({ ok: true, out: '', err: '' }) });
+    check('HA IPv4 : jamais jointe en IPv4 depuis le PC → on ne conclut rien (ok)', (await G5.verifier()) === 'ok' && (await G5.verifier()) === 'ok');
+  }
   const G2 = new GardeHA({ cfg: { ha: false }, vbox: 'x' });
   check('HA : « ha »: false dans config.json → pas de surveillance', (await G2.verifier()) === 'coupé');
   const n3 = []; const G3 = new GardeHA({ cfg: {}, vbox: '', journal: (m) => n3.push(m) });

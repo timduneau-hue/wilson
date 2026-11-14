@@ -141,4 +141,31 @@ t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'deman
   t(r.ok && L.state === 'off' && appelsB.length === n0, 'éteindre pendant le clignotement : il s\'arrête et ne rallume pas la lampe ensuite : ' + JSON.stringify(appelsB.slice(n0)) + ' ' + L.state);
   globalThis.fetch = f0;
 }
+// Journal du 14/11/26, 15h02-15h03 : Home Assistant répondait, mais sa machine virtuelle n'avait plus d'IPv4 : télé,
+// Chromecast et lumière jaune « injoignables » ensemble. Wilson doit dire la vraie panne, pas « la prise a perdu le Wi-Fi ».
+{
+  const E = [
+    { entity_id: 'switch.lumiere_jaune_salon', state: 'unavailable', attributes: { friendly_name: 'Lumière jaune salon' } },
+    { entity_id: 'media_player.tele', state: 'unavailable', attributes: { friendly_name: 'Télé' } },
+    { entity_id: 'climate.voiture', state: 'off', attributes: { friendly_name: 'Voiture chauffage' } },
+  ];
+  const f0 = globalThis.fetch; const svc = [];
+  globalThis.fetch = async (url) => {
+    if (url.endsWith('/api/config')) return { status: 200, ok: true, json: async () => ({}) };
+    if (url.endsWith('/api/states')) return { status: 200, ok: true, json: async () => E };
+    if (url.includes('/api/states/')) { const id = url.split('/api/states/')[1]; return { status: 200, ok: true, json: async () => E.find((x) => x.entity_id === id) }; }
+    if (url.endsWith('/api/template')) return { status: 200, ok: true, text: async () => '' };
+    if (url.includes('/api/services/') || url.includes('/reload')) { svc.push(url); return { status: 200, ok: true, json: async () => [] }; }
+    return { status: 404, ok: false, json: async () => ({}) };
+  };
+  const c = new Maison({ settings: { haUrl: 'https://ha.exemple.ts.net', haToken: 'bon' } });
+  await c.rafraichir();
+  t(/c'est Home Assistant qui a perdu le réseau/.test(await c.etat()), 'tous les appareils injoignables ensemble (14/11/26) : maison_etat dit la vraie panne');
+  const r = await c.commande({ appareil: 'switch.lumiere_jaune_salon', action: 'allumer' });
+  t(!r.ok && /perdu le réseau de la maison/.test(r.info) && !/débrancher/.test(r.info) && !svc.length, 'commande pendant la panne : vraie panne dite, rien relancé ni envoyé : ' + r.info);
+  t(/perdu le réseau/.test(c.texteInventaire()), 'inventaire donné à Gemini : la panne y est dite');
+  E[1].state = 'off';
+  t(!/perdu le réseau/.test(await (c.invAt = 0, c.etat())), 'un seul appareil injoignable : pas de fausse alerte');
+  globalThis.fetch = f0;
+}
 console.log(`${ok}/${ok + ko} OK`); process.exit(ko ? 1 : 0);
