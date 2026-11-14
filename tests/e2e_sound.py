@@ -146,11 +146,11 @@ async def main():
           return { lag: wilson.lag, light: !!wilson._light }; })()""")
         check('Appli en arrière-plan : ni retard compté, ni mode allégé', r['lag'] < 50 and not r['light'] and any('arrière-plan ou écran éteint' in l for l in logs), str(r))
 
-        # Batterie : signalée une seule fois jusqu'au rebranchement.
-        r = await page.evaluate("""(() => { wilson.battery = { charging: false, level: 0.73 }; wilson._batTold = false;
-          const a = wilson._system('eco').includes("plus branchée"), b = wilson._system('eco').includes("plus branchée");
-          wilson.sensors._emit ? 0 : 0; wilson._batTold = false; return [a, b]; })()""")
-        check('Batterie débranchée : signalée une fois, pas à chaque phrase', r == [True, False], str(r))
+        # Batterie (1.43.0, remarques du 13/11/26) : jamais signalée de lui-même, même débranchée ; l'outil reste là.
+        r = await page.evaluate("""(() => { wilson.battery = { charging: false, level: 0.73 };
+          const a = wilson._system('eco'), b = wilson._system('live');
+          return [a.includes('plus branchée'), b.includes('plus branchée'), b.includes('pas branchée'), a.includes('73 %'), b.includes('73 %')]; })()""")
+        check('Batterie débranchée : jamais signalée de lui-même', r == [False, False, False, False, False], str(r))
 
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])

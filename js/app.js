@@ -24,8 +24,9 @@ import { Famille, FAMILLE_TOOLS, FAMILLE_TOOL_NAMES } from './famille.js';
 import { Reactions } from './reactions.js';
 import { Memoire } from './memoire.js';
 import { brancherStockage, bilanStockage } from './stockage.js';
-import { Questions, QUESTION_TOOL } from './questions.js';
+import { Questions, QUESTION_TOOL, PROPRIO as PROPRIO_NOM } from './questions.js';
 import * as VP from './voiture.js';
+const hhmm = (t) => { const d = new Date(t); return `${d.getHours()}h${String(d.getMinutes()).padStart(2, '0')}`; };
 
 // Protocole voiture (PLAN 2 quinquies) : les seuls outils déclarés à Gemini quand le téléphone est relié à la voiture.
 const OUTILS_VOITURE = ['crm_client', 'crm_contacts', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_question', 'question_difficile', 'mails', 'mail_envoyer','itineraire', 'appeler', 'crm_noter', 'crm_confirmer',
@@ -38,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.42.1';
+const VERSION = '1.43.0';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -364,7 +365,11 @@ class App {
     let t = `\nTa dernière mise à jour (version ${VERSION}${n.date ? ', ' + n.date : ''}), faite d'après les remarques de Timothée et ton journal : ${n.texte} Si on te demande ce qui a changé, dis-le simplement.`;
     // Pas en voiture (journal du 12/11/26, 08h42:28 : 12 s de nouveautés enchaînées à « C'est parti, je te guide vers… », pendant qu'il
     // cherchait à corriger la destination) : elles seront dites à la première discussion hors de la voiture, ou s'il les demande.
+    // 1.43.0 (réponse de Timothée à q261113a, 13/11/26, 07h09:42 : « sur le premier appareil sur lequel tu me vois ») : dites
+    // une seule fois pour tous ses appareils. Le réglage commun nvDites (synchronisé par le script) dit qu'elles l'ont été.
+    if (n.aDire && this.settings.nvDites === VERSION) n.aDire = false;
     if (n.aDire && mode === 'live' && !this.enVoiture) {
+      try { this.settings.nvDites = VERSION; this.applySettings('nvDites'); } catch (_) {}
       t += ' C\'est ta première discussion depuis : après avoir répondu à ce qu\'on te demande, dis en une phrase courte ce qui a changé (une seule fois).';
       n.aDire = false; try { localStorage.setItem('wilson.nouveautesDites', VERSION); } catch (_) {}
     }
@@ -751,8 +756,10 @@ class App {
     // alors que personne ne le regardait (R1), incompris (« Tu dis quoi là ? », 08h26:43), et Gemini ne le savait pas
     // (« Concernant la voiture, tu disais quoi ? », 08h27:28). Gardé, il passe en premier à la discussion suivante.
     const NV = this._nouvelleVoiture; this._nouvelleVoiture = null;
-    const nouvelleVoiture = NV && reason !== 'test' && Date.now() - NV.at < 15 * 60000 ? NV : null;
+    const dejaRemise = NV && NV.msgId && (this.famille.msgs || []).some((m) => m.id === NV.msgId && m.remis);   // dite par un autre appareil
+    const nouvelleVoiture = NV && !dejaRemise && reason !== 'test' && Date.now() - NV.at < 15 * 60000 ? NV : null;
     if (nouvelleVoiture) {
+      this._nvEnvoi = { ...nouvelleVoiture, conv: this.convId };   // 1.43.0 : gardée tant qu'elle n'est pas vraiment dite
       const min = Math.max(1, Math.round((Date.now() - nouvelleVoiture.at) / 60000));
       this.brain.sendText(`[Nouvelles de la voiture, arrivées il y a ${min} min, pendant que personne ne te regardait : ${nouvelleVoiture.phrase} Dis-le-lui d'abord, en une phrase, sans rien ajouter.]`);
       this.log('Voiture : nouvelle gardée, donnée au début de la discussion', true);
@@ -1153,6 +1160,7 @@ class App {
       if (t0 && why !== 'essai de voix') setTimeout(() => this._passeMemoire(t0, t1, qs), 15000);
     }
     this.log(`Fin de conversation (${why}) — dernière parole de Wilson il y a ${depuis(this.playEndAt)}, de Timothée il y a ${depuis(this._heardAt)}${this._voitureBt ? ', en voiture' : ''}`); this._byName = false; this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false; this._searchMs = 0; this._vv = null; this._vvHerite = null;
+    this._nvSuivi('');   // 1.43.0 : nouvelle de la voiture pas encore dite → gardée pour la suivante
     // Une réponse du CRM envoyée mais pas encore dite (journal du 05/11/26, 11h04:22) : elle reste à dire ; en voiture, il
     // se réveille pour la dire (C11 bis), sauf si on l'a fait taire au volant (elle passera à la prochaine discussion).
     const P = this._aDire;
@@ -1214,8 +1222,8 @@ Nous sommes ${fmtDate()}.${nv}`;
   _system(mode = 'live') {
     if (mode === 'live' && this._voitureBt) return this._systemVoiture();
     const s = this.settings, souv = this.memoire.pourConsigne(), recents = this.memory.recent(10), suite = this._contexteSuite();
-    const bat = this.battery && !this.battery.charging && !this._batTold && !/Mobile/.test(navigator.userAgent) ? `\nAttention : la tablette n'est plus branchée (batterie ${Math.round(this.battery.level * 100)} %). Signale-le une seule fois, brièvement, puis n'en reparle plus.` : '';
-    if (bat) this._batTold = true;
+    // 1.43.0 : plus jamais la batterie de lui-même (remarques de Timothée du 13/11/26, 07h09:54, 21h40:08 et 21h41:18 :
+    // « tu arrêtes de me parler de la batterie »). Seulement s'il la demande (outil batterie). L'onglet État la montre toujours.
     const nv = this._nouveautes(mode);
     const eco = mode === 'eco' || mode === 'eco-search';
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
@@ -1304,7 +1312,7 @@ Sers-t'en avec tact, comme un ami qui se souvient : naturellement quand c'est ut
 Derniers échanges (pour la continuité, n'y fais allusion que si c'est utile) :
 ${recents || '(aucun)'}
 ${suite ? suite + '\n' : ''}
-Nous sommes ${fmtDate()}.${bat}${nv}`;
+Nous sommes ${fmtDate()}.${nv}`;
   }
 
   // ---------- son ----------
@@ -1522,10 +1530,12 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
         this._retenu = null; this._liveTurn = null; this._modelTalking = 0;
         if (user) this.log(`Entendu (sans regard) : « ${user.slice(0, 160)} »`, true);
         this.log(`Wilson se tait (personne ne le regardait)${wilson ? ` — il aurait dit : « ${wilson.slice(0, 100)} »` : ''}`, true);
+        this._nvSuivi(wilson, true);
         if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
         $('subtitle').textContent = '';
         return;
       }
+      if (wilson) this._nvSuivi(wilson);
       if (wilson) this._lastTurnAt = performance.now();   // un tour muet (puis relance) ne compte pas : délai réellement ressenti
       // La suite d'une demande (outil) est dite : la permission donnée par l'outil s'arrête ; la prochaine phrase devra être
       // dite en le regardant (R1). Le toucher et les boutons gardent leurs 30 s.
@@ -2850,12 +2860,36 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
     if (!s) return;
     this.log(`Voiture : ${s.texte}${s.detail ? ` — réponse du module : ${String(s.detail).slice(0, 160)}` : ''}`, true);
     const phrase = s.texte[0].toUpperCase() + s.texte.slice(1);
-    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Nouvelles de la voiture : ${phrase} Dis-le-lui en une phrase, sans rien ajouter.]`);
-    else if (this.state === 'conversation' || this.enVoiture) this._sayAfter(phrase);
-    else {                                                     // R1 : personne ne le regarde → à la prochaine discussion
-      this._nouvelleVoiture = { phrase, at: Date.now() };
-      this.log('Voiture : personne ne me regarde, je le dirai au début de la prochaine discussion (R1)', true);
+    // 1.43.0 (journal du 13/11/26, 07h07:30 : le refus est arrivé pendant la discussion, mais Timothée ne regardait plus ;
+    // la réponse a été retenue (R1) et la nouvelle perdue : à 07h08:15, « Alors cette voiture, on en est où ? » → « j'ai lancé
+    // le chauffage ») : envoyée dans la discussion seulement s'il regarde ; sinon gardée, et redonnée si elle n'est pas dite.
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open && !this.paused) {
+      this._nvEnvoi = { phrase, at: Date.now(), conv: this.convId };
+      this.brain.sendText(`[Nouvelles de la voiture : ${phrase} Dis-le-lui en une phrase, sans rien ajouter.]`);
+    } else if (this.enVoiture || (this.state === 'conversation' && !this.paused)) this._sayAfter(phrase);
+    else this._garderNouvelleVoiture({ phrase, at: Date.now() });   // R1 : personne ne le regarde → à la prochaine discussion
+  }
+  // Gardée pour la prochaine discussion sur cet appareil, et déposée en message pour Timothée (remarque du 13/11/26,
+  // 07h32:40 : « que l'information me soit donnée même si je ne reste pas devant la tablette ») : le premier appareil qui
+  // le voit (son téléphone, ou la tablette qui le reconnaît) la lui dit ; une fois remise, l'autre ne la redit pas.
+  _garderNouvelleVoiture(NV) {
+    if (!NV.msgId && !this.famille.telephone && this.remote && this.remote.on) {
+      try { NV.msgId = this.famille.deposer({ pour: PROPRIO_NOM, de: 'Wilson', texte: `Nouvelles de la voiture (${hhmm(NV.at)}) : ${NV.phrase}` }).id; } catch (_) {}
     }
+    this._nouvelleVoiture = NV; this._nvEnvoi = null;
+    this.log(`Voiture : personne ne me regarde, je le dirai au début de la prochaine discussion (R1)${NV.msgId ? ', et en message pour Timothée (son téléphone)' : ''}`, true);
+  }
+  // Dite pour de bon : sa phrase parle de la voiture. Retenue ou discussion finie sans l'avoir dite : gardée de nouveau.
+  _nvSuivi(wilson, retenue = false) {
+    const N = this._nvEnvoi; if (!N) return;
+    const parle = /voiture|chauffage|d[ée]givr|refus|MG\b/i.test(wilson || '');
+    if (retenue && wilson && !parle && N.conv === this.convId) return;   // une autre réponse retenue : la nouvelle attend encore
+    if (!retenue && parle) {
+      this._nvEnvoi = null;
+      if (N.msgId) { try { this.famille._marquer([N.msgId], PROPRIO_NOM); } catch (_) {} }
+      return;
+    }
+    if (retenue || N.conv !== this.convId) this._garderNouvelleVoiture(N);
   }
 
   async _crmTool(call) {
@@ -3023,7 +3057,16 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       const dire = aut.qui && aut.qui !== 'quelqu\'un que je ne connais pas' ? `Désolé ${aut.qui}, les e-mails, c'est seulement pour Timothée.` : 'Les e-mails, c\'est seulement pour Timothée : regarde-moi bien et redemande.';
       return { echec: true, info: `REFUSÉ : ses e-mails sont privés, réservés à Timothée. Dis seulement : « ${dire} » Aucun contenu d'e-mail.`, dire };
     }
-    const boite = ['perso', 'pro'].includes(a.boite) ? a.boite : 'les_deux';
+    let boite = ['perso', 'pro'].includes(a.boite) ? a.boite : 'les_deux';
+    // 1.43.0 (remarque de Timothée du 13/11/26, 07h34:40 : « désactiver la recherche des e-mails pro, trop contraignant de
+    // devoir laisser le PC allumé ») : la boîte pro (Outlook dans Chrome, sur le PC) n'est plus regardée ; le Gmail perso, si.
+    if (!this.settings.mailsPro) {
+      if (boite === 'pro') {
+        this.log('E-mails : boîte pro demandée, mais coupée à la demande de Timothée (13/11/26)', true);
+        return { echec: true, info: "Sa boîte pro n'est plus regardée : il l'a demandé le 13/11/26 (trop contraignant de laisser le PC allumé). Dis-le simplement, en une phrase ; s'il veut la remettre, il te le dit comme une remarque pour ta prochaine mise à jour.", dire: "Ta boîte pro, je ne la regarde plus : tu me l'as demandé le 13 novembre." };
+      }
+      boite = 'perso';
+    }
     const r = await this._parClaude({ question: q, type: 'mail', boite, voiture: this.enVoiture, crm: true }, signal);
     if (r.info) return r;
     const p = r.indispo || 'Claude, sur l\'ordinateur de la maison, n\'est pas relié sur cet appareil';
@@ -3390,7 +3433,6 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       const was = this.battery; this.battery = b;
       if (was && was.charging && !b.charging) { this.face.setEmotion('triste', 4000); this.badge('Je ne suis plus branché', 8000); }
       if (was && !was.charging && b.charging) this.face.setEmotion('joie', 2500);
-      if (b.charging) this._batTold = false;
     });
     s.on('network', (on) => {
       this.log(on ? 'Téléphone de nouveau en ligne' : 'Téléphone hors ligne');
@@ -3445,7 +3487,11 @@ Nous sommes ${fmtDate()}.${bat}${nv}`;
       const E = this.ecoState, thinking = E && (E.busy || E.cap);
       // une question à l'analyste garde la discussion ouverte 90 s ; au-delà, la réponse viendra de toute façon (C11 bis)
       // (et une réponse du CRM qu'il est en train de donner ne se coupe pas : journal du 05/11/26, 11h04:22)
-      const searching = !!(this._searches && this._searches.size) || [...(this._analyses || new Map()).values()].some((A) => now - A.t0 < 90000) || this._aDireEnCours(now);
+      // 1.43.0 (journal du 13/11/26, 21h39:39 : la recherche sur Xavier Niel arrive au moment où Timothée détourne les yeux,
+      // veille aussitôt, la réponse n'est jamais dite ; remarque du 13/11/26, 07h10:34 : « donne la réponse dès que tu l'as,
+      // même si je ne suis plus devant ») : un résultat d'outil reçu garde l'écoute ouverte jusqu'à ce qu'il soit dit (12 s au plus).
+      const AOr = this._apresOutil, attendReponse = !!(AOr && AOr.conv === this.convId && now - AOr.at < 12000);
+      const searching = !!(this._searches && this._searches.size) || [...(this._analyses || new Map()).values()].some((A) => now - A.t0 < 90000) || this._aDireEnCours(now) || attendReponse;
       // Images : aucune envoyée d'office (R6) ; seulement à la demande (outil « regarder »).
       const keep = this.car || this._voitureBt ? CAR_IDLE_MS : this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);

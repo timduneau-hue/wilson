@@ -28,7 +28,9 @@ export const DEFAULTS = {
   crm: false, voitureAuto: true, oreilleSens: 'normal', prenomMaison: false,   // prenomMaison : accord de Timothée du 01/11/26, à la maison seulement au regard      // CRM à la voix et mode voiture (PLAN 2 quater)
   haUrl: '', haToken: '',                                    // la maison par Home Assistant (PLAN 7 bis)
   gardeAuto: true, gardePhoto: true, objectifActifs: 0,      // garde de la maison et objectif des clients actifs (PLAN 7 sexies)
-  claudePC: true,                                            // questions difficiles : Claude sur le PC de la maison (PLAN 10)
+  nvDites: '',                                               // 1.43.0 : version dont les nouveautés ont déjà été dites (sur n'importe quel appareil)
+  claudePC: true,
+  mailsPro: false,                                           // 1.43.0 : boîte pro (Outlook sur le PC) coupée à la demande de Timothée (13/11/26)                                            // questions difficiles : Claude sur le PC de la maison (PLAN 10)
 };
 export const VOICES = [
   ['Puck', 'enjoué'], ['Achird', 'amical'], ['Charon', 'posé'], ['Fenrir', 'énergique'], ['Umbriel', 'décontracté'],

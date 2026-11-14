@@ -55,6 +55,18 @@ const PHOTO_MS = 5000;   // photo seule à l'écran : 5 s (remarque de Timothée
 const IMAGE_MS = 5000, REAFFICHE_MS = 60000;
 // Une photo (jpg) et pas un logo, un blason, une carte ou un dessin (svg, png) : réponse de Timothée du 12/11/26 (q261112a).
 const PAS_PHOTO = /logo|blason|emblem|coat[_ ]of[_ ]arms|drapeau|flag|carte|map|signature|icon|ic[oô]ne|diagram|sch[eé]ma/i;
+// 1.43.0 (13/11/26, 20h05:28, 20h06:22 et 21h00:05 : « une Ferrari » → photo d'Enzo Ferrari, « je te demandais la photo
+// d'une voiture ») : une page sur une PERSONNE n'est prise que si on demande cette personne, et quand le sujet nomme une
+// chose (« voiture Ferrari »), la page dont la description parle de cette chose passe devant.
+export const PERSONNE = /\b(nee?|homme|femme|acteur|actrice|chanteu[rs]e?|joueu[rs]e?|pilote|journaliste|animat(eur|rice)|ecrivain|ecrivaine|romancier|humoriste|politique|industriel|personnalite|footballeu[rs]e?|musicien|peintre|sporti(f|ve)|entrepreneu[rs]e?|homme d'affaires|femme d'affaires|realisat(eur|rice)|comedien|comedienne|mannequin|influenceu[rs]e?|prince|princesse|roi|reine|saint|sainte|philosophe|scientifique|inventeur|personnage)\b/;
+const CHOSES = { voiture: 'automobile|voiture|vehicule|modele|berline|coupe|cabriolet|roadster|supercar', auto: 'automobile|voiture|modele', moto: 'moto|motocyclette', avion: 'avion|aeronef|appareil', bateau: 'bateau|navire|voilier|yacht', chien: 'chien|race', chat: 'chat|race', maison: 'maison|batiment|edifice|villa|demeure', montre: 'montre', telephone: 'telephone|smartphone' };
+export function choisirPage(pages, sujet) {
+  const s = plat(sujet), mots = s.split(/[\s'-]+/).filter(Boolean);
+  const chose = mots.find((m) => CHOSES[m]), re = chose ? new RegExp(CHOSES[chose]) : null;
+  const ok = pages.filter((x) => estPhoto(x.original ? x.original.source : (x.thumbnail || {}).source)
+    && (!PERSONNE.test(plat(x.description)) || plat(x.title) === s));
+  return (re && ok.find((x) => re.test(plat(x.description)) || re.test(plat(x.title)))) || ok[0] || null;
+}
 const nomFichier = (u) => { const f = String(u || '').split('?')[0].split('/').pop() || ''; try { return decodeURIComponent(f); } catch (_) { return f; } };
 const estPhoto = (u) => /\.(jpe?g|webp)$/i.test(nomFichier(u)) && !PAS_PHOTO.test(nomFichier(u));
 // Chaque recherche d'image attend 4 s au plus (trois au pire : la photo vaut un peu d'attente, pas une minute).
@@ -180,9 +192,9 @@ export class Outils {
       }
     } catch (_) {}
     try {
-      const j = await getJson(`https://fr.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(nom)}&gsrlimit=6&prop=pageimages&piprop=thumbnail|original&pithumbsize=900&format=json&origin=*`);
+      const j = await getJson(`https://fr.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(nom)}&gsrlimit=8&prop=pageimages|description&piprop=thumbnail|original&pithumbsize=900&format=json&origin=*`);
       const pages = Object.values((j && j.query && j.query.pages) || {}).sort((a, b) => a.index - b.index).filter((x) => x.thumbnail && x.thumbnail.source);
-      const p = pages.find((x) => estPhoto(x.original ? x.original.source : x.thumbnail.source));
+      const p = choisirPage(pages, nom);
       if (p) return { src: p.thumbnail.source, titre: p.title, source: 'Wikipédia' };
       if (!secours && pages[0]) secours = { src: pages[0].thumbnail.source, titre: pages[0].title, source: 'Wikipédia' };
     } catch (_) {}

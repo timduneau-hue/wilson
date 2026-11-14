@@ -9,7 +9,7 @@ const C = {
 };
 
 export class Miel {
-  constructor(face) { this.f = face; this.bg = '#000'; this.ink = C.ivory; this.iris = makeIris(); }
+  constructor(face) { this.f = face; this.bg = '#000'; this.ink = C.ivory; }
 
   draw(g, st) {
     const P = st.P;
@@ -45,7 +45,11 @@ export class Miel {
       g.fillStyle = sg; g.fillRect(ex - rx, ey - ry, 2 * rx, 2 * ry);
       const ri = rx * 0.64 / sx * 0.98, ix = ex + lx * rx * 0.36, iy = ey + ly * ry * 0.3;
       g.save(); g.translate(ix, iy); g.scale(sx * (1 - Math.abs(lx) * 0.06), 1 - Math.abs(ly) * 0.05);
-      g.drawImage(this.iris, -ri, -ri, 2 * ri, 2 * ri);
+      // 1.43.0 (remarque de Timothée du 14/11/26, 11h09:13 : « plus de couleur marron dans mes yeux, l'iris a disparu » ;
+      // déjà le 30/10/26 : « tes yeux tout blancs sans couleur ») : l'iris était peint une fois dans une petite toile cachée,
+      // que Chrome sur Android peut vider (mémoire, appli en arrière-plan) sans prévenir. Il est maintenant dessiné à
+      // chaque image, directement : rien ne peut plus l'effacer.
+      g.fillStyle = irisGradient(g, ri); g.beginPath(); g.arc(0, 0, ri, 0, TAU); g.fill();
       const pr = ri * 0.42 * clamp(P.pupil, 0.55, 1.5);
       const pg = g.createRadialGradient(0, 0, pr * 0.6, 0, 0, pr * 1.08);
       pg.addColorStop(0, '#050201'); pg.addColorStop(1, 'rgba(5,2,1,0)');
@@ -69,11 +73,8 @@ export class Miel {
 }
 
 // Iris lisse (dégradé seul) : les fines stries de la 1re version créaient un scintillement quand l'œil bougeait.
-function makeIris() {
-  const s = 256, c = document.createElement('canvas'); c.width = c.height = s;
-  const g = c.getContext('2d'), r = s / 2;
-  const rg = g.createRadialGradient(r, r, r * 0.18, r, r, r);
+export function irisGradient(g, r) {
+  const rg = g.createRadialGradient(0, 0, r * 0.18, 0, 0, r);
   rg.addColorStop(0, C.irisIn); rg.addColorStop(0.45, C.irisMid); rg.addColorStop(0.86, C.irisOut); rg.addColorStop(1, C.limbal);
-  g.fillStyle = rg; g.beginPath(); g.arc(r, r, r, 0, TAU); g.fill();
-  return c;
+  return rg;
 }

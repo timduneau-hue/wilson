@@ -92,6 +92,8 @@ export class Famille {
     const n = norm(nom), now = Date.now();
     return this.msgs.filter((m) => {
       if (m.remis || m.annule || !(norm(m.pour) === n || m.pour === 'tous')) return false;
+      const NV = this.app._nvEnvoi || this.app._nouvelleVoiture;   // nouvelle de la voiture : dite par l'appli elle-même ici
+      if (NV && NV.msgId === m.id) return false;
       const M = metaMessage(m);
       return (norm(m.de) !== n || M.soi) && !(M.apres && now < M.apres) && !(M.maison && this.telephone);
     });

@@ -190,8 +190,8 @@ export const CRM_TOOLS = [
     description: "Toute autre question sur ses données, même inhabituelle : chiffre d'un mois ou d'une année passée, devis à relancer, clients qui ont (ou n'ont pas) commandé, quand un client a acheté un article, détail d'une commande, comparaisons, listes, totaux… Un analyste cherche dans tout le CRM et répond, même si ça prend une minute ou plus. Avant de l'appeler, dis « Je cherche l'information… », puis attends le résultat sans relancer.",
     parameters: { type: 'OBJECT', properties: { question: { type: 'STRING', description: 'la question complète, avec le nom du client et la période s\'il les a dits (ou le client dont vous parlez)' } }, required: ['question'] } },
   { name: 'itineraire', behavior: 'BLOCKING',
-    description: "Aller chez un client : affiche un grand bouton qui ouvre le GPS (Google Maps ou Waze) avec l'adresse de sa fiche ; Timothée appuie dessus. SEULEMENT quand il demande d'y aller (« emmène-moi », « guide-moi », « lance le GPS », « l'itinéraire ») : jamais parce qu'il cite un client.",
-    parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou le contact' } }, required: ['client'] } },
+    description: "Aller chez un client : affiche un grand bouton qui ouvre le GPS (Google Maps ou Waze) avec l'adresse de sa fiche ; Timothée appuie dessus. SEULEMENT quand il demande d'y aller (« emmène-moi », « guide-moi », « lance le GPS », « l'itinéraire ») : jamais parce qu'il cite un client. Marche aussi pour ses lieux à lui, sans le CRM : « la maison », « l'agence de Nantes » (ou Cholet, Rennes), « la plateforme d'Arnage ».",
+    parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: "la société ou le contact ; ou « maison », « agence Nantes », « agence Cholet », « agence Rennes », « plateforme Arnage »" } }, required: ['client'] } },
   { name: 'appeler', behavior: 'BLOCKING',
     description: "Appeler un client : affiche sur l'écran un grand bouton vert avec son numéro ; Timothée appuie dessus pour lancer l'appel.",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou le contact' }, contact: { type: 'STRING', description: 'la personne à appeler, si elle est précisée' } }, required: ['client'] } },
@@ -621,7 +621,41 @@ export class Crm {
   }
 
   // ---- itinéraire (C12) ----
+  // 1.43.0 (remarque de Timothée du 13/11/26, 07h28:58) : ses lieux à lui, prêts pour le GPS sans passer par le CRM — les
+  // agences Boschat Laveix de Nantes, Cholet et Rennes, la plateforme logistique d'Arnage, et la maison. Le GPS reçoit le
+  // nom du lieu (Google Maps et Waze le trouvent) ; l'adresse de la maison n'est jamais dans ce dépôt public : elle vient de
+  // la mémoire de Wilson (« La famille habite au … », retenu le 13/11/26), sinon de la ville des réglages.
+  lieuConnu(client = '') {
+    const x = plat(client).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!x) return null;
+    const boschat = /\b(agence|boschat|laveix|bl|bureau|depot|boulot|travail)\b/.test(x);
+    for (const v of ['nantes', 'cholet', 'rennes']) {
+      if (new RegExp(`\\b${v}\\b`).test(x) && (boschat || x === v)) {
+        const V = v[0].toUpperCase() + v.slice(1);
+        return { societe: `l'agence Boschat Laveix de ${V}`, adresse: `Boschat Laveix, ${V}` };
+      }
+    }
+    if (/\barnage\b|\bplate ?forme\b|\blogistique\b/.test(x)) return { societe: "la plateforme logistique Boschat Laveix d'Arnage", adresse: 'Boschat Laveix, Arnage' };
+    if (/^(la |a la |chez )?(maison|moi|nous)$|\bdomicile\b|\bchez moi\b|\bchez nous\b|\brentrer a la maison\b/.test(x)) {
+      const items = (this.app.memoire && this.app.memoire.items) || [];
+      const f = items.map((i) => String(i.texte || '')).map((t) => t.match(/(?:habit\w*|adresse[^:]*?|domicile[^:]*?)\s+(?:au|à|a|:)\s+(\d[^.;]{4,80})/i)).find(Boolean);
+      const ville = (this.app.settings && this.app.settings.city) || '';
+      const adresse = f ? f[1].trim() : ville;
+      return adresse ? { societe: 'la maison', adresse } : { societe: 'la maison', adresse: '', manque: true };
+    }
+    return null;
+  }
+
   async routeTarget({ client = '' } = {}, signal, { confirme = false } = {}) {
+    const L = this.lieuConnu(client);
+    if (L) {
+      if (L.manque) return { ok: false, dire: "Je ne connais pas encore l'adresse de la maison : demande-la-lui et retiens-la (memoriser « La famille habite au … »)." };
+      const q = encodeURIComponent(L.adresse);
+      this.log(`itinéraire : lieu connu « ${client} » → ${L.societe}`);
+      const target = { societe: L.societe, cle: '', contact: '', adresse: L.adresse, douteux: false, lieu: true,
+        maps: `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`, waze: `https://waze.com/ul?q=${q}&navigate=yes` };
+      return { ok: true, target, dire: `Le bouton pour aller à ${L.societe} est affiché : dis-lui en une phrase d'appuyer sur « Y aller » ; le guidage s'ouvre sur le téléphone et sur l'écran de la voiture, et pour te reparler il reviendra sur Wilson.` };
+    }
     const Q = await this._qui(client, signal);
     if (Q.dire) return { ok: false, dire: Q.dire };
     const S = Q.soc, ou = `${S.societe}${S.ville && !plat(S.ville).includes(plat(S.societe)) ? ' à ' + S.ville : ''}`;

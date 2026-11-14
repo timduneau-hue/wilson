@@ -199,7 +199,7 @@ async def main():
         check('Photo seule à l\'écran : 5 s (remarque de Timothée du 01/11/26, 18h50)', e2 == 5000, f'{e2}')
         await page.evaluate("wilson.outils.fermer()")
         await page.evaluate("wilson.outils.fermer()")
-        nv = await page.evaluate("(localStorage.removeItem('wilson.nouveautesDites'), wilson._lireNouveautes()).then(() => [wilson._system(), wilson._system()])")
+        nv = await page.evaluate("(localStorage.removeItem('wilson.nouveautesDites'), wilson.settings.nvDites = '', wilson._lireNouveautes()).then(() => [wilson._system(), wilson._system()])")
         check('Nouveautés de version.json dans la consigne, à dire une seule fois (G3)', 'Ta dernière mise à jour' in nv[0] and 'première discussion depuis' in nv[0] and 'première discussion depuis' not in nv[1], nv[0][-400:])
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await ctx.close(); await b.close()
