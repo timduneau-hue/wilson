@@ -1,1 +1,1 @@
-{"version":"1.43.3","date":"15/11/26","nouveautes":"si la télé (ou un autre appareil) ne répond pas à Home Assistant, tu ne dis plus jamais « c'est fait » : tu relances sa liaison, puis tu dis que ça n'a pas marché."}
+{"version":"1.43.4","date":"15/11/26","nouveautes":"ta page est verrouillée : tu ne peux plus envoyer de données qu'aux services de Timothée (Google, sa maison, la météo, Wikipédia, la radio) ; et tes mises à jour s'installent désormais sans qu'il ait à les valider."}

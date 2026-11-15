@@ -1,0 +1,57 @@
+# Publication automatique (PLAN.md, section 11, S9 ; décision de Timothée du 15/11/26 : « plus de clic mais un petit compte rendu
+# de ce qui a été mis à jour »). Quand « Vérifier » est vert sur une demande de modification, le gardien (.github/gardien.mjs,
+# lu depuis main) l'examine ; s'il est d'accord, la demande est fusionnée et GitHub Pages republie l'appli. Sinon, elle attend
+# le Merge de Timothée, avec un commentaire qui dit pourquoi.
+# Sécurité : déclencheur workflow_run → ce fichier et le gardien sont toujours ceux de main (une demande ne peut pas les changer
+# pour se fusionner elle-même), et le code de la demande n'est jamais exécuté ici (seulement lu, par l'API).
+name: Publication automatique
+
+on:
+  workflow_run:
+    workflows: ['Vérifier']
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  pages: write
+
+concurrency:
+  group: publication
+  cancel-in-progress: false
+
+jobs:
+  publier:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Gardien
+        id: gardien
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPOT: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          BRANCHE: ${{ github.event.workflow_run.head_branch }}
+        run: node .github/gardien.mjs
+
+      - name: Fusionner et republier
+        if: steps.gardien.outputs.ok == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPOT: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          PR: ${{ steps.gardien.outputs.pr }}
+        run: |
+          gh api -X PUT "repos/$DEPOT/pulls/$PR/merge" -f merge_method=merge -f sha="$SHA" --jq .message
+          # Une fusion faite par cet automatisme ne relance pas les autres : on demande à GitHub Pages de republier.
+          gh api -X POST "repos/$DEPOT/pages/builds" --jq .status || echo "Republication demandée sans réponse (GitHub Pages la fera au prochain passage)."
+          echo "Demande n°$PR fusionnée automatiquement." >> "$GITHUB_STEP_SUMMARY"
