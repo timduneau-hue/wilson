@@ -251,9 +251,11 @@ export class Maison {
   // commande : échec, dit tel quel (jamais « c'est allumé » quand c'est éteint).
   // Journal du 11/11/26 (18h44:47, 20h58:53, 21h16:55, 21h18:22 ; remarques de Timothée de 20h59:35 et 21h00:45) : « allumer →
   // ok — éteint » revenait encore : l'inventaire range l'état dans `etat`, la vérification lisait `state` (toujours vide).
+  // Journal du 15/11/26, 13h33:48 : « eteindre → Télé : ok — Télé : injoignable » et Wilson a dit « C'est fait, la télé est
+  // éteinte » alors qu'elle était restée allumée. Une télé (ou un autre lecteur) injoignable après la commande : échec.
   _verifie(e, allume, info) {
-    if (e.domaine !== 'light' && e.domaine !== 'switch') return { ok: true, info };
     const n = (this.inv || []).find((x) => x.id === e.id), st = n && n.etat;
+    if (e.domaine !== 'light' && e.domaine !== 'switch') return st === 'unavailable' ? { ok: false, info: this.injoignable(e) } : { ok: true, info };
     if (!st || st === 'unavailable' || st === 'unknown') return { ok: true, info };
     if (allume ? st === 'off' : st === 'on') return { ok: false, info: `${info} (commande envoyée, mais Home Assistant indique que ${e.nom} est resté${allume ? ' éteint' : ' allumé'} : ne dis surtout pas que c'est fait ; dis-lui que ça n'a pas marché)` };
     return { ok: true, info };
@@ -283,6 +285,14 @@ export class Maison {
       const x = await this._etatDe(id).catch(() => null);
       if (x && x.state === 'unavailable' && this._sansReseau(inv)) return { ok: false, info: HA_SANS_RESEAU };
       if (x && x.state === 'unavailable' && !(await this._relancer(e))) return { ok: false, info: `${e.nom} ne répond pas : la prise a sans doute perdu le Wi-Fi. Il faut la débrancher puis la rebrancher ; si ça revient souvent, elle est trop loin de la box.` };
+    }
+    // Télé ou lecteur « injoignable » (journal du 15/11/26, 13h33 : télé branchée par câble à 12h57, nouvelle adresse sur le
+    // réseau, Home Assistant cherchait encore l'ancienne) : on relance sa liaison une fois ; s'il reste injoignable, on le dit,
+    // sans rien envoyer (une commande envoyée à un appareil injoignable est acceptée par Home Assistant mais n'arrive jamais).
+    if ((d === 'media_player' || d === 'remote') && !['allumer', 'appli', 'radio'].includes(action)) {
+      const x = await this._etatDe(id).catch(() => null);
+      if (x && x.state === 'unavailable' && this._sansReseau(inv)) return { ok: false, info: HA_SANS_RESEAU };
+      if (x && x.state === 'unavailable' && !(await this._relancer(e))) return { ok: false, info: this.injoignable(e) };
     }
     try {
       // Chauffage ou clim (la voiture par le module MG iSMART de Home Assistant, demande du 11/11/26) : la commande part vers
@@ -387,16 +397,18 @@ export class Maison {
   }
   // Télé en veille profonde (réseau coupé, « injoignable ») : réveil par le réseau (script « Réveil télé » de Home Assistant,
   // paquet Wake-on-LAN), puis on attend qu'elle réponde. false si elle reste injoignable.
-  get TELE_COUPEE() { return "La télé est en veille profonde, coupée du réseau : je ne peux pas l'allumer. Dis-lui de l'allumer à la télécommande ; pour que je puisse le faire la prochaine fois, il faut activer « Démarrage à distance » dans les réglages réseau de la télé."; }
+  get TELE_COUPEE() { return "La télé ne répond pas à Home Assistant : je n'ai pas pu l'allumer, ne dis surtout pas que c'est fait. Dis-lui de l'allumer à la télécommande. Deux causes possibles : elle est en veille profonde (il faut « Démarrage à distance » activé dans ses réglages réseau), ou elle a changé d'adresse sur le réseau (par exemple branchée par câble au lieu du Wi-Fi) et il faut la reconnecter dans Home Assistant."; }
+  injoignable(e) { return `${e.nom} ne répond pas à Home Assistant : la commande n'a pas pu lui parvenir, ne dis surtout pas que c'est fait ; dis-lui que ça n'a pas marché et d'utiliser la télécommande. Cause probable : l'appareil a changé d'adresse sur le réseau (par exemple branché par câble au lieu du Wi-Fi) et il faut le reconnecter dans Home Assistant.`; }
   async _reveiller(e, inv, svc) {
     const x = await this._etatDe(e.id).catch(() => null);
     if (x && x.state !== 'unavailable') return true;
     const sc = inv.find((y) => y.domaine === 'script' && /^script\.reveil/.test(y.id));
-    if (!sc) return false;
+    if (!sc) return this._relancer(e);
     this.log(`Maison : ${e.nom} injoignable → ${sc.nom}`);
     await svc('script', 'turn_on', { entity_id: sc.id }).catch(() => {});
     const r = await this._attendre(e.id, (y) => y.state !== 'unavailable', 25000);
-    return !!(r && r.state !== 'unavailable');
+    if (r && r.state !== 'unavailable') return true;
+    return this._relancer(e);                     // 15/11/26 : télé qui a changé d'adresse → relancer sa liaison dans Home Assistant
   }
   async _relancer(e) {
     const t = await this._fetch('/api/template', { method: 'POST', text: true, body: { template:

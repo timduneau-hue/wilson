@@ -1,1 +1,1 @@
-{"version":"1.43.2","date":"15/11/26","nouveautes":"quand une phrase n'est pas pour toi, tu te tais vraiment, sans dire « je vous laisse entre vous » ; tu essaies toujours d'allumer un appareil « injoignable » au lieu de refuser ; et tu dis tout de suite que la boîte e-mail pro est coupée."}
+{"version":"1.43.3","date":"15/11/26","nouveautes":"si la télé (ou un autre appareil) ne répond pas à Home Assistant, tu ne dis plus jamais « c'est fait » : tu relances sa liaison, puis tu dis que ça n'a pas marché."}
