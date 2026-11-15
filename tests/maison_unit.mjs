@@ -176,4 +176,36 @@ t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'deman
   t(!/QUAND MÊME/.test(await (c.invAt = 0, c.etat())), 'rien d\'injoignable : pas de consigne en plus');
   globalThis.fetch = f0;
 }
+// Journal du 15/11/26, 13h33:48 : télé branchée par câble à 12h57 (nouvelle adresse), Home Assistant la voyait « injoignable » ;
+// « éteins la télé » → « ok — Télé : injoignable » et Wilson a dit « C'est fait, la télé est éteinte ». Elle était restée allumée.
+{
+  const E = [
+    { entity_id: 'media_player.television', state: 'unavailable', attributes: { friendly_name: 'Télé' } },
+    { entity_id: 'media_player.tele', state: 'unavailable', attributes: { friendly_name: 'Télé (Chromecast)' } },
+    { entity_id: 'switch.balcon', state: 'off', attributes: { friendly_name: 'Éclairage balcon' } },
+  ];
+  const f0 = globalThis.fetch; const svc = []; let relance = 0, repare = false;
+  globalThis.fetch = async (url, o) => {
+    if (url.endsWith('/api/config')) return { status: 200, ok: true, json: async () => ({}) };
+    if (url.endsWith('/api/states')) return { status: 200, ok: true, json: async () => E };
+    if (url.includes('/api/states/')) { const id = url.split('/api/states/')[1]; return { status: 200, ok: true, json: async () => E.find((x) => x.entity_id === id) }; }
+    if (url.endsWith('/api/template')) return { status: 200, ok: true, text: async () => (/device_entities/.test(o.body) ? 'entree1' : E.map((e) => `${e.entity_id}||False|False`).join('\n')), json: async () => 'entree1' };
+    if (url.includes('/reload')) { relance++; if (repare) E[0].state = 'on'; return { status: 200, ok: true, json: async () => ({}) }; }
+    if (url.includes('/api/services/')) { svc.push(url.split('/api/services/')[1]); return { status: 200, ok: true, json: async () => [] }; }
+    return { status: 404, ok: false, json: async () => ({}) };
+  };
+  const c = new Maison({ settings: { haUrl: 'https://ha.exemple.ts.net', haToken: 'bon' } });
+  c._attendre = async (id, cond) => E.find((x) => x.entity_id === id);   // pas d'attente réelle dans le test
+  await c.rafraichir();
+  let r = await c.commande({ appareil: 'media_player.television', action: 'eteindre' });
+  t(!r.ok && /ne répond pas à Home Assistant/.test(r.info) && /ne dis surtout pas que c'est fait/.test(r.info) && !svc.length && relance === 1, 'télé injoignable + « éteindre » (15/11/26, 13h33) : liaison relancée une fois, puis échec dit, jamais « ok » : ' + JSON.stringify({ r, svc, relance }));
+  r = await c.commande({ appareil: 'media_player.television', action: 'volume', valeur: '20' });
+  t(!r.ok && /ne répond pas/.test(r.info) && !svc.length, 'télé injoignable + volume : échec, rien envoyé');
+  repare = true; relance = 0;
+  r = await c.commande({ appareil: 'media_player.television', action: 'eteindre' });
+  t(relance === 1 && svc.includes('media_player/turn_off'), 'liaison relancée qui répare : la commande part ensuite : ' + JSON.stringify(svc));
+  E[0].state = 'unavailable'; svc.length = 0; await c.rafraichir();
+  t(!c._verifie({ id: 'media_player.television', domaine: 'media_player', nom: 'Télé' }, false, 'Télé : injoignable').ok, 'télé injoignable juste après la commande : jamais « ok »');
+  globalThis.fetch = f0;
+}
 console.log(`${ok}/${ok + ko} OK`); process.exit(ko ? 1 : 0);
