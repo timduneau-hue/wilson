@@ -165,7 +165,15 @@ t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'deman
   t(!r.ok && /perdu le réseau de la maison/.test(r.info) && !/débrancher/.test(r.info) && !svc.length, 'commande pendant la panne : vraie panne dite, rien relancé ni envoyé : ' + r.info);
   t(/perdu le réseau/.test(c.texteInventaire()), 'inventaire donné à Gemini : la panne y est dite');
   E[1].state = 'off';
-  t(!/perdu le réseau/.test(await (c.invAt = 0, c.etat())), 'un seul appareil injoignable : pas de fausse alerte');
+  const e1 = await (c.invAt = 0, c.etat());
+  t(!/perdu le réseau/.test(e1), 'un seul appareil injoignable : pas de fausse alerte');
+  // Journal du 14/11/26, 15h02:25 et 20h05:35 : « injoignable » lu dans l'état → Wilson refusait sans essayer maison_commande.
+  t(/appelle QUAND MÊME maison_commande/.test(e1), 'maison_etat avec un appareil injoignable : « appelle quand même maison_commande » : ' + e1);
+  await c.rafraichir();
+  const ti = c.texteInventaire();
+  t(/Lumière jaune salon.*injoignable \(si on te demande d'agir dessus, appelle QUAND MÊME maison_commande/.test(ti) && !/Télé.*QUAND MÊME/.test(ti), 'inventaire : seul l\'appareil injoignable porte « appelle quand même maison_commande » : ' + ti);
+  E[0].state = 'off';
+  t(!/QUAND MÊME/.test(await (c.invAt = 0, c.etat())), 'rien d\'injoignable : pas de consigne en plus');
   globalThis.fetch = f0;
 }
 console.log(`${ok}/${ok + ko} OK`); process.exit(ko ? 1 : 0);

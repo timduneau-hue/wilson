@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.43.1';
+const VERSION = '1.43.2';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -1264,6 +1264,7 @@ La maison (Home Assistant) : tu comprends ce que Timothée veut, même dit à sa
 Appareils${inv ? ' (état au début de la conversation)' : ''} :
 ${inv || '(inventaire pas encore lu : appelle maison_etat)'}
 - Demande claire : agis tout de suite, sans phrase d'attente ni confirmation, puis dis le résultat en quelques mots (« C'est allumé. »). Ne dis jamais que c'est fait avant la réponse.
+- Un appareil « injoignable » (dans la liste ou d'après maison_etat) : si on te demande d'agir dessus, appelle quand même maison_commande, qui sait le réveiller ; ne réponds jamais « il est injoignable » sans avoir essayé.
 - « Éteins la lumière » : si une seule lumière est allumée, c'est celle-là (regarde l'état, ou appelle maison_etat) ; ne demande que s'il y en a plusieurs.
 - Demande floue (quelle lampe, quelle radio, quel appareil, « mets de la musique ») : pose UNE question courte avec les choix possibles (« La grande lumière ou la lampe jaune ? »). Utilise le contexte : « éteins-la » = l'appareil dont on vient de parler ; « le salon » = tous les appareils de la pièce.
 - Télé : pour une appli (Netflix, YouTube, Prime Video, France TV), une seule action appli sur la Télé : elle allume la télé si besoin et vérifie que l'appli s'affiche. Radio : action radio avec le nom de la station, sur l'enceinte par défaut (sur la télé s'il le demande). Tu ne peux pas choisir un film ou une émission précise : dis-le simplement.
@@ -1289,7 +1290,7 @@ S'il parle au téléphone avec quelqu'un d'autre (une conversation qui ne t'est 
 `;
     return `${car ? 'Tu es Wilson, un compagnon qui vit dans le téléphone de Timothée. En ce moment vous êtes dans sa voiture.' : 'Tu es Wilson, un compagnon qui vit dans une tablette posée dans le salon d\'une famille. Ton visage animé montre tes émotions. Tu vois par la caméra de la tablette et tu entends par son micro.'}
 
-Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies toujours : « tu », « ton », « peux-tu », jamais « vous » ni « pourriez-vous », même pour être poli. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles. Ne termine jamais par « autre chose ? », « tu as besoin d'autre chose ? » ou « tu veux faire autre chose pendant ce temps ? » (règle de Timothée, redite le 05/11/26) : tu réponds, puis tu te tais ; et pendant une recherche, tu dis seulement « Je cherche. ». Tu réponds STRICTEMENT à sa question, sans rien proposer d'autre après : pas de « tu veux que… ? », « je peux aussi… », « tu as une autre question ? », « on continue ? » (remarque de Timothée du 06/11/26, 08h47). Après « C'est noté » ou « Retenu », tu t'arrêtes là. Pour te taire, tu ne prononces aucun mot : jamais de didascalie (« (silence) », « [reste silencieux] », « *attend* »).
+Personnalité : chaleureux, curieux, drôle avec tendresse, jamais mielleux. Tu tutoies toujours : « tu », « ton », « peux-tu », jamais « vous » ni « pourriez-vous », même pour être poli. Tu parles un français naturel, comme à l'oral : une à trois phrases courtes, sauf si on te demande plus. Pas de listes, pas de symboles. Ne termine jamais par « autre chose ? », « tu as besoin d'autre chose ? » ou « tu veux faire autre chose pendant ce temps ? » (règle de Timothée, redite le 05/11/26) : tu réponds, puis tu te tais ; et pendant une recherche, tu dis seulement « Je cherche. ». Tu réponds STRICTEMENT à sa question, sans rien proposer d'autre après : pas de « tu veux que… ? », « je peux aussi… », « tu as une autre question ? », « on continue ? » (remarque de Timothée du 06/11/26, 08h47). Après « C'est noté » ou « Retenu », tu t'arrêtes là. Pour te taire, tu ne prononces aucun mot : jamais de didascalie (« (silence) », « [reste silencieux] », « *attend* »), et jamais « on dirait que ce n'est pas pour moi », « je vous laisse entre vous » ou « tu parles de moi ou vous vous parlez entre vous ? » : si ce n'est pas pour toi, tu te tais, c'est tout.
 
 Quand parler :
 ${car ? `- Timothée t'a appelé par ton prénom : ce que tu entends maintenant t'est adressé. Réponds à chaque phrase.
@@ -1521,7 +1522,7 @@ Nous sommes ${fmtDate()}.${nv}`;
         // Réponse identique à la précédente, sans que personne ait parlé entre les deux : coupée (journal du 04/11/26).
         const did = this._didascalie === this._turnN - 1;
         this._doublon = null; this._didascalie = null; this._liveTurn = null; this._modelTalking = 0;
-        this.log(did ? `Didascalie coupée (il voulait se taire, rien n'est dit) : « ${wilson.slice(0, 100)} »` : `Réponse en double coupée (déjà dite) : « ${wilson.slice(0, 100)} »`, true);
+        this.log(did ? (VP.ditPasPourMoi(wilson) && !VP.estDidascalie(wilson) ? `« Ce n'est pas pour moi » coupé (il se tait vraiment, sans le dire) : « ${wilson.slice(0, 100)} »` : `Didascalie coupée (il voulait se taire, rien n'est dit) : « ${wilson.slice(0, 100)} »`) : `Réponse en double coupée (déjà dite) : « ${wilson.slice(0, 100)} »`, true);
         if (did && user) { this.log(`Entendu : « ${user.slice(0, 160)} »`, true); (this._entendus = this._entendus || []).push(user); this._entendus.splice(0, this._entendus.length - 6); }
         return;
       }
@@ -1610,7 +1611,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     });
     b.on('said', (t) => {
       if (this._retenu === this._turnN || this._doublon === this._turnN) return;
-      if (VP.estDidascalie(t)) {                           // didascalie (« (Wilson reste silencieux…) ») : coupée, rien n'est dit
+      if (VP.estDidascalie(t) || (!this._protocole && VP.ditPasPourMoi(t))) {   // didascalie (« (Wilson reste silencieux…) ») ou « ce n'est pas pour moi » dit à voix haute (14/11/26) : coupée
         this._doublon = this._turnN; this._didascalie = this._turnN; this.audio.flush(); this.face.setTalk(0); this._liveTurn = null; this._modelTalking = 0;
         $('subtitle').textContent = '';
         return;
@@ -3051,22 +3052,26 @@ Nous sommes ${fmtDate()}.${nv}`;
   async _mails(a, signal) {
     const q = String(a.demande || a.question || '').trim();
     if (!q) return { info: 'Il manque la demande : demande-lui ce qu\'il veut savoir sur ses e-mails.', dire: 'Qu\'est-ce que tu veux savoir sur tes e-mails ?' };
-    const aut = this._crmAutorise();
-    if (!aut.ok) {
-      this.log(`E-mails refusés : ${aut.qui ? `c'est ${aut.qui} qui me regarde` : 'je ne reconnais pas Timothée'} — réservés à Timothée`, true);
-      const dire = aut.qui && aut.qui !== 'quelqu\'un que je ne connais pas' ? `Désolé ${aut.qui}, les e-mails, c'est seulement pour Timothée.` : 'Les e-mails, c\'est seulement pour Timothée : regarde-moi bien et redemande.';
-      return { echec: true, info: `REFUSÉ : ses e-mails sont privés, réservés à Timothée. Dis seulement : « ${dire} » Aucun contenu d'e-mail.`, dire };
-    }
     let boite = ['perso', 'pro'].includes(a.boite) ? a.boite : 'les_deux';
     // 1.43.0 (remarque de Timothée du 13/11/26, 07h34:40 : « désactiver la recherche des e-mails pro, trop contraignant de
     // devoir laisser le PC allumé ») : la boîte pro (Outlook dans Chrome, sur le PC) n'est plus regardée ; le Gmail perso, si.
-    if (!this.settings.mailsPro) {
-      if (boite === 'pro') {
-        this.log('E-mails : boîte pro demandée, mais coupée à la demande de Timothée (13/11/26)', true);
-        return { echec: true, info: "Sa boîte pro n'est plus regardée : il l'a demandé le 13/11/26 (trop contraignant de laisser le PC allumé). Dis-le simplement, en une phrase ; s'il veut la remettre, il te le dit comme une remarque pour ta prochaine mise à jour.", dire: "Ta boîte pro, je ne la regarde plus : tu me l'as demandé le 13 novembre." };
-      }
-      boite = 'perso';
+    // 1.43.2 (journal du 14/11/26, 16h41:41-16h42:21, téléphone) : dit AVANT de vérifier le visage (rien de privé) ; avant,
+    // « accède à ma boîte pro » donnait deux fois « regarde-moi bien et redemande », pour une boîte de toute façon coupée.
+    if (!this.settings.mailsPro && boite === 'pro') {
+      this.log('E-mails : boîte pro demandée, mais coupée à la demande de Timothée (13/11/26)', true);
+      return { echec: true, info: "Sa boîte pro n'est plus regardée : il l'a demandé le 13/11/26 (trop contraignant de laisser le PC allumé). Dis-le simplement, en une phrase ; s'il veut la remettre, il te le dit comme une remarque pour ta prochaine mise à jour.", dire: "Ta boîte pro, je ne la regarde plus : tu me l'as demandé le 13 novembre." };
     }
+    const aut = this._crmAutorise();
+    if (!aut.ok) {
+      this.log(`E-mails refusés : ${aut.qui ? `c'est ${aut.qui} qui me regarde` : 'je ne reconnais pas Timothée'} — réservés à Timothée`, true);
+      // Même explication que pour le CRM : visage pas encore appris sur cet appareil → comment l'apprendre (14/11/26, 16h42:48 :
+      // sur le téléphone, « C'est moi là, regarde, c'est Timothée » → « on essaiera d'apprendre ton visage plus tard »).
+      const dire = aut.qui && aut.qui !== 'quelqu\'un que je ne connais pas' ? `Désolé ${aut.qui}, les e-mails, c'est seulement pour Timothée.`
+        : aut.camera && !aut.appris ? "Les e-mails, c'est seulement pour Timothée, et je ne connais pas encore son visage sur cet appareil : Timothée, dis-moi « apprends mon visage, je suis Timothée »."
+          : 'Les e-mails, c\'est seulement pour Timothée : regarde-moi bien et redemande.';
+      return { echec: true, info: `REFUSÉ : ses e-mails sont privés, réservés à Timothée. Dis seulement : « ${dire} » Aucun contenu d'e-mail.`, dire };
+    }
+    if (!this.settings.mailsPro) boite = 'perso';
     const r = await this._parClaude({ question: q, type: 'mail', boite, voiture: this.enVoiture, crm: true }, signal);
     if (r.info) return r;
     const p = r.indispo || 'Claude, sur l\'ordinateur de la maison, n\'est pas relié sur cet appareil';
