@@ -110,6 +110,18 @@ export function estDidascalie(t) {
   return /^\s*[([*]/.test(x) || /\b(je reste|il reste|wilson reste|reste|rester|demeure) (silencieux|muet)\b|ne (me )?semble pas s'adresser a (lui|moi)|[([*]\s*(silence|pause|wilson|il se tait|se tait|attend|ne dit rien|ne repond pas)\b/.test(x);
 }
 
+// Il annonce à voix haute que ce n'était pas pour lui (« On dirait que vous papotez entre vous, je ne m'immisce pas »,
+// « Je vous laisse régler ça entre vous ! », « tu parles de moi ou vous vous parlez entre vous ? ») : le dire, c'est
+// justement se mêler de la conversation. Journal du 14/11/26 : 10h48:41, 11h08:54, 11h25:46, 13h16:46, 16h01:41, 21h26:10,
+// 21h27:18. Comme une didascalie, c'est coupé : il se tait vraiment.
+export function ditPasPourMoi(t) {
+  const x = plat(t).replace(/\s+/g, ' ').trim();
+  if (!x || x.length > 260) return false;
+  const debut = x.replace(/^((coucou|salut|ah|oh|oups|hmm|euh|bon|ok|d'accord|oula|tiens)\b[\s,.!…]*)+/, '');
+  return /^(on dirait (bien )?que (ce n'est pas pour moi|ca ne m'est pas adresse|ca ne me concerne pas|tu parles (a|avec) quelqu'un d'autre|vous (etes en (pleine )?(conversation|discussion)|papotez|discutez|parlez entre vous|vous parlez))|ce n'(est|etait) pas pour moi|je vous laisse (regler|discuter|parler|papoter|entre vous)|je (ne )?(vais pas|veux pas|voudrais pas) (vous )?(deranger|interrompre|m'immiscer))/.test(debut)
+    || /\bje ne m'(immisce|en mele) pas\b|\btu parles (de|a) moi ou (vous|tu|a)\b|\bvous vous parlez entre vous\b|\bvous parlez entre vous\b/.test(x.slice(0, 160));
+}
+
 // Il dit qu'il n'a PAS demandé le guidage (journal du 06/11/26, 08h45:13 : « Et pourquoi tu as activé le GPS alors que j'ai pas
 // dit que on allait à Lèbre ? » → Gemini a relancé le guidage, à cause du mot « GPS »).
 export function refusItineraire(t) { return /\b(pas demande|pas dit|pourquoi (tu|t'as|as-tu|il)|arrete|annule|coupe|eteins|enleve|ferme|n'y (vais|va|allons) pas|on y va pas|j'y vais pas|pas besoin|pas la peine|je (ne )?veux pas|non non)\b/.test(plat(t)); }

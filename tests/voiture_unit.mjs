@@ -47,6 +47,17 @@ check('« Oui vas-y » : un oui', V.estOui('Oui vas-y') && !V.estOui('Oui mais p
 // Didascalies lues à voix haute (09/11, 17h52:33)
 check('« (Wilson reste silencieux…) » : didascalie', V.estDidascalie("(Wilson reste silencieux car la conversation ne semble pas s'adresser à lui.)"));
 check('« *attend* », « [silence] » : didascalies', V.estDidascalie('*attend*') && V.estDidascalie('[silence]'));
+// Journal du 14/11/26 (10h48:41 … 21h27:18) : « ce n'est pas pour moi » dit à voix haute → coupé comme une didascalie.
+for (const p of ["On dirait que ce n'est pas pour moi. Préviens-moi si tu as besoin de quoi que ce soit.",
+  "On dirait que vous papotez entre vous, je ne m'immisce pas. Faites-moi signe si vous avez besoin de moi !",
+  "On dirait que tu parles à quelqu'un d'autre. Je reste à l'écoute si tu as besoin de moi !",
+  "Coucou ! On dirait que vous êtes en pleine conversation, je ne voudrais pas déranger.",
+  "Je vous laisse régler ça entre vous ! Prévenez-moi si vous avez besoin d'aide pour autre chose.",
+  "J'entends bien tout ça, mais tu parles de moi ou vous vous parlez entre vous ? Dis-moi si tu as besoin de quelque chose."])
+  check('« ' + p.slice(0, 50) + '… » : pas pour moi, coupé', V.ditPasPourMoi(p));
+check('Vraies réponses gardées (« pas pour moi »)', !V.ditPasPourMoi("C'est fait, la lumière jaune est allumée.") && !V.ditPasPourMoi("Pas de problème, je reste là si tu as besoin.")
+  && !V.ditPasPourMoi("Ah, ça te plairait ? Qu'est-ce que tu imagines comme truc trop bien ?") && !V.ditPasPourMoi("Je ne comprends pas cette phrase. Tu peux me la redire en français, s'il te plaît ?")
+  && !V.ditPasPourMoi("Pour ce mois-ci, tu as 37 clients actifs.") && !V.ditPasPourMoi("Tu parles de la réunion de lundi ? Elle est à 9h00."));
 check('Une vraie réponse n\'est pas une didascalie', !V.estDidascalie('Tu as 23 clients actifs ce mois-ci.') && !V.estDidascalie('Je te guide (enfin, Maps te guide).'));
 // Reprise d'un résultat déjà reçu (06/11, 08h46:06)
 const res0611 = "[La recherche dans le CRM que tu avais lancée pour la question « OBJECTIF CLIENTS ACTIFS Combien de clients actifs ce mois-ci ? » est terminée (84 s). Résultat : Réponse de Claude : « Tu as 23 clients actifs sur 49, donc il t'en manque 26. C'est le chiffre de novembre de l'an dernier qui fixe l'objectif, puisque tu n'en as pas donné. » Dis-la-lui.]";

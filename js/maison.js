@@ -55,6 +55,10 @@ export const HA_VM = "Home Assistant ne répond pas, alors que l'ordinateur de l
 const HA_LENT = "Home Assistant a mis trop de temps à répondre pour cet appareil (il répond pour les autres) : la commande est peut-être passée quand même.";
 // Journal du 14/11/26, 15h02-15h03 : télé, Chromecast et lumière jaune « injoignables » ensemble, alors que Home Assistant
 // répondait (VPN et PC au vert). Sa machine virtuelle avait perdu son adresse IPv4 : elle ne voyait plus aucun appareil.
+// Journal du 14/11/26, 15h02:25 et 20h05:35 : « Éteins la télé », « Allume la télé » → la télé (en veille profonde après
+// 17h08) était « injoignable » dans l'inventaire ou dans maison_etat, et Wilson a répondu « elle est injoignable » sans
+// essayer, alors que maison_commande sait la réveiller par le réseau (ou relancer la liaison d'une prise).
+export const ESSAIE = " (si on te demande d'agir dessus, appelle QUAND MÊME maison_commande : elle sait le réveiller ou relancer sa liaison ; ne dis jamais qu'il est injoignable sans avoir essayé)";
 // Quand tous les appareils de la maison sont injoignables en même temps, c'est Home Assistant, pas chaque appareil.
 export const HA_SANS_RESEAU = "Tous les appareils de la maison sont injoignables en même temps alors que Home Assistant répond : ce ne sont pas les appareils, c'est Home Assistant qui a perdu le réseau de la maison. L'ordinateur de la maison le répare tout seul en moins de 15 minutes ; si ça dure, il faut rebrancher le câble réseau de la machine virtuelle Home Assistant (VirtualBox, Périphériques, Réseau). Dis-le-lui simplement, sans parler de chaque appareil.";
 const SERVICE_MS = 25000;
@@ -189,7 +193,7 @@ export class Maison {
   texteInventaire() {
     if (!this.inv || !this.inv.length) return '';
     if (this._sansReseau(this.inv)) return '(' + HA_SANS_RESEAU + ' Appelle quand même maison_etat ou maison_commande si on te le demande : la panne est peut-être déjà réparée.)';
-    return this.inv.filter((e) => e.domaine !== 'remote' && !/^script\.reveil/.test(e.id)).map((e) => `- ${e.nom} [${e.id}] : ${TYPE[e.domaine]}${e.piece ? ', ' + e.piece : ''} ; ${this._possible(e)} ; actuellement ${this._decrire(e)}`).join('\n');
+    return this.inv.filter((e) => e.domaine !== 'remote' && !/^script\.reveil/.test(e.id)).map((e) => `- ${e.nom} [${e.id}] : ${TYPE[e.domaine]}${e.piece ? ', ' + e.piece : ''} ; ${this._possible(e)} ; actuellement ${this._decrire(e)}${e.etat === 'unavailable' ? ESSAIE : ''}`).join('\n');
   }
 
   _trouver(inv, q) {
@@ -221,7 +225,7 @@ export class Maison {
     if (this._sansReseau(inv)) { this.log('Maison : tous les appareils injoignables en même temps → Home Assistant sans réseau local'); return HA_SANS_RESEAU; }
     const l = (appareils && appareils.length ? appareils.map((q) => this._trouver(inv, q)).filter(Boolean) : inv.filter((e) => e.domaine !== 'remote' && e.domaine !== 'script'));
     if (!l.length) return 'Aucun appareil ne correspond. Appareils : ' + inv.map((e) => e.nom).join(', ');
-    return l.map((e) => `${e.nom}${e.piece ? ' (' + e.piece + ')' : ''} : ${this._decrire(e, true)}`).join(' ; ');
+    return l.map((e) => `${e.nom}${e.piece ? ' (' + e.piece + ')' : ''} : ${this._decrire(e, true)}`).join(' ; ') + (l.some((e) => e.etat === 'unavailable') ? '.' + ESSAIE : '');
   }
 
   // { appareil, action, valeur } → { ok, info } (info : pour Gemini, qui le dit à sa façon).
