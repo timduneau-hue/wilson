@@ -7,6 +7,7 @@
     la question jamais, que le texte arrive avant, pendant ou après le son.
  3. Téléphone sans Home Assistant (09h58:43 « je ne contrôle pas les équipements ») : la consigne dit que c'est la tablette.
  4. « Recherche une idée business » noté comme une idée (10h01:46) : la description d'idees le distingue.
+ 8. (1.45.2) Seul Timothée fait corriger le programme ; fiche du client : comptes rendus, tâches, historique, « À SIGNALER ».
  7. (1.45.1) Remarque inventée (tablette, 19h23:24) : sur « j'ai une nouvelle remarque », Gemini a noté « visage trop
     statique » (« j'ai jamais dit ça », 19h23:47). → une remarque sans aucun mot de ce qu'il a dit est refusée.
 """
@@ -160,6 +161,7 @@ async def main():
         check('… Wilson dit « je lance la correction tout de suite : compte une demi-heure »', 'tout de suite' in r['b'] and 'demi-heure' in r['b'], r['b'])
         check('… PC éteint : « la correction partira dès qu\'il sera rallumé »', 'rallumé' in r['c'], r['c'])
 
+        await page.evaluate("wilson.__aut0 = wilson._crmAutorise; wilson._crmAutorise = () => ({ ok: true, pourquoi: 'essai' })")   # Timothée reconnu
         # ---------- 7. Remarque inventée (tablette, 19h23:24 : « j'ai une nouvelle remarque » → « visage trop statique ») ----------
         await page.evaluate("""() => { const W = wilson; W._heard.length = 0;
           W._noteHeard('Petite remarque Wilson.', true); W._noteHeard("Oui, c'est ça. Non mais j'ai une nouvelle remarque.", true);
@@ -176,6 +178,34 @@ async def main():
         check('… sa vraie remarque, mise au propre avec ses mots, est notée', "C'est noté" in r2, r2)
         v = await page.evaluate("import('./js/voiture.js').then((V) => [V.remarqueInventee('Le visage manque de vie', 'ton visage est un peu figé'), V.remarqueInventee('Phrases coupées', 'ça coupe'), V.remarqueInventee('Le devis à relancer de la synthèse est faux', '')])")
         check('… mots proches acceptés (visage, coupe), remarque trop courte ou rien entendu : pas refusée', v == [False, False, False], str(v))
+
+        # ---------- 8. Seul Timothée fait corriger le programme ; tout l'historique du client (demandes du 16/11/26, soir) ----------
+        r = await page.evaluate("""(async () => { const W = wilson, out = {};
+          W._noteHeard('Pour la prochaine mise à jour, tu parles trop fort.', true);
+          W._crmAutorise = () => ({ ok: false, qui: 'Louis', camera: true, appris: true });
+          W._permettre(95000, 'test'); W._tools([{ id: 'rem3', name: 'remarque', args: { texte: 'Wilson parle trop fort.' } }]);
+          W._crmAutorise = () => ({ ok: false, qui: '', camera: true, appris: true });
+          out.oublie = W._remarqueOubliee("C'est noté pour ma prochaine mise à jour.");
+          W._crmAutorise = () => ({ ok: true, pourquoi: 'essai' });
+          const { pourGemini } = await import('./js/crm.js');
+          out.g = pourGemini('Client : ESSAI\\nÀ SIGNALER à Timothée : à voir au prochain rendez-vous : le nouveau cylindre\\nHistorique des échanges, comptes rendus du plus récent au plus ancien (3 en tout : Visite : 3) :', false);
+          out.g2 = pourGemini('Bilan : 41 clients actifs', false);
+          return out; })()""")
+        await attendre(lambda: 'rem3' in conn['resp'])
+        r3 = conn['resp'].get('rem3', '')
+        jr = await page.evaluate("JSON.parse(localStorage.getItem('wilson.remarques') || '[]').map((x) => x.texte)")
+        check('Remarque de quelqu\'un d\'autre (Louis) : refusée, rien noté, « il n\'y a que Timothée qui peut me faire corriger »', 'REFUSÉ' in r3 and "que Timothée qui peut me faire corriger" in r3 and 'Louis' in r3 and not any('trop fort' in x for x in jr), r3)
+        check('… et l\'appli ne la note pas non plus d\'elle-même si ce n\'est pas Timothée', r['oublie'] is False, str(r['oublie']))
+        sysi2 = json.dumps(conn['setup'] or {}, ensure_ascii=False)
+        check('Consigne : « pour la prochaine mise à jour », « remarque à prendre en compte » → remarque ; seul Timothée', 'seul Timothée peut faire corriger ton programme' in sysi2 and 'remarque à prendre en compte' in sysi2 and 'pour la prochaine mise à jour' in sysi2)
+        check('Fiche du client : comptes rendus et historique comptent autant que les chiffres, points « À SIGNALER » dits même sans demande', 'comptent autant que les chiffres' in r['g'] and '« À SIGNALER »' in r['g'] and 'même s\'il ne l\'a pas demandé' in r['g'], r['g'][-400:])
+        check('… mais rien de tout ça pour un résultat sans fiche (bilan)', 'SIGNALER' not in r['g2'] and 'comptent autant' not in r['g2'], r['g2'])
+        src2 = await page.evaluate("fetch('./js/app.js').then((r) => r.text())")   # partie « travail » de la consigne : seulement avec le CRM relié
+        check('Consigne : « qu\'est-ce qu\'on s\'est dit avec X », « où j\'en suis avec X » → crm_client ; briefing avec comptes rendus et tâches', "on s'est dit la dernière fois" in src2 and 'comptes rendus et derniers échanges, tâches, sujets à voir au rendez-vous' in src2)
+        regles = await page.evaluate("import('./js/analyste.js').then(({ reglesCRM }) => reglesCRM({}))")
+        check('Analyste et Claude du PC : toute question sur un client regarde aussi comptes rendus, tâches et sujets à voir au RDV', 'Toute question sur un client, pas seulement un briefing' in regles and 'à voir au prochain rendez-vous' in regles)
+        crmdesc = await page.evaluate("import('./js/crm.js').then(({ CRM_TOOLS }) => CRM_TOOLS.find((t) => t.name === 'crm_client').description)")
+        check('Outil crm_client : historique des visites et des échanges, sujets à signaler', "tout l'historique des visites et des échanges" in crmdesc and 'À SIGNALER' in crmdesc, crmdesc)
 
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await b.close()
