@@ -7,6 +7,7 @@
     la question jamais, que le texte arrive avant, pendant ou après le son.
  3. Téléphone sans Home Assistant (09h58:43 « je ne contrôle pas les équipements ») : la consigne dit que c'est la tablette.
  4. « Recherche une idée business » noté comme une idée (10h01:46) : la description d'idees le distingue.
+ 9. (1.45.3) Fiche du client relue après une écriture pour lui, et hors de la voiture au-delà d'une heure ; sans réseau, la gardée.
  8. (1.45.2) Seul Timothée fait corriger le programme ; fiche du client : comptes rendus, tâches, historique, « À SIGNALER ».
  7. (1.45.1) Remarque inventée (tablette, 19h23:24) : sur « j'ai une nouvelle remarque », Gemini a noté « visage trop
     statique » (« j'ai jamais dit ça », 19h23:47). → une remarque sans aucun mot de ce qu'il a dit est refusée.
@@ -206,6 +207,30 @@ async def main():
         check('Analyste et Claude du PC : toute question sur un client regarde aussi comptes rendus, tâches et sujets à voir au RDV', 'Toute question sur un client, pas seulement un briefing' in regles and 'à voir au prochain rendez-vous' in regles)
         crmdesc = await page.evaluate("import('./js/crm.js').then(({ CRM_TOOLS }) => CRM_TOOLS.find((t) => t.name === 'crm_client').description)")
         check('Outil crm_client : historique des visites et des échanges, sujets à signaler', "tout l'historique des visites et des échanges" in crmdesc and 'À SIGNALER' in crmdesc, crmdesc)
+
+        # ---------- 9. Fiche du client relue : après une écriture, et hors de la voiture au-delà d'une heure (16/11/26, 22h) ----------
+        r = await page.evaluate("""(async () => { const C = wilson.crm, vus = [], out = {}; let panne = false;
+          const ask0 = C.ask; C.cache.clear(); C.last = null; C.dernier = null;
+          C.ask = async (o) => { if (panne) { const e = new TypeError('Failed to fetch'); throw e; } vus.push(o);
+            return { ok: true, cle: 'k1', societe: 'ESSAI SARL', contact: 'Jean Essai', texte: 'fiche n°' + vus.length, contacts: [{ nom: 'Jean Essai', cle: 'k1' }, { nom: 'Paul Essai', cle: 'k2' }] }; };
+          await C.client({ cle: 'k1' }); await C.client({ cle: 'k1' }); out.deux = vus.length;            // relue une seule fois
+          C.cache.get('k1').at = Date.now() - 2 * 3600000;
+          Object.defineProperty(wilson, 'enVoiture', { get: () => true, configurable: true });
+          await C.client({ cle: 'k1' }); out.voiture = vus.length;                                          // en voiture : gardée 6 h
+          delete wilson.enVoiture;
+          const m = await C.client({ cle: 'k1' }); out.maison = vus.length; out.texte = m.e && m.e.texte;     // à la maison : relue
+          C._perimer('k2');                                                                                  // écriture pour Paul, même société
+          const f = await C.client({ cle: 'k1' }); out.apres = vus.length; out.frais = vus[vus.length - 1].frais === true; out.perime = !!C.cache.get('k1').perime;
+          C._perimer('k1'); panne = true;
+          const z = await C.client({ cle: 'k1' }); out.panne = !!(z.ok && z.e && z.vieux);                  // sans réseau : la fiche gardée
+          C.ask = ask0; C.cache.clear(); C.last = null; return out; })()""")
+        check('Fiche du client : redemandée tout de suite → gardée (pas relue)', r['deux'] == 1, str(r))
+        check('… en voiture, une fiche de 2 h sert encore (journée préparée)', r['voiture'] == 1, str(r))
+        check('… hors de la voiture, une fiche de plus d\'une heure est relue', r['maison'] == 2 and r['texte'] == 'fiche n°2', str(r))
+        check('… après une écriture pour ce client (même par un autre contact) : relue, et le CRM oublie la sienne (« frais »)', r['apres'] == 3 and r['frais'] and not r['perime'], str(r))
+        check('… sans réseau : l\'ancienne fiche, avec son heure', r['panne'], str(r))
+        srccrm = await page.evaluate("fetch('./js/crm.js').then((r) => r.text())")
+        check('… une écriture confirmée (et une écriture envoyée au retour du réseau) rend la fiche à relire', srccrm.count('this._perimer(') >= 2)
 
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await b.close()
