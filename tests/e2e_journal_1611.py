@@ -122,6 +122,15 @@ async def main():
         # ---------- 4. « Cherche-moi une idée » n'est pas une idée à noter ----------
         check('Outil idees : « cherche-moi une idée » n\'est pas une idée à noter (10h01:46)', "n'est PAS une idée à noter" in sysi)
 
+        # ---------- 5. Décisions de Timothée du 16/11/26 (12h45) : le doute, Claude pour l'information fiable ----------
+        check('Consigne : au moindre doute, UNE question courte avant de répondre ; jamais pour une demande claire', 'Le doute (décision de Timothée du 16/11/26' in sysi and 'UNE seule question courte' in sysi)
+        src = await page.evaluate("Promise.all([fetch('./js/app.js').then((r) => r.text()), fetch('./js/claude.js').then((r) => r.text())])")
+        check('Claude (question_difficile) pour toute information fiable, même si Gemini croit savoir', 'Toute question qui demande une information FIABLE' in src[1] and 'ne réponds pas de mémoire' in src[0])
+        r = await page.evaluate("""() => ({ q: wilson._aDireTexte({ question: 'charge d\\'une paumelle Tectus', dire: 'Question : tu parles de la TE 340 ou de la TE 540 ?', s: 40 }),
+          n: wilson._aDireTexte({ question: 'charge Tectus TE 340', dire: 'D\\'après la fiche Simonswerk, 80 kilos.', s: 40 }) })""")
+        check('Claude demande une précision (« Question : … ») : Wilson la pose, puis rappelle question_difficile', 'Pose-lui seulement cette question' in r['q'] and 'TE 340 ou de la TE 540' in r['q'] and 'Question :' not in r['q'] and 'rappelle question_difficile' in r['q'], r['q'])
+        check('… une vraie réponse reste « J\'ai la réponse à ta question »', "J'ai la réponse à ta question" in r['n'], r['n'])
+
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await b.close()
     print(f"\n{sum(results)}/{len(results)} vérifications réussies")
