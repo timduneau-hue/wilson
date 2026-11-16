@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.43.4';
+const VERSION = '1.43.5';
 // Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
 // actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
 const MAJ_HEURE = 4;
@@ -1257,7 +1257,11 @@ Ton travail avec Timothée : il est technico-commercial itinérant chez Boschat 
 - Si deux réponses du CRM se contredisent (l'analyste parle d'un rendez-vous, la fiche n'en montre pas), dis-le tel quel (« l'analyste parlait d'un rendez-vous le 10, mais la fiche n'en montre pas ») sans rien proposer ; n'invente jamais d'explication (« je l'ai vu dans un brouillon »…).
 `;
     const inv = maison && !eco ? this.maison.texteInventaire() : '';
-    const maisonTxt = !maison ? '' : eco ? `
+    // Journal du 16/11/26, 09h58:43 (téléphone, en voiture) : « je ne peux pas démarrer la voiture, je ne contrôle pas les
+    // équipements » alors que la tablette le fait (chauffage de la voiture par Home Assistant, réglé sur la tablette seulement).
+    const maisonTxt = !maison ? `
+La maison (lumières, télé, prises, chauffage de la voiture) : ce n'est pas réglé sur cet appareil-ci, c'est la tablette du salon qui la pilote. Si on te le demande, dis simplement « Depuis ici je ne peux pas, demande-le à la tablette du salon », sans inventer d'autre raison, et note-le avec remarque s'il insiste.
+` : eco ? `
 La maison : tu pilotes les lumières, la télé et l'enceinte par Home Assistant. Quand on te demande d'agir sur la maison ou son état, remplis le champ "maison". Ne dis jamais que c'est fait avant la réponse de Home Assistant.
 ` : `
 La maison (Home Assistant) : tu comprends ce que Timothée veut, même dit à sa façon (« mets un peu de lumière », « coupe tout au salon », « mets la radio », « je veux regarder Netflix », « baisse un peu »), et tu agis avec maison_commande (un appel par appareil), ou maison_etat pour savoir ce qui est allumé.
@@ -1450,7 +1454,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     this._liveAudio = (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
       // R1 (règle de Timothée du 01/11/26) : il ne parle que s'il est sûr qu'on le regardait en lui parlant.
-      if (this._retenu === this._turnN || this._doublon === this._turnN || this._tropTour === this._turnN) return;
+      if (this._retenu === this._turnN || this._doublon === this._turnN) return;
       if (!this._liveTurn && !this.audio.playing && !this._reponsePermise()) {
         this._retenu = this._turnN; this._nRetenues = (this._nRetenues || 0) + 1;
         this.log(`Réponse retenue : personne ne me regardait vraiment pendant la phrase (${this._etatRegard()})`);
@@ -1480,7 +1484,10 @@ Nous sommes ${fmtDate()}.${nv}`;
         this._liveTurn = { t: now, sec: 0, delay: dl != null && dl <= 60 ? dl : null, search: this._searchMs || 0 };
         this._searchMs = 0; this._tourPermis = this._turnN;            // ce tour a eu le droit de parler (R1) : son outil aussi
       }
-      this._liveTurn.sec += i16.length / (rate || 24000); this._apresOutil = null; this._voixDepuis = performance.now();
+      this._apresOutil = null; this._voixDepuis = performance.now();
+      // Question de trop repérée dans le texte (16/11/26) : le son suivant est mis de côté, joué jusqu'à la coupe seulement.
+      if (this._tropTour === this._turnN) { if (this._trop && this._trop.tour === this._turnN) this._tropGarder(i16, rate); return; }
+      this._liveTurn.sec += i16.length / (rate || 24000);
       this.audio.play(i16, rate); this.lastActivity = performance.now();
     };
     b.on('interrupted', () => {
@@ -1501,6 +1508,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       // resté sans réponse : « Wilson attend le résultat de son outil », alors qu'il n'attendait plus rien).
       const outilEnCours = this._outilsEnCours > 0 || !!(this._searches && this._searches.size);
       const hadTool = this._toolTurn === this._turnN && (outilEnCours || !((this._heardAt || 0) > (this._outilRepAt || 0) + 300 && user));
+      if (this._trop && this._trop.tour === this._turnN && !this._trop.fini) this._tropFin('tour fini');   // question de trop : coupe placée (16/11/26)
       this._turnN++;                                     // ce qui sera entendu ensuite appartient au tour suivant
       if (this._gate && !this._gate.ok) {
         if (!user || nomDit(user)) this._gateOpen(user ? 'nom dans la transcription' : 'pas de transcription');
@@ -1966,8 +1974,9 @@ Nous sommes ${fmtDate()}.${nv}`;
       return null;
     }
     if (VP.sansFait(wilson, mots)) {
+      const recu = vv.held.reduce((s, [a, r]) => s + a.length / (r || 24000), 0);
       for (const [a, r] of vv.held) this.audio.play(a, r);
-      if (vv.held.length) { this.lastActivity = performance.now(); this.log(`Verrou de vérité : réponse qui n'affirme rien, dite (« ${wilson.slice(0, 80)} »)`); this._couperFinDeTrop(wilson, this._turnN - 1); }
+      if (vv.held.length) { this.lastActivity = performance.now(); this.log(`Verrou de vérité : réponse qui n'affirme rien, dite (« ${wilson.slice(0, 80)} »)`); this._couperFinDeTrop(wilson, this._turnN - 1, recu); }
       vv.held = [];
       return null;
     }
@@ -2030,13 +2039,93 @@ Nous sommes ${fmtDate()}.${nv}`;
   }
   // « Autre chose ? », « Tu as besoin d'autre chose ? » à la fin d'une réponse : interdit par Timothée (05/11, 06/11), revenu
   // le 12/11 malgré la consigne. La fin de la réponse est coupée avant d'être jouée (le reste est dit normalement).
-  _couperFinDeTrop(t, tour = this._turnN) {
+  // Journal du 16/11/26 (téléphone, 09h58:58 et 09h59:43) : le texte de la question arrivait AVANT son son ; l'ancienne coupe
+  // (« les 3 dernières secondes reçues ») effaçait donc la fin de la VRAIE phrase, puis jetait la question en arrivant.
+  // Timothée : « tu finis pas tes phrases, ça coupe » (10h00:09), « en quoi j'ai pas fini ta phrase là ? » (09h59:13).
+  // Désormais : la question occupe la même part du son que du texte (« De rien. » = 25 % du texte → 25 % du son) ;
+  // le son qui arrive ensuite est mis de côté et joué jusqu'à ce point seulement (jamais au-delà de ce qui est sûr),
+  // la coupe tombant si possible dans le silence entre les deux phrases.
+  _couperFinDeTrop(t, tour = this._turnN, dejaRecu = null) {
     if (this._tropTour === tour) return;
-    const trop = VP.finDeTrop(cleanSpeech(t));
+    const txt = cleanSpeech(t), trop = VP.finDeTrop(txt);
     if (!trop) return;
     this._tropTour = tour;
-    const ote = this.audio.couperFin(Math.min(4, 0.4 + trop.length * 0.065));
-    this.log(`Question de trop à la fin de sa réponse (« ${trop} ») : ${ote ? `coupée avant d'être dite (${ote.toFixed(1)} s)` : 'trop tard pour la couper'}`, true);
+    const L = Math.max(1, txt.length), frac = Math.max(0, Math.min(1, (txt.lastIndexOf(trop) >= 0 ? txt.lastIndexOf(trop) : L - trop.length) / L));
+    if (dejaRecu != null) {                                // tout le son est déjà dans la file (réponse relâchée par le verrou de vérité)
+      const ote = this.audio.couperFin(Math.max(0, dejaRecu * (1 - frac) - 0.1));
+      this.log(`Question de trop à la fin de sa réponse (« ${trop} ») : ${ote ? `coupée avant d'être dite (${ote.toFixed(1)} s)` : 'trop tard pour la couper'}`, true);
+      return;
+    }
+    const sec0 = this._liveTurn ? this._liveTurn.sec : 0;
+    this._trop = { tour, frac, trop, held: [], heldSec: 0, joue: sec0, recu: sec0, fini: false, timer: 0 };
+    clearInterval(this._tropIv);
+    this._tropIv = setInterval(() => this._tropAvance(), 100);   // relâche ce qui est sûr, pour ne jamais laisser la voix en panne
+    this._tropAvance();
+  }
+  // Son reçu après la question repérée : mis de côté (relâché par _tropAvance / _tropFin).
+  _tropGarder(i16, rate) {
+    const T = this._trop; if (!T || T.fini) return;
+    const d = i16.length / (rate || 24000);
+    T.held.push([i16, rate || 24000]); T.heldSec += d; T.recu += d; this.lastActivity = performance.now();
+    clearTimeout(T.timer); T.timer = setTimeout(() => this._tropFin('plus de son'), 700);
+  }
+  // Joue le son mis de côté jusqu'à `jusqua` (secondes depuis le début de la réponse), en coupant le dernier morceau au besoin.
+  _tropJouer(jusqua) {
+    const T = this._trop;
+    while (T.held.length && T.joue < jusqua - 0.005) {
+      const [a, r] = T.held[0], d = a.length / r;
+      if (T.joue + d <= jusqua) { this.audio.play(a, r); T.held.shift(); T.heldSec -= d; T.joue += d; if (this._liveTurn) this._liveTurn.sec += d; continue; }
+      const n = Math.max(0, Math.floor((jusqua - T.joue) * r));
+      if (n > 0) { this.audio.play(a.subarray(0, n), r); T.held[0] = [a.subarray(n), r]; T.heldSec -= n / r; T.joue += n / r; if (this._liveTurn) this._liveTurn.sec += n / r; }
+      break;
+    }
+  }
+  _tropAvance() {
+    const T = this._trop;
+    if (!T || T.fini) { clearInterval(this._tropIv); return; }
+    if (this.discard || this.state !== 'conversation' || this._turnN !== T.tour) { this._tropFin('tour fini'); return; }
+    // Ce qui est reçu n'est qu'une partie de la réponse : frac × reçu est toujours AVANT le début réel de la question.
+    const ctx = this.audio.ctx, reste = ctx ? (this.audio.nextTime || 0) - ctx.currentTime : 0;
+    if (reste < 0.35) this._tropJouer(T.frac * T.recu);
+  }
+  // Fin de la réponse (tour fini ou plus de son) : la longueur totale est connue, la coupe est placée.
+  _tropFin(pourquoi) {
+    const T = this._trop;
+    if (!T || T.fini) return;
+    T.fini = true; clearTimeout(T.timer); clearInterval(this._tropIv);
+    if (this.discard || this.state !== 'conversation') { T.held = []; return; }
+    let coupe = T.frac * T.recu + 0.1;                     // un peu de marge : mieux vaut finir la phrase
+    // Le son de la réponse encore à jouer, en temps « depuis le début de la réponse » : en file, puis mis de côté.
+    const segs = [], fin = this.audio.nextTime || 0;
+    for (const q of this.audio.enFile ? this.audio.enFile() : []) segs.push({ t0: T.joue - (fin - q.debut), f: q.f, r: q.r });
+    let t0 = T.joue; for (const [a, r] of T.held) { segs.push({ t0, f: a, r, i16: true }); t0 += a.length / r; }
+    const silence = this._tropSilence(segs, coupe);
+    if (silence != null) coupe = silence;
+    let ote = 0;
+    if (coupe < T.joue) ote = this.audio.couperFin(T.joue - coupe);   // le son était en avance sur le texte : fin déjà en file
+    this._tropJouer(coupe);
+    const jete = T.heldSec; T.held = []; T.heldSec = 0;
+    this.log(`Question de trop à la fin de sa réponse (« ${T.trop} ») : ${ote + jete > 0.2 ? `coupée avant d'être dite (${(ote + jete).toFixed(1)} s), phrase d'avant dite en entier` : 'trop tard pour la couper'}`, true);
+  }
+  // Le silence le plus net (pause entre deux phrases) à moins de 0,5 s de la coupe estimée, dans le son mis de côté.
+  _tropSilence(segs, cible) {
+    if (!segs.length) return null;
+    const r = segs[0].r, debut = segs[0].t0, n = segs.reduce((x, g) => x + g.f.length, 0);
+    if (n < r * 0.3 || segs.some((g) => g.r !== r)) return null;
+    const tout = new Float32Array(n); let p = 0;
+    for (const g of segs) { if (g.i16) for (let i = 0; i < g.f.length; i++) tout[p + i] = g.f[i] / 32768; else tout.set(g.f, p); p += g.f.length; }
+    const win = Math.round(r * 0.06), pas = Math.round(r * 0.02), nrj = [];
+    for (let i = 0; i + win <= n; i += pas) { let x = 0; for (let j = i; j < i + win; j += 4) x += tout[j] * tout[j]; nrj.push([i, x]); }
+    if (nrj.length < 5) return null;
+    const tri = nrj.map((x) => x[1]).sort((x, y) => x - y), med = tri[tri.length >> 1];
+    if (!(med > 1e-6)) return null;                      // surtout du silence : rien à départager
+    let best = null;
+    for (const [i, s] of nrj) {
+      const t = debut + (i + win / 2) / r;
+      if (t < cible - 0.3 || t > cible + 0.5 || s > med * 0.15) continue;   // plutôt après : ne pas manger la fin de la phrase
+      if (!best || s < best.s || (s === best.s && Math.abs(t - cible) < Math.abs(best.t - cible))) best = { t, s };
+    }
+    return best ? best.t : null;
   }
   _travailRecent() { return !!this._travailAt && this._travailConv === this.convId && performance.now() - this._travailAt < 120000; }   // même discussion, 2 min
 
@@ -2808,10 +2897,14 @@ Nous sommes ${fmtDate()}.${nv}`;
     ctl.maison = true;                                                                // (petit son seulement après 1 s d'attente)
     // Journal du 05/11/26, 20h18:43-20h18:52 : « Éteins toutes les lumières » → Gemini a d'abord ALLUMÉ les trois, puis envoyé
     // « allumer » et « éteindre » ensemble pour les mêmes lumières. Une commande contraire à sa dernière demande est refusée.
-    const voulu = call.name === 'maison_commande' && ['allumer', 'eteindre'].includes(a.action) ? this._intentionMaison() : null;
+    // Journal du 16/11/26, 09h51:59 : « Éteins toutes les lumières et fais chauffer la voiture » → « allumer » le chauffage de la
+    // voiture refusé (la phrase disait « éteins »), et Wilson a quand même annoncé « je lance le chauffage » : la voiture n'a
+    // pas chauffé (09h58:43). Ce garde-fou ne vaut que pour les lumières et les prises : jamais pour la voiture ni un chauffage.
+    const horsGarde = /voiture|climate|chauff|clim|degivr|thermostat|temperature/.test(VP.plat(String(a.appareil || '')));
+    const voulu = call.name === 'maison_commande' && ['allumer', 'eteindre'].includes(a.action) && !horsGarde ? this._intentionMaison() : null;
     if (voulu && voulu.action !== a.action) {
       this.log(`Maison : « ${a.action} ${a.appareil} » refusé — sa dernière demande était « ${voulu.dit.slice(0, 80)} »`, true);
-      this.brain.respond([{ id: call.id, name: call.name, response: { result: `Refusé : il a demandé d'${voulu.action === 'eteindre' ? 'éteindre' : 'allumer'} (« ${voulu.dit.slice(0, 100)} »), pas d'${a.action === 'eteindre' ? 'éteindre' : 'allumer'}. Ne fais que ce qu'il a demandé, une seule fois par appareil.` } }]);
+      this.brain.respond([{ id: call.id, name: call.name, response: { result: `Refusé, RIEN n'a été fait pour cet appareil : il a demandé d'${voulu.action === 'eteindre' ? 'éteindre' : 'allumer'} (« ${voulu.dit.slice(0, 100)} »), pas d'${a.action === 'eteindre' ? 'éteindre' : 'allumer'}. Ne fais que ce qu'il a demandé, une seule fois par appareil, et ne dis jamais que c'est fait ou en route pour cet appareil.` } }]);
       return;
     }
     this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
