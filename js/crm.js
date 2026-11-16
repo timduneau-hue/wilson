@@ -21,6 +21,9 @@ export const jourDit = (d) => `${JOURS[d.getDay()]} ${pad(d.getDate())}/${pad(d.
 const minuit = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const plus = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const CACHE_KEY = 'wilson.crm.cache', QUEUE_KEY = 'wilson.crm.attente', PENDING_MS = 5 * 60000, CACHE_MS = 6 * 3600000;
+// Demande de Timothée du 16/11/26 (soir) : hors de la voiture, une fiche gardée de plus d'une heure est relue ; en voiture,
+// celles préparées pour la journée servent jusqu'à 6 h (réponse immédiate, routes sans réseau). Sans réseau : la fiche gardée.
+const FRAIS_MS = 3600000;
 const JOURNEE_MS = 10 * 60000, BILAN_MS = 15 * 60000;      // journée et bilan récents : réponse immédiate (et sans réseau)
 const LECTURES = { crm_requete: 60000, crm_schema: 30000, crm_client: 45000, crm_journee: 45000, crm_bilan: 45000, crm_produit: 45000, crm_etat: 30000, crm_trouver: 30000, crm_annuaire: 60000 };
 const hm = (t) => { const d = new Date(t); return `${d.getHours()}h${pad(d.getMinutes())}`; };
@@ -349,6 +352,21 @@ export class Crm {
     else { this.dernier.at = Date.now(); this.dernier.e = e; }
     return e;
   }
+  // Fiche gardée encore bonne à utiliser telle quelle ? (pas relue depuis une écriture pour ce client, et assez récente)
+  _utilisable(e) {
+    if (!e || e.perime) return false;
+    return Date.now() - e.at < (this.app && this.app.enVoiture ? CACHE_MS : FRAIS_MS);
+  }
+  // Wilson vient d'écrire pour ce client (tâche, compte rendu, rendez-vous, note) : ses fiches gardées seront relues, et le
+  // CRM oubliera la sienne (« frais »).
+  _perimer(cle) {
+    if (!cle) return;
+    const lui = [...this.cache.values()].find((e) => e.cle === cle || (e.contacts || []).some((c) => c.cle === cle));
+    const k = lui ? motsNom(lui.societe).join('') : '';
+    let n = 0;
+    for (const e of this.cache.values()) if (e.cle === cle || (k && motsNom(e.societe).join('') === k)) { e.perime = true; n++; }
+    if (n) { this._save(); this.log(`fiche de ${lui ? lui.societe : 'ce client'} à relire (écriture faite)`); }
+  }
   // Fiche gardée qui correspond clairement à ce qui a été dit (sinon null : on demande au CRM).
   _fromCache(q) {
     if (!q) return null;
@@ -371,16 +389,25 @@ export class Crm {
       const r = await this.client({ cle: (D.contact || D.soc.principal || {}).cle || '', client: D.soc.societe }, signal);
       return r.e ? { ...r, contactDit: D.contact || null } : r;
     }
-    if (!cle && this._isLast(client) && this.last) { this.lastAt = Date.now(); return { ok: true, e: this.last, cached: true, contactDit: (D && D.contact) || null }; }
+    if (!cle && this._isLast(client) && this.last) {
+      if (!this._utilisable(this.last)) { const r = await this.client({ cle: this.last.cle, client: this.last.societe }, signal); return r.e ? { ...r, contactDit: (D && D.contact) || null } : r; }
+      this.lastAt = Date.now(); return { ok: true, e: this.last, cached: true, contactDit: (D && D.contact) || null };
+    }
     // L'annuaire d'abord : il sait de qui on parle (société ET personne), tout de suite ; le CRM ne donne plus que la fiche.
     if (!cle && !parCrm && this.annuaire.pret) {
       const Q = await this._qui(client, signal);
       if (Q.dire) return { ok: true, texte: Q.dire, choix: Q.choix || [] };
       if (Q.e) return { ok: true, e: Q.e, approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact };
       const garde = this._ficheDeSociete(Q.soc.societe);
-      if (garde) { this.last = garde; this.lastAt = Date.now(); this.log(`fiche gardée : ${garde.societe}`); return { ok: true, e: garde, cached: true, approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact }; }
+      if (garde && this._utilisable(garde)) { this.last = garde; this.lastAt = Date.now(); this.log(`fiche gardée : ${garde.societe}`); return { ok: true, e: garde, cached: true, approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact }; }
       const c = Q.contact || Q.soc.principal;
-      const r = await this.ask({ action: 'crm_client', cle: c.cle }, signal);      // (pas de réseau : l'appelant donne les contacts de l'annuaire)
+      let r;
+      try { r = await this.ask({ action: 'crm_client', cle: c.cle, ...(garde && garde.perime ? { frais: true } : {}) }, signal); }
+      catch (err) {
+        // pas de réseau : la fiche gardée, même ancienne, avec son heure (sinon l'appelant donne les contacts de l'annuaire)
+        if (netErr(err) && garde) { this.last = garde; this.lastAt = Date.now(); this.log(`pas de réseau : fiche gardée de ${hm(garde.at)} (${garde.societe})`); return { ok: true, e: garde, cached: true, vieux: garde.at, approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact }; }
+        throw err;
+      }
       if (r.ok && r.cle) return { ok: true, e: this._keep(r), approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact };
       // fiche renommée ou supprimée depuis la lecture de l'annuaire : le CRM cherche lui-même, et l'annuaire est relu
       this.log(`annuaire : la fiche de ${c.nom} (${Q.soc.societe}) n'est plus dans le CRM (${(r && r.erreur) || 'introuvable'}) — je demande au CRM et je relis l'annuaire`);
@@ -389,9 +416,10 @@ export class Crm {
     const net = cle ? client : nomNet(client);
     if (net !== String(client || '').replace(/\s+/g, ' ').trim()) this.log(`nom cherché : « ${net} » (dit : « ${client} »)`);
     const hit = cle ? this.cache.get(cle) : this._fromCache(net);
-    if (hit && Date.now() - hit.at < CACHE_MS) { this.last = hit; this.lastAt = Date.now(); this.log(`fiche gardée : ${hit.societe}`); return { ok: true, e: hit, cached: true }; }
+    if (hit && this._utilisable(hit)) { this.last = hit; this.lastAt = Date.now(); this.log(`fiche gardée : ${hit.societe}`); return { ok: true, e: hit, cached: true }; }
+    const frais = hit && hit.perime ? { frais: true } : {};
     let r;
-    try { r = await this.ask(cle ? { action: 'crm_client', cle } : { action: 'crm_client', client: net }, signal); }
+    try { r = await this.ask(cle ? { action: 'crm_client', cle, ...frais } : { action: 'crm_client', client: net, ...frais }, signal); }
     catch (e) {
       // pas de réseau vers le CRM : la fiche gardée sur le téléphone, même ancienne, avec son heure (C8 bis)
       if (netErr(e) && hit) { this.last = hit; this.log(`pas de réseau : fiche gardée de ${hm(hit.at)} (${hit.societe})`); return { ok: true, e: hit, cached: true, vieux: hit.at }; }
@@ -582,6 +610,7 @@ export class Crm {
     }
     if (!r.ok) { this.pending = p; return { ok: false, dire: `Le CRM a refusé : ${r.erreur || 'erreur'}. Rien n'est écrit ; dis-le simplement.`, phrase: 'Le CRM a refusé : rien n\'est écrit.' }; }
     this.log(`enregistré : ${p.relu}`, true);
+    this._perimer(p.cle);                                 // sa fiche sera relue (demande de Timothée du 16/11/26)
     this.dernierEnregistre = { at: Date.now(), relu: p.relu };
     if (p.type === 'tache') this.journee = null;          // la journée gardée n'a pas cette tâche
     const jour = p.date ? jourDit(new Date(+p.date.slice(6), +p.date.slice(3, 5) - 1, +p.date.slice(0, 2))) : '';
@@ -613,7 +642,7 @@ export class Crm {
           r = { ok: false, erreur: e.name === 'AbortError' ? 'pas de réponse à temps, je ne sais pas si c\'est passé : vérifie dans Mes tâches' : e.message };
         } finally { clearTimeout(tm); }
         this.queue.shift(); this._saveQueue();
-        if (r.ok) { this.log(`enregistré au retour du réseau : ${q.relu}`, true); if (q.type === 'tache') this.journee = null; }
+        if (r.ok) { this.log(`enregistré au retour du réseau : ${q.relu}`, true); this._perimer(q.payload && q.payload.cle); if (q.type === 'tache') this.journee = null; }
         else this.log(`refusé au retour du réseau (${r.erreur || 'erreur'}) : ${q.relu}`, true);
         if (this.app._crmQueued) this.app._crmQueued(q, !!r.ok, r.erreur);
       }
