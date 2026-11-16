@@ -147,5 +147,13 @@ check('… et c\'est seulement la question finale', V.finDeTrop("C'est noté. Tu
 for (const u of ['Pour quel client ?', "Je l'enregistre ?", 'Je te guide vers ABM à La Roche, c\'est bien ça ?', 'Avec qui, chez ABM ?', "Tu as trois non lus, et aucun n'est important.", 'Tu veux noter autre chose. Je le relis.', "Qu'est-ce que tu veux changer dans ce compte rendu ?"])
   check(`pas une fin de trop : « ${u} »`, !V.finDeTrop(u), V.finDeTrop(u));
 
+// Remarque inventée (journal du 16/11/26, tablette, 19h23:24)
+check('remarque inventée : « visage trop statique » sur « j\'ai une nouvelle remarque »', V.remarqueInventee('visage de Wilson trop statique, manque de vie dans les expressions.', "Petite remarque Wilson. Oui, c'est ça. Non mais j'ai une nouvelle remarque."));
+for (const [t, e] of [['Timothée signale que mes phrases sont coupées quand je parle', 'tu finis pas tes phrases, ça coupe'],
+  ['Timothée se plaint que je lui coupe la parole à chaque fois', 'Arrête de me couper la parole'],
+  ["Démarrer la voiture depuis la tablette pour mettre le chauffage n'a pas fonctionné", "j'ai demandé de démarrer la voiture, ça marche pas"],
+  ['Le visage manque de vie', 'ton visage est un peu figé'], ['Bug', 'rien à voir'], ['Le devis de la synthèse est faux', '']])
+  check(`remarque dite : « ${t.slice(0, 45)} »`, !V.remarqueInventee(t, e));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

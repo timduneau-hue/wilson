@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.0';
+const VERSION = '1.45.1';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -584,6 +584,9 @@ class App {
   // portent sur un client, l'outil doit correspondre à ce qu'on a vraiment entendu ; sinon il ne fait rien et se tait.
   _outilPasDemande(c) {
     if (this.car && this._gate) return '';
+    // Remarque qui reprend des mots qu'il n'a pas dits (journal du 16/11/26, 19h23:24 : « visage trop statique » noté sur
+    // « j'ai une nouvelle remarque ») : refusée, Wilson lui demande sa remarque (une remarque lance une correction du code).
+    if (c.name === 'remarque') return VP.remarqueInventee((c.args || {}).texte, this._entenduRecent(90000) + ' ' + String(this.brain.inText || '')) ? 'remarque' : '';
     const dit = this._entenduRecent(), n = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (!dit.trim()) return '';                                                      // pas de transcription : on ne peut pas juger
     const d = n(dit), a = c.args || {};
@@ -2210,8 +2213,9 @@ Nous sommes ${fmtDate()}.${nv}`;
       if (c.name !== 'exprimer_emotion') this._permettre(95000, 'outil ' + c.name);
       const pasDemande = this._outilPasDemande(c);
       if (pasDemande) {
-        this.log(`Outil ${c.name} refusé : rien de tel dans ce qui a été dit (« ${this._entenduRecent().slice(-120)} »)`, true);
-        const pourquoi = pasDemande === 'reafficher' ? "Il ne t'a rien demandé d'afficher : s'il veut que tu répètes, redis simplement ta dernière phrase, sans outil."
+        this.log(`Outil ${c.name} refusé : rien de tel dans ce qui a été dit${pasDemande === 'remarque' ? ` (remarque « ${String(a.texte || '').slice(0, 80)} »)` : ''} (« ${this._entenduRecent(pasDemande === 'remarque' ? 90000 : 25000).slice(-120)} »)`, true);
+        const pourquoi = pasDemande === 'remarque' ? "Il ne t'a pas encore dit sa remarque : ce que tu voulais noter, il ne l'a pas dit. Ne note rien et ne dis pas « c'est noté ». Dis seulement « Je t'écoute, c'est quoi ta remarque ? », puis note-la avec ses mots quand il l'aura dite."
+          : pasDemande === 'reafficher' ? "Il ne t'a rien demandé d'afficher : s'il veut que tu répètes, redis simplement ta dernière phrase, sans outil."
           : this.enVoiture && pasDemande !== 'regarder' ? `Le client « ${a.client || ''} » ne correspond pas à ce que tu as entendu. S'il te parle bien d'un client, redemande-lui son nom pour vérifier ; si ce n'était pas pour toi (radio), tais-toi.`
           : "Personne ne t'a demandé cela : ce que tu as entendu n'était sans doute pas pour toi (bruit, gens qui parlent entre eux). Ne fais rien et ne dis rien.";
         res.push({ id: c.id, name: c.name, response: { result: pourquoi } });

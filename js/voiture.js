@@ -243,3 +243,19 @@ export function questionContacts(t) {
 // crm_question avec une écriture (journal du 12/11/26, 09h55 : « Enregistre la visite chez … » envoyé à Claude, en lecture
 // seule : « je ne peux pas enregistrer »). Une demande d'écrire n'est jamais une question.
 export function ordreEcriture(t) { return /^\s*(enregistre[rsz]?|note[rsz]?|ajoute[rsz]?|indique[rsz]?|cree[rsz]?|saisi[srt]?|saisir|marque[rsz]?|inscri[srt]|mets|mettre)\b/.test(plat(t)); }
+
+// Remarque inventée (journal du 16/11/26, tablette, 19h23:24) : Timothée a seulement dit « j'ai une nouvelle remarque » et
+// Gemini a noté « visage de Wilson trop statique, manque de vie dans les expressions », qu'il n'avait jamais dit (19h23:47 :
+// « Bah non, j'ai jamais dit ça »). Depuis le 16/11/26, une remarque lance une correction du code : elle doit reprendre au
+// moins un mot de ce qu'il a vraiment dit. Les mots d'annonce (« petite remarque », « nouvelle remarque ») ne comptent pas.
+const MOTS_VIDES = new Set(('wilson timothee remarque remarques petite petit nouvelle nouveau autre encore aussi alors quand dans avec pour plus moins '
+  + 'sont mais comme cette celle celui ceux fait faire fais etre avoir elle elles leur leurs tout tous toute toutes chose choses bien sans sous '
+  + 'entre apres avant depuis parce quoi quel quelle quels quelles cela donc tres peut peux doit dois veut veux voudrais aimerais dire dit '
+  + 'jamais toujours chaque fois rien probleme souci truc note noter mise jour corriger correction devrais faudrait vraiment juste').split(/\s+/).filter(Boolean));
+const racine = (m) => m.slice(0, 5);
+export function motsRemarque(t) { return plat(t).split(/[^a-z0-9]+/).filter((m) => m.length >= 4 && !MOTS_VIDES.has(m)); }
+export function remarqueInventee(texte, entendu) {
+  const mots = motsRemarque(texte), dits = new Set(motsRemarque(entendu).map(racine));
+  if (mots.length < 2 || !plat(entendu).trim()) return false;          // trop court pour juger, ou rien d'entendu : on laisse passer
+  return !mots.some((m) => dits.has(racine(m)));
+}
