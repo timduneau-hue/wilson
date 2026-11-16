@@ -394,13 +394,23 @@ export class AudioIO {
   // déjà lancé. Rend le nombre de secondes retirées.
   couperFin(sec) {
     const now = this.ctx.currentTime, depuis = Math.max(this.nextTime - sec, now + 0.05);
-    const aOter = this.sources.filter((s) => s._debut != null && s._debut >= depuis);
-    if (!aOter.length) return 0;
-    let debut = this.nextTime, ote = 0;
-    for (const s of aOter) { try { s.onended = null; s.stop(); } catch (_) {} debut = Math.min(debut, s._debut); ote += s._duree || 0; }
-    this.sources = this.sources.filter((s) => !aOter.includes(s)); this.nextTime = debut; this.playedSec = Math.max(0, this.playedSec - ote);
+    if (!(this.nextTime > depuis)) return 0;
+    let ote = 0;
+    // 16/11/26 : le morceau à cheval sur la coupe est arrêté pile à la coupe (stop programmé), plus gardé en entier.
+    for (const s of this.sources) {
+      if (s._debut == null) continue;
+      const fin = s._debut + (s._duree || 0);
+      if (s._debut >= depuis) { try { s.onended = null; s.stop(); } catch (_) {} ote += s._duree || 0; s._ote = true; }
+      else if (fin > depuis) { try { s.stop(depuis); } catch (_) {} ote += fin - depuis; s._duree = depuis - s._debut; }
+    }
+    this.sources = this.sources.filter((s) => !s._ote); this.nextTime = depuis; this.playedSec = Math.max(0, this.playedSec - ote);
     if (!this.sources.length) this._emit('drained');
     return ote;
+  }
+  // Ce qui reste à jouer, pas encore commencé : [{ debut (heure du son), f (échantillons), r }] (pour trouver un silence).
+  enFile() {
+    const now = this.ctx.currentTime + 0.05;
+    return this.sources.filter((s) => s._debut != null && s._debut >= now && s.buffer).map((s) => ({ debut: s._debut, f: s.buffer.getChannelData(0), r: s.buffer.sampleRate }));
   }
   // Silence immédiat (on lui coupe la parole).
   flush() {

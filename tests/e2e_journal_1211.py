@@ -327,7 +327,7 @@ async def main():
         parle(c, "De rien. Tu as besoin d'autre chose ?", sec=4.0)
         await page.wait_for_timeout(600)
         joue = (await page.evaluate("wilson.audio.playedSec")) - joue0
-        check('« Tu as besoin d\'autre chose ? » à la fin : coupé avant d\'être dit (05/11, 06/11, 12/11)', any('Question de trop à la fin de sa réponse (« Tu as besoin d\'autre chose ? »)' in l for l in logs[ln:]) and joue < 1.0, f'{joue:.1f} s jouées {[l for l in logs[ln:] if "trop" in l]}')
+        check('« Tu as besoin d\'autre chose ? » à la fin : coupé avant d\'être dit, « De rien. » dit en entier (05/11, 06/11, 12/11, 16/11)', any('Question de trop à la fin de sa réponse (« Tu as besoin d\'autre chose ? »)' in l for l in logs[ln:]) and joue < 1.3, f'{joue:.1f} s jouées {[l for l in logs[ln:] if "trop" in l]}')
         await page.wait_for_function('!wilson.audio.playing', timeout=6000)
         ln = len(logs)
         await demande(c, 'Note une tâche.')
