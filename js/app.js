@@ -39,10 +39,13 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.43.5';
-// Demande de Timothée du 04/11/26, 21h26 : « une fois par jour ça va, et pendant la nuit, même si elle est allumée et Wilson
-// actif ». Mise à jour seulement entre 4h00 et 5h00 (après l'amélioration de la nuit, vers 1h30, PLAN 7 septies) ; « Relancer l'appli » reste immédiat.
-const MAJ_HEURE = 4;
+const VERSION = '1.44.0';
+// Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
+// jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
+// de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
+// la phrase ou l'outil en cours (2 min au plus ; jamais pendant un appel téléphonique), affiche sa tête de mise à jour, le dit
+// s'il était en pleine discussion, puis se recharge.
+const MAJ_VERIF_MS = 5 * 60000;
 const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
 const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
 const SEG_VU_MIN = 8;             // R1 : une phrase « dite en le regardant » = au moins 8 blocs de 20 ms de voix avec le regard confirmé
@@ -171,7 +174,7 @@ class App {
       const hadController = !!navigator.serviceWorker.controller;
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => { this.swReg = r; }).catch((e) => this.log('SW : ' + e.message));
       // Nouvelle version installée : on recharge (seulement si une ancienne version tournait, et jamais en pleine conversation).
-      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) this._reloadWhenIdle('nouvelle version installée', { nuit: true }); });
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) this._reloadWhenIdle('nouvelle version installée'); });
       // W14 retour arrière : l'appli dit « prête » au service worker quelques secondes après son démarrage ; sans ce signal à temps,
       // il resert la version précédente. Il dit aussi s'il vient de le faire (une seule fois au journal).
       navigator.serviceWorker.addEventListener('message', (e) => this._messageSw(e.data || {}));
@@ -179,7 +182,7 @@ class App {
     }
 
     this._lireNouveautes();
-    setInterval(() => { const j = new Date().toDateString(); if (this._fenetreMaj() && this._majDuJour !== j) { this._majDuJour = j; this._checkUpdate(); } }, 5 * 60000);   // une fois par nuit
+    setInterval(() => this._checkUpdate(), MAJ_VERIF_MS); setTimeout(() => this._checkUpdate(), 60000);   // tout de suite (16/11/26)
     setInterval(() => this._tick(), 50);
     // Surveillance de la charge : si la tablette prend du retard, on allège l'animation (jamais de file d'attente qui s'allonge).
     let lastBeat = performance.now(); this.lag = 0; this._t0 = lastBeat;   // on ignore le démarrage (chargement des modèles)
@@ -401,15 +404,40 @@ class App {
       this._reloadWhenIdle(version);
     } catch (_) {}
   }
-  _fenetreMaj(d = new Date()) { return d.getHours() === MAJ_HEURE; }
-  _reloadWhenIdle(why, { nuit = false } = {}) {
+  _reloadWhenIdle(why) {
+    if (this._majEnCours) return;
+    this._majEnCours = true;
+    const t0 = performance.now();
     const go = () => {
-      if (nuit && !this._fenetreMaj()) return setTimeout(go, 10 * 60000);           // la journée : on attend la nuit
-      if (this.state === 'eveil' || this.state === 'conversation' || this.settingsOpen || this.phone || this.netWait) return setTimeout(go, 15000);
+      const attente = performance.now() - t0;
+      // jamais pendant un appel ni dans les réglages ; la fin de sa phrase, un outil ou l'installation : 2 min au plus
+      if (this.phone || this.settingsOpen) return setTimeout(go, 5000);
+      const occupe = (this.audio && this.audio.playing) || this._outilsEnCours > 0 || (this._searches && this._searches.size)
+        || (this.swReg && (this.swReg.installing || this.swReg.waiting));
+      if (occupe && attente < 120000) return setTimeout(go, 1500);
       try { sessionStorage.setItem('wilson.reloadedFor', `${why}|${Date.now()}`); } catch (_) {}
-      this.log('Mise à jour : rechargement'); this.remote.flush({ beacon: true }); location.reload();
+      const parlait = this.state === 'conversation' || this.state === 'eveil';
+      this.log(`Mise à jour (${why}) : ${parlait ? 'je le dis, ' : ''}tête de mise à jour, puis rechargement`, true);
+      this._teteMaj();
+      if (parlait) { try { this.discard = true; this.voice.speak('Je me mets à jour, je ne suis pas disponible pendant une minute.'); } catch (_) {} }
+      this.remote.flush({ beacon: true });
+      setTimeout(() => location.reload(), parlait ? 4500 : 2500);
     };
     go();
+  }
+  // « Changer un peu de tête » pendant la mise à jour (16/11/26) : visage voilé, roue qui tourne, « pas disponible ».
+  _teteMaj() {
+    try { this.face.setEmotion('reflexion', 60000, 1); } catch (_) {}
+    if (document.getElementById('tete-maj')) return;
+    const d = document.createElement('div');
+    d.id = 'tete-maj';
+    d.setAttribute('role', 'status');
+    d.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;'
+      + 'background:rgba(8,10,20,.78);color:#F3E3B0;font:600 26px/1.3 system-ui,sans-serif;text-align:center;padding:24px';
+    d.innerHTML = '<div style="font-size:90px;line-height:1;animation:wilson-maj 2s linear infinite">⚙</div>'
+      + '<div>Je me mets à jour…</div><div style="font-size:18px;font-weight:400;opacity:.85">Pas disponible pendant une minute</div>'
+      + '<style>@keyframes wilson-maj{to{transform:rotate(360deg)}}</style>';
+    document.body.appendChild(d);
   }
 
   // Portrait et paysage : l'appli installée était verrouillée en paysage ; on laisse l'appareil tourner.
@@ -1203,7 +1231,7 @@ ${crm ? `   - Qui est qui chez un client (« qui est le magasinier chez X ? », 
 4. Au moindre doute (nom mal entendu, plusieurs clients possibles, phrase coupée, son mauvais, autre langue dans la transcription), tu ne devines pas : tu reformules ce que tu as compris et tu demandes « c'est bien ça ? ». Plusieurs clients possibles : cite-les (nom et ville) et demande lequel. Le son de la voiture est souvent mauvais : si la transcription ne veut rien dire, demande-lui de répéter.
 5. Écrire dans le CRM (visite, compte rendu, rendez-vous, tâche, note) : JAMAIS sans son accord. crm_noter (client = la société, contact = la personne vue ou appelée s'il la cite, texte = ce qu'il dicte, sans rien ajouter), puis tu lui relis mot pour mot la phrase préparée et tu demandes « Je l'enregistre ? » ; seulement après son « oui » : crm_confirmer. Tu ne dis « c'est enregistré » (ni « c'est noté », ni « j'ai ajouté ») que quand crm_confirmer l'a confirmé. « Indique que je suis passé chez X aujourd'hui », « note la visite » : crm_noter, type compte_rendu, échange visite, texte « Visite » suivi des personnes vues s'il les cite. Les comptes rendus et rendez-vous arrivent en brouillon dans son CRM : il les valide lui-même. S'il corrige la personne (« non, c'était Julien, pas Marc ») ou le texte : rappelle crm_noter avec la correction, la phrase à relire et la fenêtre à l'écran se mettent à jour toutes seules (ne dis jamais que tu ne peux pas modifier ou afficher). Une demande d'écrire ne passe JAMAIS par crm_question.
 6. « Emmène-moi chez X », « guide-moi vers X », « lance le GPS » : itineraire tout de suite, sans lui demander s'il le veut. Seulement s'il le demande : un nom de client, une question sur un client, ce n'est PAS une demande d'y aller (remarque de Timothée du 06/11/26) ; et ne propose jamais de lancer le GPS. Si l'outil te dit que le nom est incertain, pose seulement la question qu'il te donne (« Je te guide vers …, c'est bien ça ? ») et, après son « oui », rappelle itineraire. « Arrête le guidage », « supprime la destination », « enlève le GPS » : n'appelle PAS itineraire et ne relance rien ; tu ne peux pas arrêter Google Maps : dis-lui de dire « OK Google, arrête la navigation » ou de toucher la croix sur l'écran de la voiture. ${appli() ? 'Le guidage part directement dans la voiture (Android Auto) et tu restes avec lui : dis « C\'est parti, je te guide vers … ».' : 'Un bouton s\'affiche : dis-lui d\'appuyer sur « Y aller » (le guidage passe aussi sur l\'écran de la voiture ; pour te reparler ensuite, il revient sur Wilson).'} « Appelle X » : appeler (bouton vert). Un bouton ne s'affiche QUE par ces outils : ne dis jamais « j'affiche » sans les appeler ; si le client change, rappelle l'outil pour le bon client.` : ''}
-7. Le reste : l'heure et la date, SEULEMENT s'il les demande (jamais de toi-même, jamais pour meubler) : date_et_heure ; la météo : meteo ; une petite information sur Internet (actualité, horaires, prix, commerce) : chercher ; une recherche de produit ou technique : question_difficile ; sa batterie : batterie ; un rappel à une heure précise : rappel (quand au format 2026-10-30T18:00) ; un minuteur : minuteur ; « rappelle-nous ce soir à la maison », « dis à Camille que… » : messages (deposer ; pour un rappel à la maison : pour = « tous » ou son prénom, aussi_pour_moi = true, a_la_maison = true, apres = l'heure) ; l'agenda Famille (Google Agenda partagé avec Camille) : agenda ; « note cette idée » : idees ; sa bourse, son PEA, ses actions, son LDD : bourse ; « retiens que… » : memoriser.
+7. Le reste : l'heure et la date, SEULEMENT s'il les demande (jamais de toi-même, jamais pour meubler) : date_et_heure ; la météo : meteo ; une petite information simple sur Internet (un horaire, un résultat sportif) : chercher ; tout ce qui demande une information fiable (produit, technique, explication, conseil, règle, calcul, actualité à recouper) : question_difficile, même si tu crois savoir (16/11/26 : il préfère attendre une réponse fiable) ; sa batterie : batterie ; un rappel à une heure précise : rappel (quand au format 2026-10-30T18:00) ; un minuteur : minuteur ; « rappelle-nous ce soir à la maison », « dis à Camille que… » : messages (deposer ; pour un rappel à la maison : pour = « tous » ou son prénom, aussi_pour_moi = true, a_la_maison = true, apres = l'heure) ; l'agenda Famille (Google Agenda partagé avec Camille) : agenda ; « note cette idée » : idees ; sa bourse, son PEA, ses actions, son LDD : bourse ; « retiens que… » : memoriser.
 8. Une remarque sur ta façon de fonctionner (« pour la prochaine mise à jour… », « c'est un bug », « tu devrais… ») : remarque avec sa remarque mise au propre, puis dis simplement que c'est noté pour ta prochaine mise à jour. Ne dis jamais « c'est noté » sans avoir appelé remarque. N'invente jamais d'explication sur ton propre fonctionnement et ne promets rien.
 9. « Répète », « tu peux répéter ? » : redis simplement ta dernière phrase (aucun outil, surtout pas reafficher).
 10. Une simple réaction (« voilà », « c'est pas trop tôt », un soupir, un mot isolé, une transcription qui ne veut rien dire) n'est pas une demande : n'appelle aucun outil, ne dis rien, ou seulement « Oui ? » s'il semble attendre. S'il se plaint (« tu bugues », « c'est pas ça ») : « Pardon. », puis écoute ce qu'il veut. S'il parle au téléphone avec quelqu'un d'autre, ou si tu n'entends que la radio, tais-toi. Au revoir, « c'est bon », « merci, c'est tout » : réponds en deux mots puis appelle terminer_conversation (jamais sur un reproche : reste et écoute).
@@ -1306,7 +1334,8 @@ ${car ? `- Timothée t'a appelé par ton prénom : ce que tu entends maintenant 
 
 Ta vue : tu ne vois rien tant que tu n'as pas pris de photo. ${eco ? 'Si une photo est jointe, sers-t\'en pour répondre ; sinon, quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), mets "regarder" à true et dis seulement une très courte phrase d\'attente.' : 'Quand on te demande de regarder (« regarde », ce que tu vois, une couleur, lire, un objet qu\'on te montre, comment on est habillé…), dis une très courte phrase (« Je regarde… ») puis appelle regarder.'} Ne prétends jamais voir quelque chose sans photo.
 ${tools}
-${travail}${maisonTxt}${famille}${voiture}${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une information récente ou qui change (actualités, sport, horaires, prix, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.${this.claude.on ? '\nQuestion difficile (identifier une référence de produit, trouver un équivalent, comparer des produits ou des fiches techniques, question technique ou réglementaire) : dis seulement « Je cherche. » puis appelle question_difficile avec la question complète ; Claude, sur l\'ordinateur de la maison, cherche et lit les fiches (une à deux minutes). Quand sa réponse arrive, répète-la mot pour mot.' : ''}
+${travail}${maisonTxt}${famille}${voiture}${eco ? (s.city ? `La maison est à ${s.city} (utile pour la météo et les horaires).` : '') : `Recherche : pour une petite information récente ou qui change (horaires, résultats sportifs, programmes télé, commerces, événements), ou quand on te demande de chercher, dis en français une très courte phrase d'attente (« Je regarde… ») puis appelle chercher avec la question complète${s.city ? ` (la maison est à ${s.city})` : ''}. Résume le résultat à l'oral en une à trois phrases, sans liens ni adresses web.${this.claude.on ? '\nInformation fiable (décision de Timothée du 16/11/26 : « je préfère avoir une information fiable qu\'une information pas fiable ») : pour un produit, une référence, un équivalent, une comparaison, une question technique, réglementaire, juridique, médicale ou financière, une explication, un conseil, un calcul ou une actualité à recouper, ne réponds pas de mémoire : dis seulement « Je cherche. » puis appelle question_difficile avec la question complète ; Claude, sur l\'ordinateur de la maison, cherche, vérifie et répond (une à deux minutes). Quand sa réponse arrive, répète-la mot pour mot. Tu ne réponds toi-même qu\'à la conversation, à l\'heure, à la météo, à la maison et aux petites choses simples.' : ''}
+Le doute (décision de Timothée du 16/11/26 : « qu'il me pose des questions pour préciser les choses s'il a un doute avant de répondre ») : si sa demande peut se comprendre de deux façons qui changent la réponse (deux clients ou deux produits possibles, un nom mal entendu, une information qui manque), ne devine pas : pose-lui UNE seule question courte, puis agis avec sa réponse. Jamais de question quand la demande est claire (« allume la lumière », « quelle heure est-il ? »).
 Langue : parle toujours en français, y compris pour une phrase d'attente. La transcription de ce qu'on te dit sort parfois en anglais, en espagnol ou en russe par erreur : c'est du français mal compris. Réponds toujours en français, jamais en anglais, même si la phrase entendue est en anglais, en italien ou en portugais ; si tu n'as pas compris, demande simplement de répéter.`}
 Tu es Wilson : ne te présente jamais comme un modèle d'IA d'une entreprise.
 
@@ -1845,6 +1874,9 @@ Nous sommes ${fmtDate()}.${nv}`;
   // Elle reste « à dire » jusqu'à ce que Wilson l'ait vraiment dite (15 min au plus) : la discussion ne se ferme pas pendant
   // qu'il la dit, elle passe en premier à la discussion suivante, et en voiture il se réveille pour la dire.
   _aDireTexte(P, demande = '') {
+    // Claude demande une précision (« Question : … », règle de Timothée du 16/11/26) : Wilson la pose, sans rien affirmer.
+    const q = /^\s*Question\s*:\s*/i.exec(String(P.dire || ''));
+    if (q) return `[Pour la recherche « ${P.question} », Claude a besoin d'une précision avant de répondre. Pose-lui seulement cette question, sans rien ajouter : « ${String(P.dire).slice(q[0].length).trim()} ». Avec sa réponse, rappelle question_difficile avec la question complète précisée.]`;
     const deb = `[La recherche ${P.ou == null ? 'dans le CRM ' : P.ou}que tu avais lancée pour la question « ${P.question} » est terminée (${P.s} s). Résultat : ${P.dire}`;
     return demande ? `${deb} Timothée vient de te dire : « ${demande} ». Donne-lui d'abord ce résultat, en commençant par « J'ai la réponse à ta question sur … » (quelques mots du sujet), puis réponds à ce qu'il vient de dire si c'est autre chose.]`
       : `${deb} Dis-la-lui maintenant, en commençant par « J'ai la réponse à ta question sur … » (quelques mots du sujet).]`;
@@ -1854,7 +1886,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     if (!P || this.mode !== 'live' || !this.brain.open || this.state !== 'conversation') return false;
     if (Date.now() - P.at > 15 * 60000) { this.log(`Réponse à « ${P.question.slice(0, 60)} » jamais dite en 15 min : abandonnée`); this._aDire = null; return false; }
     if ((P.n || 0) >= 3) {                                                  // 3 envois sans qu'il la dise : la voix du téléphone la lit
-      this.log('Réponse attendue envoyée 3 fois sans être dite : je la lis avec la voix de l\'appareil'); this._aDire = null; this._sayAfter(`J'ai la réponse à ta question. ${P.dire}`); return true;
+      this.log('Réponse attendue envoyée 3 fois sans être dite : je la lis avec la voix de l\'appareil'); this._aDire = null; this._sayAfter(/^\s*Question\s*:/i.test(P.dire) ? String(P.dire).replace(/^\s*Question\s*:\s*/i, '') : `J'ai la réponse à ta question. ${P.dire}`); return true;
     }
     P.conv = this.convId; P.envoyeAt = performance.now(); P.n = (P.n || 0) + 1; P.relance = false;
     this._permettre(30000, 'réponse tardive'); this._resumedAt = performance.now(); this.lastActivity = performance.now();
