@@ -182,7 +182,7 @@ async def main():
         idx = next((i for i, t in enumerate(c['texts'][n0:]) if '[Tu as le résultat de ton outil' in t), None)
         dt = (c['tt'][n0 + idx] - t0) if idx is not None else 99
         res = [r for r in c['tools'] if r.get('name') == 'remarque']
-        check('Résultat de « remarque » = « C\'est noté. » (plus de consigne lue à voix haute)', res and res[-1]['response']['result'] == "C'est noté.", str(res)[:200])
+        check('Résultat de « remarque » = « C\'est noté. » (plus de consigne lue à voix haute)', res and res[-1]['response']['result'] == "C'est noté, je lance la correction : compte une heure environ.", str(res)[:200])
         check('Muet après l\'outil : relance au bout de 3 s (5 s avant)', 2.7 <= dt <= 4.2, f'{dt:.1f} s')
         tones = await page.evaluate('window.__tones.slice()')
         check('… petit son de réflexion en voiture pendant l\'attente (« dis-moi quand tu travailles »)', 'reflexion' in tones, str(tones))
@@ -192,7 +192,7 @@ async def main():
         n = len([l for l in logs if 'REMARQUE DE TIMOTHÉE : Pendant une recherche' in l])
         check('La même remarque rappelée par Google : notée une seule fois', n == 1 and has('Remarque déjà notée'), str(n))
         desc = await page.evaluate("import('./js/outils.js').then(({ OUTILS }) => OUTILS.find((t) => t.name === 'remarque').description)")
-        check('… la consigne « C\'est noté. » est dans la description de l\'outil', "dis seulement « C'est noté. »" in desc, desc[-140:])
+        check('… la consigne (dire le résultat : « C\'est noté, je lance la correction… », 16/11/26) est dans la description de l\'outil', "dis seulement le résultat de l'outil (« C'est noté, je lance la correction : compte une heure environ. »" in desc, desc[-200:])
         # pas de relance pendant qu'il parle encore
         await page.wait_for_timeout(3500)
         n0 = len(c['texts']); t0 = time.monotonic()

@@ -38,7 +38,7 @@ export const OUTILS = [
     description: "Envoie le brouillon d'e-mail (Gmail personnel) que Claude vient de préparer avec l'outil mails. SEULEMENT après lui avoir relu le destinataire et le texte, lui avoir demandé « Je l'envoie ? » et avoir entendu son « oui » clair. action : envoyer ; annuler s'il dit non ou veut le changer (pour le changer, rappelle ensuite mails avec sa correction). Jamais pour la boîte pro : ses brouillons pro restent dans Outlook, il les envoie lui-même.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['envoyer', 'annuler'] } }, required: ['action'] } },
   { name: 'remarque', behavior: 'BLOCKING',
-    description: "Remarque de Timothée sur ton fonctionnement, pour ta prochaine mise à jour (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile. Une seule fois par remarque. Une correction qui vaut pour toujours (la prononciation d'un nom, la façon d'appeler quelqu'un) : appelle AUSSI memoriser, pour l'appliquer dès maintenant. Ensuite, dis seulement « C'est noté. », puis réponds au reste de ce qu'il a dit ou écoute la suite.",
+    description: "Remarque de Timothée sur ton fonctionnement ou sur son CRM (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile. Une seule fois par remarque. Une correction qui vaut pour toujours (la prononciation d'un nom, la façon d'appeler quelqu'un) : appelle AUSSI memoriser, pour l'appliquer dès maintenant. Ensuite, dis seulement le résultat de l'outil (« C'est noté, je lance la correction : compte une heure environ. » : depuis le 16/11/26, chaque remarque lance la correction toute seule, Claude corrige et publie dans l'heure, et Timothée reçoit une notification), puis réponds au reste de ce qu'il a dit ou écoute la suite.",
     parameters: { type: 'OBJECT', properties: { texte: S }, required: ['texte'] } },
   { name: 'mes_remarques', behavior: 'BLOCKING',   // accord de Timothée du 01/11/26 (« je t'avais demandé de noter des choses hier »)
     description: "Relire les remarques que Timothée t'a faites pour tes mises à jour (« qu'est-ce que je t'ai demandé de changer ? », « tu te rappelles ce que je t'ai fait noter hier ? »), avec leur date." },
@@ -472,13 +472,14 @@ RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus te
     // Journal du 05/11/26 : la même remarque notée deux fois (09h37:45 et 09h37:46, outil annulé par Google puis rappelé ;
     // 09h44:02 puis 09h45:16) → une remarque identique dans les 10 min n'est pas notée de nouveau.
     const l = lire('wilson.remarques', []), cle = norm(t), now = Date.now();
-    if (l.some((r) => r && now - r.t < 10 * 60000 && norm(r.texte) === cle)) { this.log(`Remarque déjà notée (pas de doublon) : ${t.slice(0, 80)}`); return "C'est noté."; }
+    if (l.some((r) => r && now - r.t < 10 * 60000 && norm(r.texte) === cle)) { this.log(`Remarque déjà notée (pas de doublon) : ${t.slice(0, 80)}`); return "C'est noté, la correction est déjà lancée."; }
     this.log(`REMARQUE DE TIMOTHÉE : ${t}`, true);
     l.push({ t: now, texte: t }); ecrire('wilson.remarques', l.slice(-50));
     // Remarque du 04/11/26, 11h51 : « noter mes remarques en arrière-plan, sans rester bloqué ni arrêter de m'écouter ».
     // 05/11/26, 09h46:11 : Gemini 3.1 a lu à voix haute le résultat « {result: Remarque notée. Dis « C'est noté. » (trois
     // mots)… » → le résultat est maintenant la phrase à dire elle-même ; la consigne est dans la description de l'outil.
-    return "C'est noté.";
+    // 16/11/26 : chaque remarque lance la correction (tâche « Wilson — correction des remarques », toutes les heures de 7h00 à 22h00).
+    return "C'est noté, je lance la correction : compte une heure environ.";
   }
 
   mesRemarques() {
