@@ -3,7 +3,7 @@ import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decouper, demande, argumentsClaude, Relais, limiteAtteinte, repriseLimite, effortPour, modelePour, commandeArret, arreterArbre, GardeHA, HA_ACTION_MS } from '../pc/relais.mjs';
+import { decouper, demande, argumentsClaude, argumentsAtelier, lireResultat, nomBranche, demandeCorrection, ATELIER_INTERDITS, Relais, limiteAtteinte, repriseLimite, effortPour, modelePour, commandeArret, arreterArbre, GardeHA, HA_ACTION_MS } from '../pc/relais.mjs';
 import { OUTILS, appeler, serveur } from '../pc/crm-mcp.mjs';
 
 let ok = 0, ko = 0;
@@ -53,7 +53,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 9 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 10 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -80,7 +80,7 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 9');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 10');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
 
 // ---------- Lot 4 : arrêt de tout l'arbre (W15), limite signalée au script (W16), effort réduit (W16) ----------
@@ -240,6 +240,50 @@ check('MCP : méthode inconnue → erreur propre', reps.find((x) => x.id === 4).
   const rep = await M.appeler('mail_chercher', { q: 'from:x', n: 99 }, { script: 'S', secret: 's'.repeat(40), fetchImpl: async (u, o) => { vu = JSON.parse(o.body); return { text: async () => JSON.stringify({ ok: true, texte: 'Gmail : 0 fil' }) }; } });
   check('Gmail (MCP) : passe par le script avec le secret du relais', vu && vu.action === 'mail_chercher' && vu.secret === 's'.repeat(40) && vu.q === 'from:x' && /0 fil/.test(rep.content[0].text));
   check('Gmail (MCP) : outil inconnu refusé', (await M.appeler('mail_envoyer', {}, { script: 'S', secret: 'x' })).isError === true);
+}
+
+// ---------- L'atelier (relais 10, décision de Timothée du 16/11/26) : une remarque est corrigée tout de suite ----------
+{
+  const a = argumentsAtelier({ consigne: 'C' }), val = (k) => a[a.indexOf(k) + 1];
+  check('Atelier : Opus 5.5, effort élevé, sans question (dontAsk), consigne ajoutée à celle de Claude Code', val('--model') === 'claude-opus-5-5' && val('--effort') === 'high' && val('--permission-mode') === 'dontAsk' && val('--append-system-prompt') === 'C' && !a.includes('--system-prompt'));
+  check('Atelier : Claude ne peut ni commiter, ni pousser, ni appeler gh, ni aller sur Internet', ['Bash(git push:*)', 'Bash(git commit:*)', 'Bash(gh:*)', 'WebFetch', 'WebSearch'].every((x) => ATELIER_INTERDITS.includes(x)) && !/git push|gh:|WebFetch/.test(val('--allowedTools')));
+  check('Atelier : il peut lire, modifier et lancer les tests (node, python)', ['Read', 'Edit', 'Write', 'Bash(node:*)', 'Bash(python:*)'].every((x) => val('--allowedTools').split(',').includes(x)));
+  const res = lireResultat('﻿{"dire":"Corrigé :\\n tu finis tes phrases.","question":"","wilson":{"titre":"1.44.2 : phrases finies","description":"La cause…"},"crm":null,"autre":"ignoré"}');
+  check('Atelier : RESULTAT.json lu et nettoyé (BOM, retours à la ligne, champs inconnus ignorés)', res && res.dire === 'Corrigé : tu finis tes phrases.' && res.wilson.titre === '1.44.2 : phrases finies' && res.crm === null && !('autre' in res), JSON.stringify(res));
+  check('Atelier : RESULTAT.json illisible → rien', lireResultat('pas du json') === null && lireResultat('') === null);
+  check('Atelier : branche « remarque-aammjj-hhmm »', nomBranche(new Date(2026, 10, 16, 18, 5)) === 'remarque-261116-1805');
+  const dc = demandeCorrection({ question: 'Tu coupes tes phrases', contexte: 'Journal…', appareil: 'téléphone', t: new Date(2026, 10, 16, 9, 59, 53).getTime() }, new Date(2026, 10, 16, 10, 0));
+  check('Atelier : la demande donne la remarque, son heure, l\'appareil, le journal et RESULTAT.json', /« Tu coupes tes phrases »/.test(dc) && /16\/11\/26 09h59:53, téléphone/.test(dc) && /Journal…/.test(dc) && /RESULTAT\.json/.test(dc));
+
+  // Le relais : la correction part à l'atelier (à part : les questions continuent), puis la demande est publiée par le relais.
+  const env2 = []; const fetch2 = async (u, o) => { const b = JSON.parse(o.body); env2.push(b); return { status: 200, text: async () => JSON.stringify(b.action ? { ok: true, etat: 'faite' } : 'ok') }; };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-'));
+  fs.writeFileSync(path.join(dir, 'consigne-correction.md'), 'consigne');
+  const RA = new Relais({ config: { script: 'S', secret: 'x'.repeat(40) }, dir, fetchImpl: fetch2, log: () => {} });
+  const cmds = []; let modifie = false;
+  RA.cmd = (nom, args) => { cmds.push(nom + ' ' + args.join(' ')); if (args[0] === 'status' && args[1] === '--porcelain') return modifie && /wilson$/.test(path.basename(cmds.length ? dir + '/wilson' : '')) ? ' M js/app.js' : ''; if (args[0] === 'pr') return 'https://github.com/timduneau-hue/wilson/pull/42'; return ''; };
+  RA.serveurTests = () => null;
+  RA._claudeAtelier = async (q, base) => { fs.writeFileSync(path.join(base, 'RESULTAT.json'), JSON.stringify({ dire: 'Corrigé : tu finis tes phrases.', question: '', wilson: { titre: '1.44.2 : phrases finies', description: 'Cause : coupe trop tôt.' }, crm: null })); modifie = true; return { etapes: 40 }; };
+  let enCoursPendant = null; const t = RA.traiter({ id: 'c1', type: 'correction', question: 'Tu coupes tes phrases, client Dupont', appareil: 'téléphone', t: Date.now() }); enCoursPendant = RA.enCours; await t; await RA.atelierFile;
+  check('Atelier : une correction ne bloque pas les questions (compteur des questions inchangé)', enCoursPendant === 0 && RA.enCours === 0 && RA.atelier === false);
+  check('Atelier : GitHub vérifié, wilson et crm-boschat préparés', cmds.some((c) => c === 'gh auth status') && cmds.filter((c) => /^gh repo clone timduneau-hue\/(wilson|crm-boschat)/.test(c)).length === 2, cmds.join(' | '));
+  const pr = cmds.find((c) => /^gh pr create/.test(c)) || '';
+  check('Atelier : le RELAIS commite, pousse la branche et ouvre la demande (pas Claude)', cmds.some((c) => /^git .*commit -q -m 1\.44\.2 : phrases finies/.test(c)) && cmds.some((c) => /^git push -q -u origin remarque-\d{6}-\d{4}$/.test(c)) && /--repo timduneau-hue\/wilson --base main --head remarque-/.test(pr), cmds.join(' | '));
+  check('Atelier : dépôt public → jamais la remarque mot pour mot (nom de client), mais le repère « Remarques traitées jusqu\'au »', pr && !/Dupont/.test(pr) && /Remarques traitées jusqu'au \d{2}\/\d{2}\/\d{2} \d{2}h\d{2}:\d{2}/.test(pr), pr.slice(0, 300));
+  const rc = env2.find((x) => x.action === 'claude_rendre');
+  check('Atelier : compte rendu rendu au script (ce qu\'il faut dire + lien de la demande)', rc && rc.id === 'c1' && rc.ok === true && /tu finis tes phrases/.test(rc.dire) && /pull\/42/.test(rc.detail) && rc.question === '', JSON.stringify(rc));
+  // Une question plutôt qu'une correction : rien de publié, la question est rendue.
+  env2.length = 0; cmds.length = 0; modifie = false;
+  RA._claudeAtelier = async (q, base) => { fs.writeFileSync(path.join(base, 'RESULTAT.json'), JSON.stringify({ dire: '', question: 'Tu parles du téléphone ou de la tablette ?', wilson: null, crm: null })); return { etapes: 5 }; };
+  await RA.traiter({ id: 'c2', type: 'correction', question: 'Ça bug', t: Date.now() }); await RA.atelierFile;
+  const rq = env2.find((x) => x.action === 'claude_rendre');
+  check('Atelier : remarque ambiguë → sa question est rendue, rien de publié', rq && rq.question === 'Tu parles du téléphone ou de la tablette ?' && !cmds.some((c) => /pr create|push/.test(c)), JSON.stringify(rq));
+  // GitHub pas branché : erreur claire, rendue (jamais de silence).
+  env2.length = 0; RA.cmd = (nom, args) => { if (nom === 'gh' && args[0] === 'auth') throw new Error('gh introuvable sur le PC : lancer l\'installation de l\'atelier (atelier.ps1)'); return ''; };
+  await RA.traiter({ id: 'c3', type: 'correction', question: 'Ça bug encore', t: Date.now() }); await RA.atelierFile;
+  const re = env2.find((x) => x.action === 'claude_rendre');
+  check('Atelier : GitHub pas branché → erreur claire rendue (atelier.ps1)', re && re.ok === false && /atelier\.ps1/.test(re.erreur), JSON.stringify(re));
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(`\n${ok}/${ok + ko} vérifications OK`);

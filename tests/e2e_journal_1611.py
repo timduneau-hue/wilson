@@ -131,6 +131,33 @@ async def main():
         check('Claude demande une précision (« Question : … ») : Wilson la pose, puis rappelle question_difficile', 'Pose-lui seulement cette question' in r['q'] and 'TE 340 ou de la TE 540' in r['q'] and 'Question :' not in r['q'] and 'rappelle question_difficile' in r['q'], r['q'])
         check('… une vraie réponse reste « J\'ai la réponse à ta question »', "J'ai la réponse à ta question" in r['n'], r['n'])
 
+        # ---------- 6. Une remarque part tout de suite au PC (atelier, relais 10 ; décision du 16/11/26, 14h01) ----------
+        r = await page.evaluate("""(async () => {
+          const W = wilson, C = W.claude, vus = [];
+          Object.defineProperty(C, 'on', { get: () => true, configurable: true });
+          const ask0 = C._ask.bind(C);
+          W.log('Entendu : « allume la lumière »');
+          // 1) script Google pas encore à jour : rien n'est envoyé, la tâche horaire prendra le relais
+          C._ask = async (o) => { vus.push(o); return o.action === 'claude_etat' ? { ok: true, pc: { vivant: true } } : { ok: true, accepte: true }; };
+          const a = await W.outils.run('remarque', { texte: 'Tu coupes la fin de tes phrases' });
+          const nA = vus.filter((o) => o.action === 'claude_demander').length;
+          // 2) script à jour, PC présent : envoyé tout de suite, avec le journal
+          vus.length = 0;
+          C._ask = async (o) => { vus.push(o); return o.action === 'claude_etat' ? { ok: true, pc: { vivant: true }, corrections: true } : { ok: true, accepte: true, pc: { vivant: true } }; };
+          const b = await W.outils.run('remarque', { texte: 'Le devis à relancer de la synthèse n\\'est pas le bon' });
+          const d = vus.find((o) => o.action === 'claude_demander') || {};
+          // 3) PC absent : la correction l'attend
+          C._ask = async (o) => o.action === 'claude_etat' ? { ok: true, pc: { vivant: false }, corrections: true } : { ok: true, accepte: true, pc: { vivant: false } };
+          const c = await W.outils.run('remarque', { texte: 'Troisième remarque, PC éteint' });
+          C._ask = ask0; delete C.on;
+          return { a, nA, b, d, c };
+        })()""")
+        check('Remarque : script Google pas encore à jour → rien n\'envoyé au PC, « compte une heure »', r['nA'] == 0 and 'compte une heure' in r['a'], str(r)[:300])
+        d = r['d']
+        check('Remarque : envoyée tout de suite au PC (type correction), avec le journal des 15 dernières minutes', d.get('type') == 'correction' and 'devis à relancer' in d.get('question', '') and 'Journal de l\'appareil, 15 dernières minutes' in d.get('contexte', '') and 'allume la lumière' in d.get('contexte', ''), str(d)[:300])
+        check('… Wilson dit « je lance la correction tout de suite : compte une demi-heure »', 'tout de suite' in r['b'] and 'demi-heure' in r['b'], r['b'])
+        check('… PC éteint : « la correction partira dès qu\'il sera rallumé »', 'rallumé' in r['c'], r['c'])
+
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await b.close()
     print(f"\n{sum(results)}/{len(results)} vérifications réussies")

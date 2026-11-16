@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.44.1';
+const VERSION = '1.45.0';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -424,6 +424,17 @@ class App {
       setTimeout(() => location.reload(), parlait ? 4500 : 2500);
     };
     go();
+  }
+  // Remarque → correction tout de suite par Claude sur le PC (décision de Timothée du 16/11/26), avec les 15 dernières
+  // minutes du journal de l'appareil (ce qu'il a dit, ce que Wilson a répondu, les outils, les erreurs).
+  async lancerCorrection(remarque) {
+    if (!this.claude || !this.claude.on) return null;
+    const depuis = Date.now() - 15 * 60000, T = this.logsT || [];
+    const lignes = this.logs.filter((_, i) => (T[i] || 0) >= depuis);
+    const contexte = `Appareil : ${deviceName()}${this.enVoiture ? ' (en voiture)' : ''} ; Wilson ${VERSION}.\nJournal de l'appareil, 15 dernières minutes :\n${lignes.join('\n')}`.slice(-30000);
+    const r = await this.claude.corriger({ remarque, contexte, appareil: deviceName() });
+    this.log(`Correction ${r.accepte ? (r.pcLa ? 'envoyée au PC de la maison' : 'en attente du PC de la maison (absent)') : 'pas envoyée' + (r.erreur ? ' : ' + r.erreur : '')} : « ${String(remarque).slice(0, 100)} »`, true);
+    return r;
   }
   // « Changer un peu de tête » pendant la mise à jour (16/11/26) : visage voilé, roue qui tourne, « pas disponible ».
   _teteMaj() {

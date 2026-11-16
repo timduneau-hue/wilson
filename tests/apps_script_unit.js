@@ -437,5 +437,32 @@ check('Propriétés (W13) : l\'adresse du CRM vient de la propriété', fetched.
 vm.runInContext("TAVILY_CLE = 'tvly-DANSLECODE'; FEUILLE = 'COLLE_ICI_X';", ctx); delete props.TAVILY_CLE; logged.length = 0; vm.runInContext('deplacerIdentifiantsVersProprietes()', ctx);
 check('Propriétés (W13) : « deplacerIdentifiantsVersProprietes » copie les vrais identifiants, pas les modèles « COLLE_ICI »', props.TAVILY_CLE === 'tvly-DANSLECODE' && !props.FEUILLE && logged.some((l) => /TAVILY_CLE/.test(String(l))));
 }
+{
+// ---------- Corrections (décision de Timothée du 16/11/26) : une remarque part tout de suite au PC ----------
+const C = (o) => JSON.parse(ctx.doPost({ parameter: { k: props.cle_wilson }, postData: { contents: JSON.stringify(o) } }).getContent());   // clé du moment (changée plus haut)
+const SECRET = 'secret-du-pc-tire-au-sort-0123456789';
+cache.claude_pc = JSON.stringify({ t: Date.now() - 600000, version: 'relais 10' });
+let r = C({ action: 'claude_demander', id: 'corr1', question: 'Tu coupes la fin de tes phrases', type: 'correction', contexte: 'x'.repeat(20000), appareil: 'téléphone' });
+check('Correction : acceptée même si le PC est absent (elle l\'attend), avec 15 min de journal', r.ok && r.accepte === true && JSON.parse(cache.claude_q_corr1).type === 'correction' && JSON.parse(cache.claude_q_corr1).contexte.length === 20000);
+r = C({ action: 'claude_demander', id: 'pasCorr', question: 'Une question ordinaire', type: 'internet' });
+check('… une question ordinaire reste refusée si le PC est absent', r.ok && r.accepte === false);
+for (let n = 0; n < 10; n++) { r = C({ action: 'claude_prendre', secret: SECRET, attente: 1, version: 'relais 9' }); if (!r.question) break; }   // questions laissées par les essais d'avant
+check('Correction : un relais trop ancien (9) ne la prend pas, elle reste dans la file', !r.question && JSON.parse(cache.claude_file).includes('corr1') && C({ action: 'claude_etat' }).corrections === true);
+r = C({ action: 'claude_prendre', secret: SECRET, attente: 1, version: 'relais 10' });
+check('Correction : le relais 10 la prend', r.question && r.question.id === 'corr1' && r.question.type === 'correction');
+const nMails = mails.length, nQ = (sheets['Questions'] ? sheets['Questions'].data.length : 1);
+r = C({ action: 'claude_rendre', secret: SECRET, id: 'corr1', ok: true, dire: "J'ai besoin d'une précision avant de corriger.", question: 'Tu parles du téléphone ou de la tablette ?' });
+const Q = sheets['Questions'].data, der = Q[Q.length - 1];
+check('Correction : sa question va dans l\'onglet « Questions » (Wilson la lui posera)', r.ok && Q.length === nQ + 1 && der[2] === 'Tu parles du téléphone ou de la tablette ?' && /Tu coupes la fin/.test(der[3]) && !!props['corr_' + der[0]], JSON.stringify(der));
+check('Correction : compte rendu par e-mail', mails.length === nMails + 1 && /question avant de corriger/.test(mails[mails.length - 1].subject), JSON.stringify(mails[mails.length - 1] || {}).slice(0, 200));
+const HC = sheets['Claude'].data;
+check('Correction : notée « Correction » dans l\'onglet Claude', HC[1] && /^Correction/.test(HC[1][2]));
+r = C({ action: 'q_repondre', id: der[0], reponse: 'Du téléphone, en voiture' });
+const f = JSON.parse(cache.claude_file || '[]'), nouvelle = f.length ? JSON.parse(cache['claude_q_' + f[f.length - 1]] || '{}') : {};
+check('Sa réponse repart au PC : nouvelle correction avec la question et sa réponse', r.ok && nouvelle.type === 'correction' && /Tu coupes la fin/.test(nouvelle.question) && /Sa réponse : Du téléphone, en voiture/.test(nouvelle.question) && !props['corr_' + der[0]], JSON.stringify(nouvelle).slice(0, 300));
+r = C({ action: 'claude_prendre', secret: SECRET, attente: 5, version: 'relais 10' });
+C({ action: 'claude_rendre', secret: SECRET, id: r.question.id, ok: true, dire: 'Corrigé : tu finis tes phrases.', detail: 'https://github.com/…/pull/9' });
+check('Correction faite : e-mail « correction faite » avec le lien', /correction faite/.test(mails[mails.length - 1].subject) && /pull\/9/.test(mails[mails.length - 1].body));
+}
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);

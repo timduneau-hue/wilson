@@ -11,6 +11,10 @@
 //  - claude_resultat (Wilson) : où en est la question (attente, en cours, faite, erreur), en attendant jusqu'à 15 s qu'elle avance ;
 //  - claude_annuler (Wilson) : la question ne sert plus (PC trop lent, on fait autrement) ;
 //  - claude_etat (Wilson) : le PC est-il là ?
+//  - type « correction » (décision de Timothée du 16/11/26) : une remarque faite à Wilson part tout de suite au PC, qui corrige
+//    le code (Wilson, CRM), teste et ouvre la demande de modification sur GitHub. Acceptée même si le PC est absent (elle
+//    l'attend 6 h). À la fin : un e-mail de compte rendu à Timothée ; une question du PC va dans l'onglet « Questions »,
+//    et sa réponse repart toute seule au PC (correctionReponse_, appelée par qRepondre_).
 // La file est dans le cache du script (6 h au plus) : rien n'est écrit dans la feuille. Le secret du PC est gardé dans les
 // propriétés du script la première fois qu'il se présente ; pour en changer, lancer « oublierPC » dans l'éditeur.
 // Depuis le 11/11/26, cette première présentation doit passer par l'adresse avec la clé du script (…/exec?k=…, voir journal.gs) :
@@ -26,7 +30,7 @@ function claude_(d) {
   if (a === 'claude_demander') return claudeDemander_(d);
   if (a === 'claude_resultat') return claudeResultat_(d);
   if (a === 'claude_annuler') return claudeChanger_(d.id, function (q) { if (q.etat === 'attente' || q.etat === 'en_cours') q.etat = 'annulee'; });
-  if (a === 'claude_etat') return { ok: true, pc: claudePc_() };
+  if (a === 'claude_etat') return { ok: true, pc: claudePc_(), corrections: true };   // corrections : ce script les connaît (16/11/26)
   if (a === 'claude_prendre' || a === 'claude_rendre') {
     var s = claudeSecret_(d.secret); if (!s.ok) return s;
     return a === 'claude_prendre' ? claudePrendre_(d) : claudeRendre_(d);
@@ -64,12 +68,13 @@ function claudeDemander_(d) {
   if (!id || !question) return { ok: false, erreur: 'question vide' };
   var pc = claudePc_(), deja = claudeLire_(id);
   if (deja) return { ok: true, accepte: deja.etat !== 'annulee', id: id, etat: deja.etat, pc: pc };   // renvoi après une coupure : rien en double
-  if (!pc.vivant) return { ok: true, accepte: false, id: id, pc: pc };
-  if (pc.limite) return { ok: true, accepte: false, id: id, limite: pc.limite, pc: pc };   // limite atteinte : rien n'entre dans la file
+  var corr = d.type === 'correction';
+  if (!pc.vivant && !corr) return { ok: true, accepte: false, id: id, pc: pc };   // une correction attend le PC (6 h au plus)
+  if (pc.limite && !corr) return { ok: true, accepte: false, id: id, limite: pc.limite, pc: pc };   // limite atteinte : rien n'entre dans la file
   var q = {
-    id: id, question: question, type: d.type === 'crm' ? 'crm' : d.type === 'mail' ? 'mail' : 'internet', voiture: !!d.voiture, crm: d.type === 'crm' || d.crm === true,   // CRM : seulement pour Timothée (06/11/26)
+    id: id, question: question, type: corr ? 'correction' : d.type === 'crm' ? 'crm' : d.type === 'mail' ? 'mail' : 'internet', voiture: !!d.voiture, crm: d.type === 'crm' || d.crm === true,   // CRM : seulement pour Timothée (06/11/26)
     boite: d.type === 'mail' ? (/^(perso|pro)$/.test(String(d.boite)) ? String(d.boite) : 'les_deux') : '',   // e-mails (11/11/26) : Gmail perso, Outlook pro, ou les deux
-    contexte: String(d.contexte || '').slice(0, 8000), regles: String(d.regles || '').slice(0, 8000),
+    contexte: String(d.contexte || '').slice(0, corr ? 30000 : 8000), regles: String(d.regles || '').slice(0, 8000),
     appareil: String(d.appareil || '').slice(0, 40), t: Date.now(), etat: 'attente',
   };
   var lock = LockService.getScriptLock(); if (!lock.tryLock(8000)) return { ok: false, erreur: 'script occupé, réessaie' };
@@ -93,12 +98,14 @@ function claudePrendre_(d) {
       var lock = LockService.getScriptLock();
       if (lock.tryLock(5000)) {
         try {
-          var f = claudeFile_(), q = null;
+          var f = claudeFile_(), q = null, gardees = [];
+          var nRelais = +((/relais (\d+)/.exec(String(d.version || '')) || [])[1] || 0);
           while (f.length && !q) {
-            var x = claudeLire_(f.shift());
+            var idx = f.shift(), x = claudeLire_(idx);
+            if (x && x.etat === 'attente' && x.type === 'correction' && nRelais < 10) { gardees.push(idx); continue; }   // relais trop ancien : elle l'attend
             if (x && x.etat === 'attente') q = x;                  // annulée ou expirée : on passe
           }
-          c.put('claude_file', JSON.stringify(f), CLAUDE_TTL);
+          c.put('claude_file', JSON.stringify(gardees.concat(f)), CLAUDE_TTL);
           if (q) { q.etat = 'en_cours'; q.pris = Date.now(); claudeEcrire_(q); return { ok: true, question: q }; }
         } finally { lock.releaseLock(); }
       }
@@ -118,7 +125,35 @@ function claudeRendre_(d) {
     fini = q;
   });
   if (fini) { try { claudeHistorique_(fini); } catch (e) {} }   // l'historique ne doit jamais bloquer la réponse
+  if (fini && fini.type === 'correction') { try { correctionFinie_(fini, d); } catch (e) {} }
   return r;
+}
+
+// ---------- Corrections (décision de Timothée du 16/11/26) ----------
+// Fin d'une correction : sa question éventuelle va dans l'onglet « Questions » (Wilson la lui posera), et un petit compte
+// rendu part par e-mail (la « notification » demandée), avec les liens des demandes de modification.
+function correctionFinie_(q, d) {
+  var question = String(d.question || '').trim().slice(0, 400);
+  if (question) {
+    var qid = nouvelId_('q', 0), sh = onglet_('Questions', Q_COLS);
+    sh.appendRow([qid, new Date(), question, ('Correction de sa remarque : « ' + q.question + ' »').slice(0, 500), '', '']);
+    PropertiesService.getScriptProperties().setProperty('corr_' + qid, JSON.stringify({ remarque: q.question, contexte: String(q.contexte || '').slice(0, 8000), appareil: q.appareil || '' }));
+  }
+  var moi = Session.getEffectiveUser().getEmail(); if (!moi) return;
+  var ok = q.etat === 'faite';
+  var sujet = 'Wilson — ' + (question ? 'une question avant de corriger' : ok ? 'correction faite' : 'correction impossible') + ' : ' + String(q.question).slice(0, 70);
+  var corps = (ok ? (q.dire || '') : 'La correction n\'a pas pu se faire : ' + (q.erreur || 'erreur inconnue')) + (question ? '\n\nWilson va te poser cette question : ' + question : '')
+    + (q.detail ? '\n\n' + q.detail : '') + '\n\nTa remarque : « ' + q.question + ' »';
+  MailApp.sendEmail({ to: moi, subject: sujet, body: corps });
+}
+// Sa réponse à une question posée par une correction : la correction repart au PC, avec la question et sa réponse.
+function correctionReponse_(qid, question, reponse) {
+  var p = PropertiesService.getScriptProperties(), v = p.getProperty('corr_' + qid); if (!v) return false;
+  var c = {}; try { c = JSON.parse(v); } catch (e) { return false; }
+  p.deleteProperty('corr_' + qid);
+  claudeDemander_({ id: 'c' + Date.now().toString(36), type: 'correction', appareil: c.appareil || '', contexte: c.contexte || '',
+    question: String(c.remarque || '') + '\nQuestion que tu lui as posée : ' + question + '\nSa réponse : ' + reponse });
+  return true;
 }
 
 // Onglet « Claude » de la feuille du journal (demande de Timothée du 05/11/26, 23h58 : « où est-ce que je peux voir les
@@ -129,7 +164,7 @@ function claudeHistorique_(q) {
   var sh = onglet_('Claude', CLAUDE_COLS);
   sh.insertRowsBefore(2, 1);
   sh.getRange(2, 2, 1, 8).setNumberFormat('@');
-  sh.getRange(2, 1, 1, 9).setValues([[new Date(q.t || Date.now()), q.appareil || '', (q.type === 'crm' ? 'CRM' : q.type === 'mail' ? 'E-mails' : 'Internet') + (q.voiture ? ' (voiture)' : ''),
+  sh.getRange(2, 1, 1, 9).setValues([[new Date(q.t || Date.now()), q.appareil || '', (q.type === 'crm' ? 'CRM' : q.type === 'mail' ? 'E-mails' : q.type === 'correction' ? 'Correction' : 'Internet') + (q.voiture ? ' (voiture)' : ''),
     q.question || '', q.etat === 'erreur' ? 'Erreur : ' + (q.erreur || '') : (q.dire || ''), q.detail || '', String(q.duree || ''), String(q.etapes || ''), q.etat === 'faite' ? 'réponse' : 'erreur']]);
   sh.getRange(2, 1).setNumberFormat('dd/mm/yy hh"h"mm');
   var last = sh.getLastRow(); if (last > CLAUDE_HISTO_MAX + 100) sh.deleteRows(CLAUDE_HISTO_MAX + 2, last - CLAUDE_HISTO_MAX - 1);

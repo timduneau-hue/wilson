@@ -133,6 +133,25 @@ export class ClaudePC {
       if (etat === 'annulee') return { ok: false, raison: 'erreur', message: 'question annulée' };
     }
   }
+  // Remarque de Timothée → correction tout de suite par Claude sur le PC (décision du 16/11/26). Sans attendre la fin :
+  // le PC corrige, teste, ouvre la demande sur GitHub, et Timothée reçoit un e-mail. → { ok, accepte, pcLa } ; jamais d'exception.
+  async corriger({ remarque, contexte = '', appareil = '' } = {}) {
+    if (!this.on) return { ok: false, raison: 'pas de script' };
+    const id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    // Script Google pas encore à jour (il prendrait la remarque pour une question ordinaire) : rien n'est envoyé.
+    try { const e = await this._ask({ action: 'claude_etat' }, null, 15000); if (!e || !e.ok || !e.corrections) return { ok: false, raison: 'script pas à jour' }; }
+    catch (e) { return { ok: false, raison: 'script', erreur: e.message }; }
+    for (let essai = 0; ; essai++) {
+      try {
+        const r = await this._ask({ action: 'claude_demander', id, question: String(remarque || '').slice(0, 2000), type: 'correction', contexte, appareil }, null, 15000);
+        if (r && r.pc) this._noterPc(r.pc);
+        return { ok: !!(r && r.ok), accepte: !!(r && r.accepte), pcLa: !!(r && r.pc && r.pc.vivant), erreur: r && r.erreur };
+      } catch (e) {
+        if (!reseau(e) || essai >= 2) return { ok: false, raison: 'script', erreur: e.message };
+        await pause(3000);
+      }
+    }
+  }
   _limite(texte, jusqua) {
     this.limiteJusqua = jusqua || repriseLimite(texte);
     const h = new Date(this.limiteJusqua);
