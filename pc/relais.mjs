@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 8';
+export const VERSION = 'relais 9';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
 const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md', 'mail-mcp.mjs', 'garde-chrome.mjs', 'consigne-mail.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
@@ -50,12 +50,18 @@ export function repriseLimite(texte, maintenant = new Date()) {
   return d.getTime();
 }
 
-// W16 : effort de réflexion. config.json « effort » l'impose s'il est écrit ; sinon « high », sauf une question CRM courte et
-// simple (un chiffre, une fiche, une liste) : « medium », plus rapide et moins gourmand pour l'abonnement.
-const COMPLEXE = /compar|analys|évolu|tendance|pourquoi|stratég|prévis|classement|palmar[eè]s|tous les|chaque|par (mois|an|client|famille)|depuis (le|janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)/i;
+// W16 : effort de réflexion. config.json « effort » l'impose s'il est écrit ; sinon « high », TOUJOURS : décision de Timothée
+// du 16/11/26 (« je préfère avoir une information fiable qu'une information pas fiable ; en voiture j'ai le temps d'attendre »).
+// Avant : « medium » pour une question CRM courte et simple.
 export function effortPour(q, impose) {
-  if (impose) return impose;
-  return q && q.type === 'crm' && String(q.question || '').length <= 140 && !COMPLEXE.test(String(q.question || '')) ? 'medium' : 'high';
+  return impose || 'high';
+}
+// Modèle de Claude : Opus 5.5 (décision de Timothée du 16/11/26). « sonnet » dans config.json était seulement la valeur posée
+// par l'ancien installateur, pas un choix : il est remplacé ; tout autre modèle écrit dans config.json l'emporte.
+export const MODELE_DEFAUT = 'claude-opus-5-5';
+export function modelePour(cfgModele) {
+  const m = String(cfgModele || '').trim();
+  return !m || m === 'sonnet' ? MODELE_DEFAUT : m;
 }
 
 // W15 : arrêter Claude ET tout ce qu'il a lancé (Windows : taskkill /T /F ; ailleurs : le groupe de processus).
@@ -102,7 +108,7 @@ export function demande(q, maintenant = new Date()) {
 // effort : réflexion de Claude (low, medium, high, xhigh, max) ; « high » par défaut : des réponses fiables (06/11/26).
 // crm : le CRM n'est branché que si c'est Timothée qui demande (règle du 06/11/26) ; sinon Claude n'a qu'Internet.
 // mail : { pro, reglages } pour une question sur les e-mails (pro : Outlook dans Chrome ; reglages : fichier du crochet de garde).
-export function argumentsClaude({ mcp, consigne, modele = 'sonnet', effort = 'high', crm = true, mail = null }) {
+export function argumentsClaude({ mcp, consigne, modele = MODELE_DEFAUT, effort = 'high', crm = true, mail = null }) {
   if (mail) {
     return ['-p', '--output-format', 'json', '--model', modele, '--effort', effort, '--max-turns', String(MAIL_TOURS),
       '--tools', '', '--allowedTools', `mcp__mail,mcp__crm${mail.pro ? ',mcp__claude-in-chrome' : ''}`, '--permission-mode', 'dontAsk',
@@ -271,7 +277,7 @@ export class Relais {
 
   async boucle() {
     let attente = 5000;
-    this.journal(`démarré (${VERSION}, ${os.hostname()}, Node ${process.versions.node}, ${this.cfg.modele || 'sonnet'}, effort ${this.cfg.effort || 'high (medium pour une question CRM simple)'})`);
+    this.journal(`démarré (${VERSION}, ${os.hostname()}, Node ${process.versions.node}, ${modelePour(this.cfg.modele)}, effort ${this.cfg.effort || 'high'})`);
     let dernierJournal = Date.now(), derniereMaj = Date.now() - MAJ_MS + 60000;   // 1re vérification une minute après le démarrage
     let derniereHA = Date.now() - HA_VERIF_MS + 90000, verifHA = null;                // Home Assistant : 1re vérification 1 min 30 après
     while (!this.stop) {
@@ -364,8 +370,8 @@ export class Relais {
     return new Promise((ok, ko) => {
       const travail = path.join(this.dir, 'travail'); fs.mkdirSync(travail, { recursive: true });
       const mail = q.type === 'mail', maxMs = mail ? MAIL_MAX_MS : CLAUDE_MAX_MS;
-      const args = mail ? argumentsClaude({ ...this.fichiersMail(q), consigne: fs.readFileSync(path.join(this.dir, 'consigne-mail.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: effortPour(q, this.cfg.effort) })
-        : argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: this.cfg.modele || 'sonnet', effort: effortPour(q, this.cfg.effort), crm: q.type === 'crm' || q.crm !== false });
+      const args = mail ? argumentsClaude({ ...this.fichiersMail(q), consigne: fs.readFileSync(path.join(this.dir, 'consigne-mail.md'), 'utf8'), modele: modelePour(this.cfg.modele), effort: effortPour(q, this.cfg.effort) })
+        : argumentsClaude({ mcp: path.join(this.dir, 'mcp.json'), consigne: fs.readFileSync(path.join(this.dir, 'consigne.md'), 'utf8'), modele: modelePour(this.cfg.modele), effort: effortPour(q, this.cfg.effort), crm: q.type === 'crm' || q.crm !== false });
       const env = { ...process.env, ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER || '' };
       delete env.ANTHROPIC_API_KEY;                                         // jamais de facturation à l'usage : l'abonnement seulement
       const p = spawn(this.exe(), args, { cwd: travail, env, windowsHide: true, detached: process.platform !== 'win32' });

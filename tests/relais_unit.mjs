@@ -3,7 +3,7 @@ import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decouper, demande, argumentsClaude, Relais, limiteAtteinte, repriseLimite, effortPour, commandeArret, arreterArbre, GardeHA, HA_ACTION_MS } from '../pc/relais.mjs';
+import { decouper, demande, argumentsClaude, Relais, limiteAtteinte, repriseLimite, effortPour, modelePour, commandeArret, arreterArbre, GardeHA, HA_ACTION_MS } from '../pc/relais.mjs';
 import { OUTILS, appeler, serveur } from '../pc/crm-mcp.mjs';
 
 let ok = 0, ko = 0;
@@ -24,7 +24,8 @@ check('Demande : date, type, voiture, question, contexte, règles', /vendredi 06
 // ---------- Les droits de Claude ----------
 const a = argumentsClaude({ mcp: 'C:\\W\\mcp.json', consigne: 'C:\\W\\consigne.md' });
 const val = (f) => a[a.indexOf(f) + 1];
-check('Claude : impression seule, JSON, Sonnet, effort élevé', a[0] === '-p' && val('--output-format') === 'json' && val('--model') === 'sonnet' && val('--effort') === 'high');
+check('Claude : impression seule, JSON, Opus 5.5, effort élevé (16/11/26)', a[0] === '-p' && val('--output-format') === 'json' && val('--model') === 'claude-opus-5-5' && val('--effort') === 'high');
+check('Modèle : « sonnet » de l’ancien installateur → Opus 5.5 ; rien → Opus 5.5 ; un autre modèle écrit l’emporte', modelePour('sonnet') === 'claude-opus-5-5' && modelePour('') === 'claude-opus-5-5' && modelePour('claude-fable-5-2') === 'claude-fable-5-2');
 check('Claude : outils limités à la recherche et à la lecture de pages', val('--tools') === 'WebSearch,WebFetch' && !/Bash|Write|Edit|PowerShell/.test(val('--tools')));
 check('Claude : seul le CRM en lecture seule en plus, le reste refusé', val('--allowedTools') === 'WebSearch,WebFetch,mcp__crm' && val('--permission-mode') === 'dontAsk' && a.includes('--strict-mcp-config') && a.includes('--no-session-persistence'));
 
@@ -52,7 +53,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 8 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 9 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -79,7 +80,7 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 8');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 9');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
 
 // ---------- Lot 4 : arrêt de tout l'arbre (W15), limite signalée au script (W16), effort réduit (W16) ----------
@@ -96,7 +97,7 @@ check('Relais : la question prise est traitée', envoyes.some((x) => x.action ==
   const t4 = new Date(2026, 10, 11, 20, 0);
   check('W16 : reprise « resets 4am » → 4 h le lendemain', new Date(repriseLimite("You've hit your weekly limit · resets 4am (Europe/Paris)", t4)).getHours() === 4 && repriseLimite('resets 4am', t4) > t4.getTime());
   check('W16 : sans heure annoncée → dans une heure', repriseLimite('limit reached', t4) === t4.getTime() + 3600000);
-  check('W16 : effort « medium » pour une question CRM courte et simple', effortPour({ type: 'crm', question: 'Combien de clients actifs ?' }) === 'medium');
+  check('Effort « high » aussi pour une question CRM courte et simple (16/11/26 : fiable avant tout)', effortPour({ type: 'crm', question: 'Combien de clients actifs ?' }) === 'high');
   check('W16 : effort « high » pour une question CRM d’analyse, une recherche Internet ou une question longue', effortPour({ type: 'crm', question: 'Compare mon CA par famille avec l’an dernier' }) === 'high' && effortPour({ type: 'internet', question: 'Charge max Tectus TE 340 ?' }) === 'high' && effortPour({ type: 'crm', question: 'x'.repeat(200) }) === 'high');
   check('W16 : « effort » écrit dans config.json l’emporte', effortPour({ type: 'crm', question: 'Combien ?' }, 'xhigh') === 'xhigh');
 
