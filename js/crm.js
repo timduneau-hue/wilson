@@ -173,10 +173,10 @@ export function confiant(q, e) {
 
 export const CRM_TOOLS = [
   { name: 'crm_client', behavior: 'BLOCKING',
-    description: "Tout ce que le CRM de Timothée sait d'un client (société ou contact, même mal prononcé, avec la ville si elle aide) : contacts et téléphones, prochain rendez-vous, dernières visites, comptes rendus, tâches, chiffre d'affaires (exercice, mois en cours, comparaison avec l'an dernier), commandes, devis, articles achetés, réachats en retard, achats chez les concurrents, articles à proposer. Avant de l'appeler, dis « Je regarde dans le CRM… ».",
+    description: "Tout ce que le CRM de Timothée sait d'un client (société ou contact, même mal prononcé, avec la ville si elle aide) : contacts et téléphones, prochain rendez-vous, sujets à voir au rendez-vous et tâches en retard (« À SIGNALER »), tout l'historique des visites et des échanges (comptes rendus de visites, d'appels et d'e-mails), tâches à faire et faites, chiffre d'affaires (exercice, mois en cours, comparaison avec l'an dernier), commandes, devis, articles achetés, réachats en retard, achats chez les concurrents, articles à proposer. Avant de l'appeler, dis « Je regarde dans le CRM… ».",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'le nom de la société ou du contact, tel que Timothée l\'a dit' } }, required: ['client'] } },
   { name: 'crm_contacts', behavior: 'BLOCKING',
-    description: "Les contacts d'un client, TOUT DE SUITE (annuaire du CRM gardé sur l'appareil, sans attente) : qui est le magasinier, l'acheteur, le dirigeant…, le nom de quelqu'un, sa fonction, son numéro de téléphone, l'adresse ou la ville de la société. Pour « qui est… chez X », « c'est quoi le numéro de… », « comment s'appelle… », « où est… » : cet outil, pas crm_question. Pour tout le reste (visites, comptes rendus, chiffres, commandes, devis) : crm_client ou crm_question.",
+    description: "Les contacts d'un client, TOUT DE SUITE (annuaire du CRM gardé sur l'appareil, sans attente) : qui est le magasinier, l'acheteur, le dirigeant…, le nom de quelqu'un, sa fonction, son numéro de téléphone, l'adresse ou la ville de la société. Pour « qui est… chez X », « c'est quoi le numéro de… », « comment s'appelle… », « où est… » : cet outil, pas crm_question. Pour tout le reste (visites, comptes rendus, tâches, échanges, chiffres, commandes, devis) : crm_client ou crm_question.",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou la personne, tel que Timothée l\'a dit' } }, required: ['client'] } },
   { name: 'crm_agenda', behavior: 'BLOCKING',
     description: "Rendez-vous et tâches d'un jour dans le CRM (« qui je vois aujourd'hui », « ma journée de demain », « jeudi »).",
@@ -705,6 +705,11 @@ export class Crm {
 }
 
 // Texte d'un résultat du CRM pour Gemini : l'info, puis la consigne d'oral.
+// Demande de Timothée du 16/11/26 : sur un client, Wilson connaît aussi les comptes rendus, les tâches et tout l'historique
+// des visites et des échanges, et le prévient des sujets importants (ligne « À SIGNALER » de la fiche du CRM).
 export function pourGemini(texte, voiture) {
-  return `${texte}\nRéponds à sa question à partir de ces informations seulement (n'invente rien, ne lis pas tout) : ${voiture ? 'une ou deux phrases très courtes, il conduit' : 'une à trois phrases'}, montants arrondis, dates dites naturellement (« jeudi 30 octobre »).`;
+  const t = String(texte || ''), fiche = /comptes? rendus?|Historique des échanges/i.test(t);
+  const histo = fiche ? " Les comptes rendus, les tâches et l'historique des échanges comptent autant que les chiffres : s'il demande ce qui s'est dit, où il en est avec ce client ou ce qu'il doit savoir, appuie-toi d'abord sur eux (dates et noms tels qu'ils sont écrits)." : '';
+  const sig = /^À SIGNALER/m.test(t) ? ` Ensuite, en une phrase${voiture ? ' courte' : ''}, préviens-le des points « À SIGNALER » (sujets à voir au prochain rendez-vous, tâches en retard), même s'il ne l'a pas demandé (sa règle du 16/11/26), sauf si tu les lui as déjà dits dans cette discussion.` : '';
+  return `${t}\nRéponds à sa question à partir de ces informations seulement (n'invente rien, ne lis pas tout) : ${voiture ? 'une ou deux phrases très courtes, il conduit' : 'une à trois phrases'}, montants arrondis, dates dites naturellement (« jeudi 30 octobre »).${histo}${sig}`;
 }

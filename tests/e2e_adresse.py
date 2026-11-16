@@ -81,6 +81,7 @@ async def main():
 
         # Maintenance de nuit du 31/10/26 (journal du 30/10/26, 22h44) : « c'est noté pour ma mise à jour » sans l'outil remarque
         check('Consigne : jamais « c\'est noté » sans remarque, ni d\'explication inventée sur son visage', 'sans avoir appelé remarque' in sysp and "N'invente jamais d'explication" in sysp)
+        await page.evaluate("wilson._crmAutorise = () => ({ ok: true, pourquoi: 'essai' })")   # remarques réservées à Timothée (16/11/26) : ici on fait comme s'il était reconnu
         await page.evaluate("wilson.brain._emit('turn', { user: 'Wilson, c\\'est bizarre, je vois plus tes pupilles.', wilson: '' })")
         await page.evaluate("wilson.brain._emit('turn', { user: 'Pour les mises à jour de ce soir, tu intègres cette information.', wilson: 'C\\'est noté, je prends cela en compte pour ma prochaine mise à jour.' })"); await page.wait_for_timeout(200)
         rq = [l for l in logs if 'REMARQUE DE TIMOTHÉE' in l]
