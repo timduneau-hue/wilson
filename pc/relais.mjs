@@ -2,6 +2,10 @@
 // Attend les questions difficiles de Wilson dans la file du script « Wilson journal », les passe à Claude Code (claude -p,
 // abonnement de Timothée, aucune clé API) et rend la réponse. Claude n'a que la recherche Internet, la lecture de pages et
 // le CRM en lecture seule (crm-mcp.mjs) : aucune commande, aucun fichier, aucune écriture.
+// Relais 10 (décision de Timothée du 16/11/26) : l'ATELIER. Une remarque faite à Wilson (« il y a un bug ») arrive ici tout de
+// suite ; Claude corrige le code (dépôts wilson et crm-boschat, clonés dans atelier\) et lance les tests, sans pouvoir ni
+// pousser ni publier lui-même ; c'est le relais qui ouvre ensuite la demande de modification sur GitHub (gh, compte de
+// Timothée). Wilson : publiée seule si « Vérifier » et le gardien sont d'accord ; CRM : attend toujours le Merge de Timothée.
 // Lancé tout seul à l'ouverture de session (boucle.cmd, fenêtre cachée) ; Node 18 ou plus, sans bibliothèque.
 
 import { spawn, spawnSync, execFile, execFileSync } from 'node:child_process';
@@ -11,9 +15,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 9';
+export const VERSION = 'relais 10';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
-const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md', 'mail-mcp.mjs', 'garde-chrome.mjs', 'consigne-mail.md'];
+const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md', 'mail-mcp.mjs', 'garde-chrome.mjs', 'consigne-mail.md', 'consigne-correction.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const MAX_EN_COURS = 2;                 // deux questions en même temps au plus
@@ -118,6 +122,42 @@ export function argumentsClaude({ mcp, consigne, modele = MODELE_DEFAUT, effort 
   return ['-p', '--output-format', 'json', '--model', modele, '--effort', effort, '--max-turns', String(MAX_TOURS),
     '--tools', OUTILS, '--allowedTools', crm ? `${OUTILS},mcp__crm` : OUTILS, '--permission-mode', 'dontAsk',
     ...(crm ? ['--mcp-config', mcp] : []), '--strict-mcp-config', '--system-prompt', consigne, '--no-session-persistence'];
+}
+
+// ---------- L'atelier : corriger le code après une remarque (relais 10, 16/11/26) ----------
+export const PROPRIETAIRE = 'timduneau-hue';
+export const DEPOTS_ATELIER = { wilson: 'wilson', crm: 'crm-boschat' };
+export const ATELIER_MAX_MS = 60 * 60000;           // une heure au plus
+const ATELIER_TOURS = 300;
+// Claude lit, modifie et lance les tests (node, python) dans atelier\ ; il ne peut ni commiter, ni pousser, ni appeler gh,
+// ni aller sur Internet : la publication est faite par le relais lui-même, après lui.
+export const ATELIER_OUTILS = 'Read,Edit,Write,Glob,Grep,Bash(node:*),Bash(python:*),Bash(python3:*),Bash(py:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)';
+export const ATELIER_INTERDITS = 'Bash(git push:*),Bash(git commit:*),Bash(git reset:*),Bash(git checkout:*),Bash(git remote:*),Bash(gh:*),Bash(curl:*),Bash(npx:*),Bash(npm:*),WebFetch,WebSearch';
+export function argumentsAtelier({ consigne, modele = MODELE_DEFAUT, effort = 'high' }) {
+  return ['-p', '--output-format', 'json', '--model', modele, '--effort', effort, '--max-turns', String(ATELIER_TOURS),
+    '--tools', 'Read,Edit,Write,Glob,Grep,Bash', '--allowedTools', ATELIER_OUTILS, '--disallowedTools', ATELIER_INTERDITS,
+    '--permission-mode', 'dontAsk', '--strict-mcp-config', '--append-system-prompt', consigne, '--no-session-persistence'];
+}
+const deux = (n) => String(n).padStart(2, '0');
+export const dateRemarque = (d) => `${deux(d.getDate())}/${deux(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)} ${deux(d.getHours())}h${deux(d.getMinutes())}:${deux(d.getSeconds())}`;
+export const nomBranche = (d = new Date()) => `remarque-${String(d.getFullYear()).slice(2)}${deux(d.getMonth() + 1)}${deux(d.getDate())}-${deux(d.getHours())}${deux(d.getMinutes())}`;
+export function demandeCorrection(q, maintenant = new Date()) {
+  return [
+    `Date et heure : ${jour(maintenant)} ${heure(maintenant)} (heure de Paris).`,
+    `Remarque de Timothée, dite à Wilson (${dateRemarque(new Date(q.t || maintenant))}, ${q.appareil || 'appareil inconnu'}) :`,
+    `« ${q.question} »`,
+    q.contexte ? `\n${q.contexte}` : '',
+    '\nLes dépôts sont clonés ici (branche main à jour) : wilson\\ et crm-boschat\\. Un serveur local sert déjà wilson sur http://127.0.0.1:8765.',
+    'Termine OBLIGATOIREMENT en écrivant le fichier RESULTAT.json (dans ce dossier), au format décrit dans ta consigne.',
+  ].filter(Boolean).join('\n');
+}
+// Ce que Claude a écrit dans RESULTAT.json, nettoyé (rien d'autre n'est cru).
+export function lireResultat(texte) {
+  let j = null; try { j = JSON.parse(String(texte || '').replace(/^\uFEFF/, '')); } catch (_) {}
+  if (!j || typeof j !== 'object') return null;
+  const txt = (x, n) => String(x == null ? '' : x).replace(/\r/g, '').trim().slice(0, n);
+  const depot = (x) => x && typeof x === 'object' && txt(x.titre, 120) ? { titre: txt(x.titre, 120).replace(/\s+/g, ' '), description: txt(x.description, 6000) } : null;
+  return { dire: txt(j.dire, 600).replace(/\s+/g, ' '), question: txt(j.question, 400).replace(/\s+/g, ' '), wilson: depot(j.wilson), crm: depot(j.crm) };
 }
 
 // ---------- Home Assistant (demande de Timothée du 11/11/26 : « occupe-toi de Home Assistant ») ----------
@@ -268,7 +308,7 @@ export class Relais {
       try { fs.unlinkSync(tmp); } catch (_) {}
       if (v.status !== 0) { this.journal(`mise à jour ignorée : ${f} ne passe pas la vérification`); return false; }
     }
-    if (this.enCours) return false;
+    if (this.enCours || this.atelier) return false;
     for (const [f, t] of change) fs.writeFileSync(path.join(this.dir, f), t);
     this.journal(`mis à jour depuis GitHub (${change.map((x) => x[0]).join(', ')}) : je redémarre`);
     await this.viderJournal();
@@ -287,7 +327,7 @@ export class Relais {
           verifHA = this.gardeHA.verifier({ pcEnLigne: Date.now() - this.scriptOkAt < 3 * 60000 }).catch((e) => this.log('maison : vérification impossible : ' + e.message)).finally(() => { verifHA = null; });
         }
         if (Date.now() - dernierJournal > 10000) { dernierJournal = Date.now(); await this.viderJournal(); }
-        if (!this.enCours && Date.now() - derniereMaj > MAJ_MS && this.majAuto !== false) {
+        if (!this.enCours && !this.atelier && Date.now() - derniereMaj > MAJ_MS && this.majAuto !== false) {
           derniereMaj = Date.now();
           try { if (await this.miseAJour()) { this.stop = true; process.exit(0); } } catch (e) { this.log('mise à jour impossible : ' + e.message); }
         }
@@ -320,6 +360,7 @@ export class Relais {
     this.limite = null; return null;
   }
   async traiter(q) {
+    if (q && q.type === 'correction') { this.corriger(q); return; }   // l'atelier : à part, une à la fois (relais 10)
     this.enCours++;
     const t0 = Date.now();
     this.journal(`question reçue (${q.type}${q.voiture ? ', en voiture' : ''}) : « ${String(q.question).slice(0, 160)} »`);
@@ -347,6 +388,111 @@ export class Relais {
     }
     this.enCours--;
     await this.viderJournal();
+  }
+
+  // ---------- L'atelier (relais 10) ----------
+  corriger(q) {
+    this.atelierFile = (this.atelierFile || Promise.resolve()).then(() => this._corriger(q)).catch((e) => this.log('atelier : ' + e.message));
+    return this.atelierFile;
+  }
+  outil(nom) {
+    const pf = process.env.ProgramFiles || 'C:\\Program Files';
+    const connus = { git: [path.join(pf, 'Git', 'cmd', 'git.exe')], gh: [path.join(pf, 'GitHub CLI', 'gh.exe')],
+      python: [path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'python.exe'), path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python313', 'python.exe')] };
+    if (this.cfg[nom] && fs.existsSync(this.cfg[nom])) return this.cfg[nom];
+    for (const x of connus[nom] || []) if (fs.existsSync(x)) return x;
+    try { return execFileSync(process.platform === 'win32' ? 'where' : 'which', [nom], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/)[0].trim(); } catch (_) {}
+    throw new Error(`${nom} introuvable sur le PC : lancer l'installation de l'atelier (atelier.ps1)`);
+  }
+  cmd(nom, args, cwd, ms = 120000) {
+    return execFileSync(this.outil(nom), args, { cwd, encoding: 'utf8', windowsHide: true, timeout: ms, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  }
+  preparerDepot(base, depot) {
+    const dir = path.join(base, depot);
+    if (!fs.existsSync(path.join(dir, '.git'))) { this.cmd('gh', ['repo', 'clone', `${PROPRIETAIRE}/${depot}`, dir, '--', '--depth', '50'], base, 600000); return dir; }
+    this.cmd('git', ['fetch', '--depth', '50', 'origin', 'main'], dir, 300000);
+    this.cmd('git', ['checkout', '-f', '-B', 'main', 'origin/main'], dir);
+    this.cmd('git', ['clean', '-fd'], dir);
+    return dir;
+  }
+  // La demande de modification : le relais (pas Claude) commite, pousse une branche et ouvre la demande.
+  publier(base, cle, info, q, quand) {
+    const depot = DEPOTS_ATELIER[cle], dir = path.join(base, depot);
+    const change = this.cmd('git', ['status', '--porcelain'], dir);
+    if (!change) return null;
+    if (!info) { this.cmd('git', ['checkout', '-f', 'main'], dir); this.cmd('git', ['clean', '-fd'], dir); this.journal(`atelier : ${depot} modifié sans titre dans RESULTAT.json, rien de publié`); return null; }
+    const branche = nomBranche(quand);
+    this.cmd('git', ['checkout', '-B', branche], dir);
+    this.cmd('git', ['add', '-A'], dir);
+    const msg = `${info.titre}\n\n${info.description}\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`;
+    this.cmd('git', ['-c', 'user.name=Claude (PC de la maison)', '-c', 'user.email=noreply@anthropic.com', 'commit', '-q', '-m', msg], dir);
+    this.cmd('git', ['push', '-q', '-u', 'origin', branche], dir, 300000);
+    // dépôt public (wilson) : jamais la remarque mot pour mot (un nom de client pourrait s'y trouver)
+    const corps = `${info.description}\n\n${cle === 'crm' ? `Remarque de Timothée : « ${q.question} »\n\n` : ''}Demande ouverte par l'atelier du PC de la maison (relais 10), après une remarque faite à Wilson.\n\nRemarques traitées jusqu'au ${dateRemarque(new Date(q.t || Date.now()))}`;
+    const url = this.cmd('gh', ['pr', 'create', '--repo', `${PROPRIETAIRE}/${depot}`, '--base', 'main', '--head', branche, '--title', info.titre, '--body', corps], dir, 120000);
+    this.cmd('git', ['checkout', '-f', 'main'], dir);
+    this.journal(`atelier : demande ouverte sur ${depot} : ${url.split(/\s+/).pop()}`);
+    return { depot, url: url.split(/\s+/).pop() };
+  }
+  serveurTests(dir) {
+    try { return spawn(this.outil('python'), ['-m', 'http.server', '8765', '--bind', '127.0.0.1'], { cwd: dir, windowsHide: true, stdio: 'ignore', detached: process.platform !== 'win32' }); }
+    catch (e) { this.journal('atelier : serveur de test impossible : ' + e.message); return null; }
+  }
+  async _corriger(q) {
+    this.atelier = true;
+    const t0 = Date.now(), quand = new Date();
+    this.journal(`correction reçue (${q.appareil || '?'}) : « ${String(q.question).slice(0, 160)} »`);
+    let rendu;
+    try {
+      const lim = this.limiteActive();
+      if (lim) throw new Error(`limite d'utilisation de Claude atteinte : ${lim.texte}`);
+      const base = path.join(this.dir, 'atelier'); fs.mkdirSync(base, { recursive: true });
+      this.cmd('gh', ['auth', 'status'], base);                              // GitHub branché ? (sinon : atelier.ps1)
+      for (const d of Object.values(DEPOTS_ATELIER)) this.preparerDepot(base, d);
+      const fRes = path.join(base, 'RESULTAT.json'); try { fs.unlinkSync(fRes); } catch (_) {}
+      const serveur = this.serveurTests(path.join(base, DEPOTS_ATELIER.wilson));
+      let r;
+      try { r = await this._claudeAtelier(q, base); } finally { if (serveur) arreterArbre(serveur); }
+      const res = lireResultat(fs.existsSync(fRes) ? fs.readFileSync(fRes, 'utf8') : '') || { dire: '', question: '', wilson: null, crm: null };
+      const liens = [];
+      for (const cle of Object.keys(DEPOTS_ATELIER)) { const l = this.publier(base, cle, res[cle], q, quand); if (l) liens.push(l); }
+      const s = Math.round((Date.now() - t0) / 1000);
+      const dire = res.dire || (liens.length ? 'Correction proposée.' : res.question ? '' : 'Rien à corriger dans le code pour cette remarque.');
+      rendu = { ok: true, dire, question: res.question || '', detail: liens.map((l) => `${l.depot === 'crm-boschat' ? 'CRM (touche Merge pour le mettre en ligne)' : 'Wilson (publié seul si les vérifications passent)'} : ${l.url}`).join('\n'), duree: s, etapes: r.etapes || 0 };
+      this.journal(`correction finie en ${Math.round(s / 60)} min : ${dire}${res.question ? ' — question : ' + res.question : ''}`);
+    } catch (e) {
+      rendu = { ok: false, erreur: String(e.message || e).slice(0, 400), duree: Math.round((Date.now() - t0) / 1000) };
+      if (limiteAtteinte(rendu.erreur) && !this.limiteActive()) this.limite = { jusqua: repriseLimite(rendu.erreur), texte: rendu.erreur.slice(0, 200) };
+      this.journal(`correction impossible après ${Math.round(rendu.duree / 60)} min : ${rendu.erreur}`);
+    }
+    for (let n = 0; n < 4; n++) {
+      try { const r = await this.post({ action: 'claude_rendre', secret: this.cfg.secret, id: q.id, ...rendu }, 30000); if (r.ok) break; this.log('compte rendu refusé : ' + r.erreur); break; }
+      catch (e) { this.log('compte rendu pas rendu : ' + e.message); await pause(3000 * (n + 1)); }
+    }
+    this.atelier = false;
+    await this.viderJournal();
+  }
+  _claudeAtelier(q, base) {
+    return new Promise((ok, ko) => {
+      const args = argumentsAtelier({ consigne: fs.readFileSync(path.join(this.dir, 'consigne-correction.md'), 'utf8'), modele: modelePour(this.cfg.modele), effort: 'high' });
+      const env = { ...process.env, ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER || '' };
+      delete env.ANTHROPIC_API_KEY;                                         // jamais de facturation à l'usage : l'abonnement seulement
+      const p = spawn(this.exe(), args, { cwd: base, env, windowsHide: true, detached: process.platform !== 'win32' });
+      let out = '', err = '';
+      const minuteur = setTimeout(() => { arreterArbre(p); ko(new Error(`la correction n'a pas fini en ${ATELIER_MAX_MS / 60000} min`)); }, ATELIER_MAX_MS);
+      p.stdout.on('data', (b) => { out += b; });
+      p.stderr.on('data', (b) => { err += b; });
+      p.on('error', (e) => { clearTimeout(minuteur); ko(e); });
+      p.on('close', (code) => {
+        clearTimeout(minuteur);
+        let j = null; try { j = JSON.parse(out.trim().split(/\r?\n/).filter(Boolean).pop() || ''); } catch (_) {}
+        if (!j) return ko(new Error(`Claude s'est arrêté (code ${code}) : ${(err || out).trim().slice(0, 300) || 'aucune sortie'}`));
+        if (limiteAtteinte(j.result) || (j.is_error && limiteAtteinte(err))) return ko(new Error(`limite d'utilisation de Claude atteinte : ${String(j.result || err).trim().slice(0, 200)}`));
+        if (j.is_error) return ko(new Error(`Claude : ${j.subtype || 'erreur'} ${String(j.result || err).slice(0, 200)}`));
+        ok({ etapes: j.num_turns || 0 });
+      });
+      p.stdin.end(demandeCorrection(q), 'utf8');
+    });
   }
 
   exe() {

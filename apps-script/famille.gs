@@ -282,7 +282,7 @@ function qLire_() {
 function qRepondre_(d) {
   var rep = String(d.reponse || '').trim().slice(0, 1000);
   if (!rep || !d.id) return { ok: false, erreur: 'réponse vide' };
-  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  var lock = LockService.getScriptLock(), trouve = null; lock.waitLock(10000);
   try {
     var sh = onglet_('Questions', Q_COLS), rows = lignes_(sh, 6);
     for (var i = 0; i < rows.length; i++) {
@@ -291,10 +291,14 @@ function qRepondre_(d) {
       sh.getRange(i + 2, 5).setNumberFormat('@');
       sh.getRange(i + 2, 5, 1, 2).setValues([[deja ? deja + ' / ' + rep : rep, new Date(+d.t || Date.now())]]);
       sh.getRange(i + 2, 6).setNumberFormat('dd/mm/yy hh"h"mm');
-      return { ok: true, question: String(rows[i][2]) };
+      trouve = String(rows[i][2]);
+      break;
     }
-    return { ok: false, erreur: 'question introuvable' };
   } finally { lock.releaseLock(); }
+  if (trouve === null) return { ok: false, erreur: 'question introuvable' };
+  // question posée par une correction (16/11/26) : sa réponse repart au PC, qui reprend la correction (verrou relâché d'abord)
+  if (typeof correctionReponse_ === 'function') { try { correctionReponse_(String(d.id), trouve, rep); } catch (e) {} }
+  return { ok: true, question: trouve };
 }
 
 function echappe_(x) { return String(x).replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }); }

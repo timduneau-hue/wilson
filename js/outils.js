@@ -467,7 +467,7 @@ RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus te
   }
 
   // ---------- F7 : remarques pour la prochaine mise à jour (lues chaque nuit par Claude dans le journal) ----------
-  remarque({ texte = '' }) {
+  async remarque({ texte = '' }) {
     const t = String(texte).trim(); if (!t) return 'Quelle remarque ?';
     // Journal du 05/11/26 : la même remarque notée deux fois (09h37:45 et 09h37:46, outil annulé par Google puis rappelé ;
     // 09h44:02 puis 09h45:16) → une remarque identique dans les 10 min n'est pas notée de nouveau.
@@ -478,7 +478,12 @@ RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus te
     // Remarque du 04/11/26, 11h51 : « noter mes remarques en arrière-plan, sans rester bloqué ni arrêter de m'écouter ».
     // 05/11/26, 09h46:11 : Gemini 3.1 a lu à voix haute le résultat « {result: Remarque notée. Dis « C'est noté. » (trois
     // mots)… » → le résultat est maintenant la phrase à dire elle-même ; la consigne est dans la description de l'outil.
-    // 16/11/26 : chaque remarque lance la correction (tâche « Wilson — correction des remarques », toutes les heures de 7h00 à 22h00).
+    // 16/11/26 : chaque remarque part tout de suite au PC de la maison, où Claude corrige le code (Wilson ou CRM), teste et
+    // publie ; Timothée reçoit un e-mail. Sans PC ni script : la tâche horaire du cloud la reprendra depuis le journal.
+    let r = null;
+    try { r = this.app.lancerCorrection ? await Promise.race([this.app.lancerCorrection(t), new Promise((ok) => setTimeout(() => ok(null), 8000))]) : null; } catch (_) {}
+    if (r && r.accepte && r.pcLa) return "C'est noté, je lance la correction tout de suite : compte une demi-heure environ.";
+    if (r && r.accepte) return "C'est noté. L'ordinateur de la maison ne répond pas : la correction partira dès qu'il sera rallumé.";
     return "C'est noté, je lance la correction : compte une heure environ.";
   }
 
