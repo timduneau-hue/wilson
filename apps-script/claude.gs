@@ -131,7 +131,9 @@ function claudeRendre_(d) {
 
 // ---------- Corrections (décision de Timothée du 16/11/26) ----------
 // Fin d'une correction : sa question éventuelle va dans l'onglet « Questions » (Wilson la lui posera), et un petit compte
-// rendu part par e-mail (la « notification » demandée), avec les liens des demandes de modification.
+// rendu va dans le journal (ligne « CORRECTION DU PC : … », avec les liens des demandes de modification) : la tâche horaire
+// de Claude la lui envoie en notification sur son téléphone. Plus d'e-mail (décision de Timothée du 16/11/26, 22h00 :
+// « j'ai déjà les notifications de Claude sur mon tel, ça me suffit »).
 function correctionFinie_(q, d) {
   var question = String(d.question || '').trim().slice(0, 400);
   if (question) {
@@ -139,12 +141,15 @@ function correctionFinie_(q, d) {
     sh.appendRow([qid, new Date(), question, ('Correction de sa remarque : « ' + q.question + ' »').slice(0, 500), '', '']);
     PropertiesService.getScriptProperties().setProperty('corr_' + qid, JSON.stringify({ remarque: q.question, contexte: String(q.contexte || '').slice(0, 8000), appareil: q.appareil || '' }));
   }
-  var moi = Session.getEffectiveUser().getEmail(); if (!moi) return;
   var ok = q.etat === 'faite';
-  var sujet = 'Wilson — ' + (question ? 'une question avant de corriger' : ok ? 'correction faite' : 'correction impossible') + ' : ' + String(q.question).slice(0, 70);
-  var corps = (ok ? (q.dire || '') : 'La correction n\'a pas pu se faire : ' + (q.erreur || 'erreur inconnue')) + (question ? '\n\nWilson va te poser cette question : ' + question : '')
-    + (q.detail ? '\n\n' + q.detail : '') + '\n\nTa remarque : « ' + q.question + ' »';
-  MailApp.sendEmail({ to: moi, subject: sujet, body: corps });
+  var liens = (String(q.dire || '') + ' ' + String(q.detail || '')).match(/https:\/\/github\.com\/[^\s)»"']+\/pull\/\d+/g) || [];
+  var texte = 'CORRECTION DU PC : ' + (question ? 'question avant de corriger : ' + question : ok ? 'faite' : 'impossible : ' + (q.erreur || 'erreur inconnue'))
+    + (ok && q.dire ? ' — ' + String(q.dire).replace(/\s+/g, ' ').slice(0, 600) : '')
+    + (liens.length ? ' — demandes : ' + liens.filter(function (l, i) { return liens.indexOf(l) === i; }).join(' ') : '')
+    + ' — sa remarque : « ' + String(q.question).replace(/\s+/g, ' ').slice(0, 300) + ' »';
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try { ajoute_(onglet_('Journal', ['Date', 'Version', 'Message']), [[new Date(), 'PC · atelier', texte.slice(0, 3000)]], 2); }
+  finally { lock.releaseLock(); }
 }
 // Sa réponse à une question posée par une correction : la correction repart au PC, avec la question et sa réponse.
 function correctionReponse_(qid, question, reponse) {

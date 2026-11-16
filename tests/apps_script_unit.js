@@ -454,15 +454,17 @@ const nMails = mails.length, nQ = (sheets['Questions'] ? sheets['Questions'].dat
 r = C({ action: 'claude_rendre', secret: SECRET, id: 'corr1', ok: true, dire: "J'ai besoin d'une précision avant de corriger.", question: 'Tu parles du téléphone ou de la tablette ?' });
 const Q = sheets['Questions'].data, der = Q[Q.length - 1];
 check('Correction : sa question va dans l\'onglet « Questions » (Wilson la lui posera)', r.ok && Q.length === nQ + 1 && der[2] === 'Tu parles du téléphone ou de la tablette ?' && /Tu coupes la fin/.test(der[3]) && !!props['corr_' + der[0]], JSON.stringify(der));
-check('Correction : compte rendu par e-mail', mails.length === nMails + 1 && /question avant de corriger/.test(mails[mails.length - 1].subject), JSON.stringify(mails[mails.length - 1] || {}).slice(0, 200));
+const JC = sheets['Journal'].data[1] || [];
+check('Correction : compte rendu dans le journal (« CORRECTION DU PC »), plus d\'e-mail (16/11/26, 22h00)', mails.length === nMails && /^CORRECTION DU PC : question avant de corriger : Tu parles du téléphone/.test(JC[2]) && JC[1] === 'PC · atelier' && JC[0] instanceof Date && /Tu coupes la fin/.test(JC[2]), JSON.stringify(JC).slice(0, 300));
 const HC = sheets['Claude'].data;
 check('Correction : notée « Correction » dans l\'onglet Claude', HC[1] && /^Correction/.test(HC[1][2]));
 r = C({ action: 'q_repondre', id: der[0], reponse: 'Du téléphone, en voiture' });
 const f = JSON.parse(cache.claude_file || '[]'), nouvelle = f.length ? JSON.parse(cache['claude_q_' + f[f.length - 1]] || '{}') : {};
 check('Sa réponse repart au PC : nouvelle correction avec la question et sa réponse', r.ok && nouvelle.type === 'correction' && /Tu coupes la fin/.test(nouvelle.question) && /Sa réponse : Du téléphone, en voiture/.test(nouvelle.question) && !props['corr_' + der[0]], JSON.stringify(nouvelle).slice(0, 300));
 r = C({ action: 'claude_prendre', secret: SECRET, attente: 5, version: 'relais 10' });
-C({ action: 'claude_rendre', secret: SECRET, id: r.question.id, ok: true, dire: 'Corrigé : tu finis tes phrases.', detail: 'https://github.com/…/pull/9' });
-check('Correction faite : e-mail « correction faite » avec le lien', /correction faite/.test(mails[mails.length - 1].subject) && /pull\/9/.test(mails[mails.length - 1].body));
+C({ action: 'claude_rendre', secret: SECRET, id: r.question.id, ok: true, dire: 'Corrigé : tu finis tes phrases.', detail: 'Demande : https://github.com/timduneau-hue/wilson/pull/9 (publiée seule)' });
+const JF = sheets['Journal'].data[1] || [];
+check('Correction faite : ligne « CORRECTION DU PC : faite » avec le lien de la demande, sans e-mail', mails.length === nMails && /^CORRECTION DU PC : faite — Corrigé : tu finis tes phrases\. — demandes : https:\/\/github\.com\/timduneau-hue\/wilson\/pull\/9 — sa remarque/.test(JF[2]), JSON.stringify(JF).slice(0, 300));
 }
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);
