@@ -61,7 +61,7 @@ if (-not $secret) {
   $b = New-Object byte[] 30; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
   $secret = ([Convert]::ToBase64String($b) -replace '[+/=]', '')
 }
-Ecrire $cfgChemin (@{ script = $script; secret = $secret; claude = $claude; modele = 'sonnet' } | ConvertTo-Json)
+Ecrire $cfgChemin (@{ script = $script; secret = $secret; claude = $claude; modele = 'claude-opus-5-5' } | ConvertTo-Json)
 Ecrire (Join-Path $dir 'mcp.json') (@{ mcpServers = @{ crm = @{ type = 'stdio'; command = $nodeExe; args = @((Join-Path $dir 'crm-mcp.mjs')) } } } | ConvertTo-Json -Depth 6)
 Ecrire (Join-Path $dir 'boucle.cmd') "@echo off`r`ncd /d `"%~dp0`"`r`n:debut`r`n`"$nodeExe`" relais.mjs >> relais-sortie.log 2>&1`r`nif errorlevel 3 exit /b`r`ntimeout /t 15 /nobreak >nul`r`ngoto debut`r`n"
 Ecrire (Join-Path $dir 'demarrer.vbs') "Set s = CreateObject(`"WScript.Shell`")`r`ns.Run `"cmd /c `"`"$dir\boucle.cmd`"`"`", 0, False`r`n"
