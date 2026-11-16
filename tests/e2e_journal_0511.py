@@ -167,7 +167,7 @@ async def main():
               J[0] == "tu m'entends?" and J[1] == "Tu m'entends?" and J[2] == 'allume la lumière jaune.' and J[3]['appel'] and J[3]['demande'] == 'qui je vois demain?' and not J[3]['doute'], str(J))
 
         # ---------- 2. Après un outil ----------
-        await page.route(GL, lambda r: asyncio.ensure_future(r.fulfill(status=200, content_type='application/json', body=gemini_json({'texte': 'Wilson, note une remarque', 'nom_sur': True, 'tele': False}))))
+        await page.route(GL, lambda r: asyncio.ensure_future(r.fulfill(status=200, content_type='application/json', body=gemini_json({'texte': 'Wilson, note une remarque : pendant une recherche, sois plus bref', 'nom_sur': True, 'tele': False}))))
         await page.evaluate("wilson.eco.sent = []; wilson._onName({ score: 80.0, limite: 167.3, duree: 0.7 })")
         await page.wait_for_function("wilson.state === 'conversation' && wilson.brain.open", timeout=9000)
         await page.unroute(GL)

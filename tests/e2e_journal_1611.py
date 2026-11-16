@@ -7,6 +7,8 @@
     la question jamais, que le texte arrive avant, pendant ou après le son.
  3. Téléphone sans Home Assistant (09h58:43 « je ne contrôle pas les équipements ») : la consigne dit que c'est la tablette.
  4. « Recherche une idée business » noté comme une idée (10h01:46) : la description d'idees le distingue.
+ 7. (1.45.1) Remarque inventée (tablette, 19h23:24) : sur « j'ai une nouvelle remarque », Gemini a noté « visage trop
+    statique » (« j'ai jamais dit ça », 19h23:47). → une remarque sans aucun mot de ce qu'il a dit est refusée.
 """
 import asyncio, re, json, base64, os
 import numpy as np
@@ -157,6 +159,23 @@ async def main():
         check('Remarque : envoyée tout de suite au PC (type correction), avec le journal des 15 dernières minutes', d.get('type') == 'correction' and 'devis à relancer' in d.get('question', '') and 'Journal de l\'appareil, 15 dernières minutes' in d.get('contexte', '') and 'allume la lumière' in d.get('contexte', ''), str(d)[:300])
         check('… Wilson dit « je lance la correction tout de suite : compte une demi-heure »', 'tout de suite' in r['b'] and 'demi-heure' in r['b'], r['b'])
         check('… PC éteint : « la correction partira dès qu\'il sera rallumé »', 'rallumé' in r['c'], r['c'])
+
+        # ---------- 7. Remarque inventée (tablette, 19h23:24 : « j'ai une nouvelle remarque » → « visage trop statique ») ----------
+        await page.evaluate("""() => { const W = wilson; W._heard.length = 0;
+          W._noteHeard('Petite remarque Wilson.', true); W._noteHeard("Oui, c'est ça. Non mais j'ai une nouvelle remarque.", true);
+          W._permettre(95000, 'test'); W._tools([{ id: 'rem1', name: 'remarque', args: { texte: 'visage de Wilson trop statique, manque de vie dans les expressions.' } }]); }""")
+        await attendre(lambda: 'rem1' in conn['resp'])
+        r1 = conn['resp'].get('rem1', '')
+        jr = await page.evaluate("JSON.parse(localStorage.getItem('wilson.remarques') || '[]').map((x) => x.texte)")
+        check('Remarque que Timothée n\'a pas dite : refusée, Wilson lui demande « c\'est quoi ta remarque ? »', "c'est quoi ta remarque" in r1 and 'Ne note rien' in r1, r1)
+        check('… rien n\'est noté (pas de « REMARQUE DE TIMOTHÉE », pas de correction lancée)', not any('statique' in x for x in jr) and not any('REMARQUE DE TIMOTHÉE : visage' in l for l in logs), str(jr)[-200:])
+        await page.evaluate("""() => { const W = wilson; W._noteHeard("Tu me coupes la parole à chaque fois que je parle, c'est pénible.", true);
+          W._permettre(95000, 'test'); W._tools([{ id: 'rem2', name: 'remarque', args: { texte: 'Timothée se plaint que je lui coupe la parole quand il parle.' } }]); }""")
+        await attendre(lambda: 'rem2' in conn['resp'], 12)
+        r2 = conn['resp'].get('rem2', '')
+        check('… sa vraie remarque, mise au propre avec ses mots, est notée', "C'est noté" in r2, r2)
+        v = await page.evaluate("import('./js/voiture.js').then((V) => [V.remarqueInventee('Le visage manque de vie', 'ton visage est un peu figé'), V.remarqueInventee('Phrases coupées', 'ça coupe'), V.remarqueInventee('Le devis à relancer de la synthèse est faux', '')])")
+        check('… mots proches acceptés (visage, coupe), remarque trop courte ou rien entendu : pas refusée', v == [False, False, False], str(v))
 
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await b.close()
