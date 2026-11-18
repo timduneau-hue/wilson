@@ -22,7 +22,7 @@ import { ClaudePC, CLAUDE_TOOL, MAIL_TOOL, phraseIndispo } from './claude.js';
 import { Qui } from './qui.js';
 import { Famille, FAMILLE_TOOLS, FAMILLE_TOOL_NAMES } from './famille.js';
 import { Reactions } from './reactions.js';
-import { Memoire } from './memoire.js';
+import { Memoire, demandeEnCours } from './memoire.js';
 import { brancherStockage, bilanStockage } from './stockage.js';
 import { Questions, QUESTION_TOOL, PROPRIO as PROPRIO_NOM } from './questions.js';
 import * as VP from './voiture.js';
@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.9';
+const VERSION = '1.45.10';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -1137,7 +1137,8 @@ class App {
   _applyEco(out, emoShown) {
     if (!emoShown && out.emotion) { if (out.emotion !== 'neutre') this.face.setEmotion(out.emotion, 6500, 0.9); else this.face.clearEmotion(); }
     for (const f of out.memoriser) { if (this.memoire.ajouter(f, { qui: this.famille._parle(), origine: 'demandé' })) this.log('Retenu (demandé) : ' + f, true); }
-    if (out.oublier) { const g = this.memoire.oublier(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}${g.length ? ' (' + g.join(' ; ') + ')' : ''}`, true); }
+    if (out.oublier && demandeEnCours(out.oublier)) this.log(`Oublier « ${out.oublier} » : c'est sa demande en cours qu'il laisse tomber, aucun souvenir effacé`, true);
+    else if (out.oublier) { const g = this.memoire.oublier(out.oublier); this.log(`Oublier « ${out.oublier} » : ${g.length}${g.length ? ' (' + g.join(' ; ') + ')' : ''}`, true); }
     const g = { oui: 'nod', non: 'shake', sautiller: 'bounce', pencher_la_tete: 'tilt' }[out.geste];
     if (g) this.face.play(g); if (out.geste === 'clin_oeil') this.face.doWink(1);
     if (out.memoriser.length && !g) this.face.play('nod');
@@ -1301,7 +1302,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     // Mode économique : la recherche Google se fait en deux temps (PLAN 6 bis), la consigne est dans le format JSON.
     const crm = this.crm.on, car = this.enVoiture, maison = this.maison.on;
     const tools = eco ? ecoFormat({ search: mode === 'eco-search', canSearch: this.remote.on || !this.eco.noSearch, crm, maison }) : `Ton visage : appelle exprimer_emotion dès que ton émotion change (joie, rire, surprise, tendresse, réflexion pendant que tu cherches…), avec un geste si ça s'y prête. N'en parle jamais.
-Ta mémoire : après chaque discussion, tu relis toi-même ce qui s'est dit et tu retiens ce qui est utile (prénoms, goûts, dates, habitudes) : inutile d'appeler memoriser pour ça. Appelle memoriser seulement quand on te demande clairement de retenir quelque chose (« retiens que… », « n'oublie pas que… »), avec une phrase courte et autonome, puis confirme en quelques mots. « Oublie que… » : appelle oublier.
+Ta mémoire : après chaque discussion, tu relis toi-même ce qui s'est dit et tu retiens ce qui est utile (prénoms, goûts, dates, habitudes) : inutile d'appeler memoriser pour ça. Appelle memoriser seulement quand on te demande clairement de retenir quelque chose (« retiens que… », « n'oublie pas que… »), avec une phrase courte et autonome, puis confirme en quelques mots. « Oublie que… » : appelle oublier. Mais « oublie ce que je viens de te dire », « oublie ça », « laisse tomber » juste après une demande : il renonce à cette demande, ce n'est pas un souvenir ; n'appelle pas oublier, ne fais rien de la demande et dis seulement « D'accord, j'oublie. »
 Tu parles toujours en français, et tu ne dis jamais à voix haute tes réflexions, ce que tu vas faire avec tes outils ou des remarques sur toi-même (journal du 30/10/26 : « I need to check why the TV… »).
 La fin : si on te dit clairement au revoir, bonne nuit ou « merci, c'est tout », réponds brièvement puis appelle terminer_conversation. Jamais sur un reproche ou une remarque : reste et écoute.
 Tes progrès : seul Timothée peut faire corriger ton programme (sa règle du 16/11/26) ; c'est l'outil remarque qui vérifie que c'est lui. Quand Timothée fait une remarque sur ta façon de fonctionner ou sur son CRM (« pour la prochaine mise à jour… », « remarque à prendre en compte », « c'est un bug », « à corriger », « tu devrais… », « j'aimerais que tu… », « ne fais plus ça », une fonction qui manque), appelle remarque avec sa remarque mise au propre (un bug de son CRM aussi), puis dis seulement le résultat de l'outil (« C'est noté, je lance la correction : compte une heure environ. » ; depuis le 16/11/26, Claude corrige et publie dans l'heure et Timothée reçoit une notification). S'il demande ce qu'il t'a fait noter ou demandé de changer : mes_remarques (pas idees). Ne dis jamais « c'est noté » sans avoir appelé remarque. Une remarque sur ton apparence ou une chose qu'il trouve bizarre (« je ne vois plus tes pupilles », « tes yeux sont tout blancs ») en est une aussi. N'invente jamais d'explication sur ton propre fonctionnement (« c'est une mise à jour de mon visage ») : si tu ne sais pas, dis-le et note la remarque. Ne prétends pas pouvoir te modifier toi-même sur-le-champ.
@@ -2308,7 +2309,13 @@ Nous sommes ${fmtDate()}.${nv}`;
             silent = false; break;
           }
           this.memoire.ajouter(a.fait, { cat: a.categorie, qui: a.qui || this.famille._parle(), origine: 'demandé' }); this.log('Retenu (demandé) : ' + a.fait, true); this.face.play('nod'); out = { result: 'mémorisé' }; break;
-        case 'oublier': { const g = this.memoire.oublier(a.sujet || ''); out = { result: g.length ? 'Oublié : ' + g.join(' ; ') : 'Aucun souvenir ne correspond.' }; silent = false; this.log('Oublier « ' + a.sujet + ' » : ' + g.length + (g.length ? ' (' + g.join(' ; ') + ')' : ''), true); break; }
+        case 'oublier': {
+          if (demandeEnCours(a.sujet)) {   // « oublie ce que je viens de te dire » : sa demande en cours, pas un souvenir (journal du 18/11/26, 21h56)
+            this.log(`Oublier « ${a.sujet} » : c'est sa demande en cours qu'il laisse tomber, aucun souvenir effacé`, true);
+            out = { result: "Ce n'est pas un souvenir à effacer : il laisse tomber ce qu'il venait de te demander. Ne fais rien de cette demande, ne la reprends pas, ne pose aucune question, et dis seulement « D'accord, j'oublie. »" };
+            silent = false; break;
+          }
+          const g = this.memoire.oublier(a.sujet || ''); out = { result: g.length ? 'Oublié : ' + g.join(' ; ') : 'Aucun souvenir ne correspond.' }; silent = false; this.log('Oublier « ' + a.sujet + ' » : ' + g.length + (g.length ? ' (' + g.join(' ; ') + ')' : ''), true); break; }
         case 'date_et_heure':
           if (this._protocole) { this._heureOutil(c); continue; }      // en voiture : seulement s'il l'a demandée (réponse envoyée quand sa phrase est transcrite)
           out = { result: fmtDate() }; silent = false; break;

@@ -120,7 +120,7 @@ export const TOOLS = [{
       description: "Seulement quand on te demande clairement de retenir quelque chose (« retiens que… », « n'oublie pas que… ») : le reste, tu le retiens toi-même en relisant la discussion. fait = une phrase courte et autonome, avec les prénoms ; categorie ; qui = le ou les prénoms concernés.",
       parameters: { type: 'OBJECT', properties: { fait: { type: 'STRING' }, categorie: { type: 'STRING', enum: ['consignes', 'famille', 'santé', 'dates', 'goûts', 'habitudes', 'maison', 'projets', 'travail', 'autre'] }, qui: { type: 'STRING' } }, required: ['fait'] } },
     { name: 'oublier', behavior: 'BLOCKING',
-      description: 'Efface les souvenirs qui correspondent à ce sujet, quand on te demande d\'oublier quelque chose.',
+      description: "Efface les souvenirs qui correspondent à ce sujet, quand on te demande d'oublier quelque chose que tu as retenu (« oublie que… »). Pas pour « oublie ce que je viens de te dire », « oublie ça » ou « laisse tomber » juste après une demande : il y renonce ; dis seulement « D'accord, j'oublie. »",
       parameters: { type: 'OBJECT', properties: { sujet: { type: 'STRING' } }, required: ['sujet'] } },
     { name: 'date_et_heure', behavior: 'BLOCKING',
       description: 'Donne la date et l\'heure exactes maintenant.' },

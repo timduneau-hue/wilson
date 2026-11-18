@@ -183,6 +183,19 @@ async def main():
         r = await outil(page, c, 'r2', 'oublier', {'sujet': 'les dinosaures'})
         items = await page.evaluate("wilson.memoire.items.map((x) => x.texte + '|' + x.origine)")
         check('« Retiens que… » : gardé tout de suite (origine « demandé ») ; « oublie… » : effacé', 'Camille prend son café sans sucre.|demandé' in items and not any('dinosaures' in x for x in items) and 'Oublié' in r, str(items) + r)
+        # Journal du 18/11/26, 21h56 : « tu peux m'envoyer un petit mail ? » puis « oublie ce que je viens de te dire » →
+        # oublier « ma demande d'e-mail précédente » cherchait dans la mémoire (deux mots communs suffisent à effacer un
+        # souvenir) et Wilson répondait « Bizarre, je ne trouve rien… Tu voulais parler de quoi ? ».
+        await outil(page, c, 'r3', 'memoriser', {'fait': 'Timothée préfère une demande par e-mail.', 'categorie': 'travail', 'qui': 'Timothée'})
+        await page.wait_for_timeout(200)
+        r = await outil(page, c, 'r4', 'oublier', {'sujet': "ma demande d'e-mail précédente"})
+        items = await page.evaluate("wilson.memoire.items.map((x) => x.texte)")
+        check('« Oublie ce que je viens de te dire » : sa demande abandonnée, aucun souvenir effacé, « D\'accord, j\'oublie. »', 'Timothée préfère une demande par e-mail.' in items and "D'accord, j'oublie." in r and 'Oublié' not in r and has('sa demande en cours qu\'il laisse tomber'), str(items) + r)
+        r = await outil(page, c, 'r5', 'oublier', {'sujet': 'ce que je viens de te dire'})
+        check('… pareil pour « ce que je viens de te dire »', "D'accord, j'oublie." in r, r)
+        fns = {f['name']: f for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', [])}
+        sysm = c['setup']['systemInstruction']['parts'][0]['text']
+        check('… et Gemini le sait : outil oublier et consigne (« laisse tomber » = il renonce)', 'laisse tomber' in fns['oublier']['description'] and 'il renonce à cette demande' in sysm, fns['oublier']['description'])
         await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
 
         # ---- Questions de Claude : à Timothée seulement ----

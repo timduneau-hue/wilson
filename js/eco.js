@@ -82,7 +82,7 @@ ${chercher}${search ? '' : ` "regarder": true SEULEMENT si on te demande de rega
  "reponse": "${reponse}",
  "geste": "${GESTES.join(', ')}",
  "memoriser": ["SEULEMENT si on te demande clairement de retenir quelque chose (« retiens que… ») : phrase courte et autonome avec les prénoms ; sinon liste vide (tu relis la discussion après coup)"],
- "oublier": "sujet des souvenirs à effacer si on te le demande, sinon vide",
+ "oublier": "sujet des souvenirs à effacer si on te le demande (« oublie que… »), sinon vide ; « oublie ce que je viens de dire », « laisse tomber » : vide, il renonce à sa demande, reponse = « D'accord, j'oublie. »",
  "fin": true si on te dit au revoir, bonne nuit ou « merci, c'est tout »,
  "entendu": "${search ? '' : 'transcription fidèle de ce qui a été dit (vide si rien d\'intelligible)'}"}
 Si tu ne dois rien dire : pour_moi false et reponse "" (vide). N'écris JAMAIS « silence », « … », ni de texte entre parenthèses, crochets ou astérisques : tout ce qui est dans "reponse" est lu à voix haute.

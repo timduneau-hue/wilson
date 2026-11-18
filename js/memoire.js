@@ -19,6 +19,18 @@ const ecrire = ecrireLocal;   // W18 : un échec est noté au journal (js/stocka
 export const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 const STOP = new Set('le la les de du des un une et a au aux en est son sa ses mon ma mes ton ta tes il elle on qui que je tu nous vous ils elles ce cette pour par sur dans avec pas plus tres'.split(' '));
 export const mots = (s) => norm(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w));
+// « Oublie ce que je viens de te dire », « oublie ça », « laisse tomber » : il laisse tomber sa demande en cours, ce n'est
+// pas un souvenir à effacer. Journal du 18/11/26, 21h56:20 : après « tu peux m'envoyer un petit mail ? », oublier
+// « ma demande d'e-mail précédente » a cherché dans la mémoire (rien trouvé, mais deux mots communs suffisent à effacer un
+// souvenir) et Wilson a répondu « Bizarre, je ne trouve rien par rapport à ça. Tu voulais parler de quoi exactement ? ».
+const DEMANDE_EN_COURS = [
+  /\bce que (?:je|j|tu|on) (?:viens?|vient|venais) (?:juste )?de (?:te |me |vous )?(?:dire|demander|raconter)\b/,
+  /\b(?:demande|question|phrase|message)s? (?:\S+ ){0,3}?(?:precedente|d avant|en cours|de tout a l heure)\b/,
+  /\b(?:derniere|precedente) (?:demande|question|phrase)\b/,
+  /\blaiss(?:e|er|ez|ons) tomber\b/,
+  /^(?:(?:ma|la|cette|sa) (?:demande|question|phrase)|ca|cela|ceci|tout ca|ce que (?:j|je t) ai dit|ce que tu as dit)$/,
+];
+export const demandeEnCours = (sujet) => { const n = norm(sujet); return !!n && DEMANDE_EN_COURS.some((r) => r.test(n)); };
 const propre = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 300);
 const nouvelId = () => 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const pad = (n) => String(n).padStart(2, '0');
