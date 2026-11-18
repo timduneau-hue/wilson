@@ -19,6 +19,15 @@ def send(conn, **sc):
     conn['ws'].send(json.dumps({'serverContent': sc}))
 
 
+def voix(conn, secondes):
+    # Voix simulée du direct (PCM 24 kHz) : Wilson « parle » vraiment, le son est joué.
+    import base64, math, array
+    a = array.array('h', (int(8000 * math.sin(2 * math.pi * 220 * i / 24000)) for i in range(int(24000 * secondes))))
+    b = a.tobytes()
+    for i in range(0, len(b), 9600):
+        send(conn, modelTurn={'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': base64.b64encode(b[i:i + 9600]).decode()}}]})
+
+
 async def main():
     conns = []
     st = {'calls': [], 'a_jour': True, 'passes': [], 'autres': 0, 'passe_out': {'ajouter': [], 'oublier': []},
@@ -230,10 +239,35 @@ async def main():
         check('Dans la même discussion, posée → consigne « attends sa réponse » (pas de 2e fois)', 'Tu as posé à Timothée cette question' in await page.evaluate("wilson._system('live')"))
         await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
         await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000); c = conns[-1]
-        check('Discussion suivante : pas reposée (moins de 3 h)', 'Une question de Claude' not in c['setup']['systemInstruction']['parts'][0]['text'])
+        check('Discussion suivante : pas reposée (moins d\'1 h)', 'Une question de Claude' not in c['setup']['systemInstruction']['parts'][0]['text'])
         await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
-        await page.evaluate("wilson.questions.posees.q3 = Date.now() - 4 * 3600000")
-        check('3 h plus tard : elle revient', 'Une question de Claude pour Timothée (Claude prépare tes mises à jour la nuit ; il a besoin de sa réponse pour la prochaine) : « Veux-tu que je baisse' in await page.evaluate("wilson._system('live')"))
+        await page.evaluate("wilson.questions.posees.q3 = Date.now() - 61 * 60000")
+        check('1 h plus tard : elle revient (demande du 18/11/26 : plus 3 h)', 'Une question de Claude pour Timothée (Claude prépare tes mises à jour toutes les heures ; il a besoin de sa réponse pour la prochaine) : « Veux-tu que je baisse' in await page.evaluate("wilson._system('live')"))
+
+        # Demande du 18/11/26 : coupée avant la fin → reposée à la discussion suivante (pas dans la même)
+        await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000); c = conns[-1]
+        voix(c, 4.0)
+        send(c, outputTranscription={'text': 'Au fait, Claude voudrait savoir : veux-tu que je baisse la voix le soir ?'}); send(c, turnComplete=True)
+        await page.wait_for_timeout(400)
+        e = await page.evaluate("({ posee: !!(wilson.questions.enCours && wilson.questions.enCours.posee), ecoute: !!(wilson.questions.enCours && wilson.questions.enCours.ecoute), joue: wilson.audio.playing })")
+        check('Question en train d\'être dite (son encore joué)', e['posee'] and e['ecoute'] and e['joue'], str(e))
+        await page.evaluate("wilson.interrupt('voix')"); await page.wait_for_timeout(200)
+        check('Coupée par sa voix avant la fin : notée au journal, pas comptée posée', has('Question de Claude [q3] coupée avant la fin (voix)') and await page.evaluate("Date.now() - wilson.questions.posees.q3 > 3600000 - 3 * 60000"))
+        sysm = await page.evaluate("wilson._system('live')")
+        check('… pas reposée dans la même discussion', 'Une question de Claude pour Timothée' not in sysm and 'Tu as posé à Timothée cette question' not in sysm)
+        await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
+        await page.evaluate("wilson.questions.posees.q3 -= 121000")
+        await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000); c = conns[-1]
+        check('… reposée à la discussion suivante (2 min après)', 'Une question de Claude pour Timothée' in c['setup']['systemInstruction']['parts'][0]['text'] and 'baisse la voix' in c['setup']['systemInstruction']['parts'][0]['text'])
+        # Dite jusqu'au bout, mais la discussion s'arrête juste après sans un mot de lui (il est parti) → reposée aussi
+        voix(c, 0.6)
+        send(c, outputTranscription={'text': 'Au fait, Claude voudrait savoir : veux-tu que je baisse la voix le soir ?'}); send(c, turnComplete=True)
+        await page.wait_for_timeout(1500)
+        check('Son fini : la question est entendue', await page.evaluate("!!(wilson.questions.enCours && wilson.questions.enCours.posee && !wilson.questions.enCours.ecoute)"))
+        await page.evaluate("wilson.endConversation('plus regardé')"); await page.wait_for_timeout(300)
+        check('Discussion finie juste après, sans un mot de lui : reposée à la suivante', has('Question de Claude [q3] restée sans réponse') and await page.evaluate("Date.now() - wilson.questions.posees.q3 > 3600000 - 3 * 60000"))
+        # Il a répondu « plus tard » (déjà vérifié plus haut) : pas reposée avant 1 h, mais pas oubliée
+        await page.evaluate("wilson.questions.posees.q3 = Date.now() - 61 * 60000")
         # Quota épuisé sur le 1er modèle : le suivant, et plus celui-là pendant 1 h
         st['quota'] = {'gemini-3.8-flash'}; st['modeles'] = []; st['passe_out'] = {'ajouter': [], 'oublier': []}
         await page.evaluate("wilson.memory.addExchange('Louis a son match de foot tous les samedis matin.', 'D\\'accord !', 'Timothée')")
