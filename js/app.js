@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.7';
+const VERSION = '1.45.8';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -1354,7 +1354,7 @@ ${inv || '(inventaire pas encore lu : appelle maison_etat)'}
 La famille : ${fam}${qst ? '\n' + qst : ''}
 - « Dis à X que… », « laisse un message à X » : outil messages (deposer : pour = son prénom, de = qui te parle, texte = le message tel quel, mis au propre). Tu le lui diras toi-même quand il ou elle te regardera. « J'ai des messages ? » : messages (lire). « X a eu mon message ? » : statut.
 - « Apprends mon visage, je suis X » : dis « Regarde-moi bien… » puis outil visages (apprendre) ; « oublie le visage de X » : oublier. Ne prétends jamais reconnaître quelqu'un si ce n'est pas écrit ici.
-- « On part, surveille la maison » : outil garde (activer) ; « on est rentrés » : garde (arreter).
+${this.famille.coupee ? '- La garde de la maison est coupée (Timothée l\'a arrêtée le 18/11/26) : « surveille la maison » → outil garde quand même, et dis simplement ce qu\'il répond ; ne promets jamais de surveiller la maison.' : '- « On part, surveille la maison » : outil garde (activer) ; « on est rentrés » : garde (arreter).'}
 - L'agenda Famille (Google Agenda partagé de Timothée et Camille) : « mets dans l'agenda le médecin de Louis jeudi à 10h », « on a quoi ce week-end ? » : outil agenda. Les rendez-vous clients de Timothée restent dans le CRM.
 `;
     const voiture = !car ? '' : `

@@ -64,7 +64,7 @@ async def main():
         check('Une fois sûr : plus d\'analyse toutes les 1,5 s (au plus une toutes les 20 s, V4)', n2 - n <= 1, f'{n} → {n2}')
         check('Bilan : reconnaissance décrite, sans empreinte', 'Timothée' in await page.evaluate("wilson.bilan()['Visages (sur cet appareil)']") and '0.0' not in await page.evaluate("wilson.bilan()['Visages (sur cet appareil)'].split('—')[0]"))
         # ---- Oreille de garde réelle (YAMNet) ----
-        await page.evaluate("wilson.famille.activer('demandee', 'test'); wilson.famille.garde.vide = Date.now()")
+        await page.evaluate("wilson.famille.coupee = false; wilson.famille.activer('demandee', 'test'); wilson.famille.garde.vide = Date.now()")
         await page.wait_for_function("wilson.famille.oreille.ready", timeout=120000)
         check('Garde : oreille de garde prête (MediaPipe Audio + YAMNet, sur l\'appareil)', True)
         await page.evaluate(BIPS)
