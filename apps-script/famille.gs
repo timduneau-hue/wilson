@@ -5,6 +5,10 @@
 //  - messages de la famille (msg_…) : déposés par un appareil (téléphone), remis par un autre (tablette du salon). Un message
 //    par propriété du script (une propriété ne peut pas dépasser 9 ko) ; effacés 14 jours après ;
 //  - prénoms des visages appris sur la tablette (prénoms seulement, jamais les empreintes), pour que le téléphone les connaisse ;
+//  - sauf le visage de Timothée (réponse de Timothée du 18/11/26, 14h38, question q261115a : « prends l'image mémorisée dans la
+//    tablette de la maison et enregistre-la pour celle du téléphone ») : ses empreintes codées, envoyées par la tablette avec
+//    msg_lire (visage_proprio), gardées dans la propriété « visage_proprio » (24 au plus, ≈ 5 ko) et rendues au téléphone qui
+//    en a une plus ancienne (visage_t). Jamais celles de la famille ;
 //  - garde de la maison (garde_ecrire) : demandée sur un appareil, appliquée par la tablette ;
 //  - alerte : e-mail à Timothée (son propre compte, celui qui a déployé le script), avec la photo de la pièce si elle est jointe,
 //    et en copie aux adresses de ALERTES_AUSSI. 20 alertes par jour au plus, une du même genre toutes les 10 minutes au plus ;
@@ -51,7 +55,19 @@ function msgLire_(d) {
   if (d.noms && d.noms.length) p.setProperty('famille_noms', JSON.stringify(d.noms.slice(0, 20).map(function (n) { return String(n).slice(0, 30); })));
   var noms = []; try { noms = JSON.parse(p.getProperty('famille_noms') || '[]'); } catch (e) {}
   var garde = null; try { garde = JSON.parse(p.getProperty('garde') || 'null'); } catch (e) {}
-  return { ok: true, messages: msgTous_().filter(function (m) { return !m.annule; }), noms: noms, garde: garde };
+  var r = { ok: true, messages: msgTous_().filter(function (m) { return !m.annule; }), noms: noms, garde: garde };
+  // Visage de Timothée : écrit seulement par la tablette ; liste vide = oublié sur la tablette (le téléphone efface sa copie).
+  var vp = d.visage_proprio;
+  if (vp && d.appareil === 'tablette' && +vp.t > 0 && Object.prototype.toString.call(vp.desc) === '[object Array]') {
+    var desc = vp.desc.slice(-24).map(function (c) { return String(c).slice(0, 220); }).filter(function (c) { return /^[0-9.e+-]+:[A-Za-z0-9+\/=]+$/.test(c); });
+    p.setProperty('visage_proprio', JSON.stringify({ t: +vp.t, desc: desc }));
+    r.visage_ok = true;
+  }
+  if (d.visage_t !== undefined && d.appareil !== 'tablette') {
+    var v = null; try { v = JSON.parse(p.getProperty('visage_proprio') || 'null'); } catch (e) {}
+    if (v && +v.t > (+d.visage_t || 0)) r.visage_proprio = v;
+  }
+  return r;
 }
 
 function msgDeposer_(m) {
