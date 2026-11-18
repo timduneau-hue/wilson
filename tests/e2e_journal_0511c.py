@@ -311,6 +311,40 @@ async def main():
         check('… mais muet après le résultat : relance (comme avant), précédée d\'une fin de phrase forcée en voiture', ok and len(c['ends']) > 0, str(c['texts'][n0:])[:200])
         await finir('test')
 
+        # ---------- 4 bis. Il explique quelque chose de long : fin de phrase forcée plus patiente (remarque du 18/11/26, 17h58:01) ----------
+        c = await toucher()
+        parle(c, 'Oui ?', sec=0.5)
+        await page.wait_for_timeout(1200)
+        e0 = len(c['ends'])
+        await page.evaluate("window.__bruit = setInterval(() => { wilson.audio.speaking = true; wilson.audio.lastVoicedAt = performance.now(); }, 50)")
+        t0 = time.monotonic()
+        send(c, inputTranscription={'text': "Non mais je viens de te dire qu'il y avait un point que je voudrais aborder, c'était de valider les clients."})
+        await page.wait_for_timeout(6500)
+        check('Explication longue (17h56:41) + micro qui entend une voix : pas de fin forcée au bout de 4,5 s (ni 6,5 s)', len(c['ends']) == e0, f"ends={c['ends'][e0:]}")
+        send(c, inputTranscription={'text': " Quand, quand je sors d'une visite, euh"})
+        await page.wait_for_timeout(7000)
+        check('… il continue : toujours pas de fin forcée 7 s après ses derniers mots', len(c['ends']) == e0, f"ends={c['ends'][e0:]}")
+        t1 = time.monotonic()
+        ok = await attendre(lambda: len(c['ends']) > e0, 4)
+        dt = (c['ends'][e0] - t1 + 7.0) if len(c['ends']) > e0 else None
+        check('… plus un mot : fin forcée quand même, vers 9 s', ok and dt is not None and 8.5 < dt < 10.8, f'dt={dt}')
+        check('… journal : « il expliquait quelque chose : attendu plus longtemps »', has('il expliquait quelque chose : attendu plus longtemps'))
+        await page.evaluate("clearInterval(window.__bruit); wilson.audio.speaking = false")
+        parle(c, "D'accord, je t'écoute.")
+        await page.wait_for_timeout(600)
+        # sans bruit : phrase pas finie (« … et puis, ») → 6 s au lieu de 3
+        e0 = len(c['ends'])
+        t0 = time.monotonic()
+        send(c, inputTranscription={'text': 'Je voulais te dire, pour la visite de demain, et puis,'})
+        await page.wait_for_timeout(4500)
+        check('Phrase pas finie, micro silencieux : pas de fin forcée au bout de 3 s (ni 4,5 s)', len(c['ends']) == e0, f"ends={c['ends'][e0:]}")
+        ok = await attendre(lambda: len(c['ends']) > e0, 4)
+        dt = (c['ends'][e0] - t0) if len(c['ends']) > e0 else None
+        check('… fin forcée vers 6 s', ok and dt is not None and 5.5 < dt < 7.8, f'dt={dt}')
+        parle(c, "D'accord.")
+        await page.wait_for_timeout(600)
+        await finir('test')
+
         # ---------- 5. L'analyste se souvient d'un modèle lent, même après un redémarrage ----------
         J = await page.evaluate("""(() => { const A = wilson.crm.analyste; A.lent['gemini-3.8-flash'] = Date.now() + 7200000; A.modelUsed = 'gemini-3.5-flash-lite'; A._saveLent();
           const B = new A.constructor({ ask: async () => ({}), log: () => {} });
