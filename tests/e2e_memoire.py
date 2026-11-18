@@ -318,6 +318,28 @@ async def main():
         check('Script à jour : envoyé, et le téléphone a la même mémoire que la tablette', any(m['texte'] == 'Timothée part au travail à 7h30.' for m in st['mem']) and 'Camille prend son café sans sucre.' in items2 and await page2.evaluate("wilson.memoire.att.ajouter.length") == 0, str(items2))
         await page2.evaluate("wilson.questions.synchroniser()"); await page2.wait_for_timeout(300)
         check('Sur son téléphone, c\'est Timothée : la question peut être posée', 'Une question de Claude pour Timothée' in await page2.evaluate("wilson._system('live')"))
+        # Journal du 18/11/26, 09h31-11h49 (téléphone, en voiture) : deux heures de discussions, la question attendait et Gemini
+        # ne la posait jamais. L'appli choisit le moment : sa demande réglée, 5 s de calme → elle la lui fait poser, une fois.
+        await page2.evaluate("Object.defineProperty(wilson, '_voitureBt', { get: () => true, configurable: true })")
+        await page2.evaluate("wilson.startConversation('toucher')"); await page2.wait_for_function('wilson.brain.open', timeout=8000); c2 = conns[-1]
+        dites = lambda: sum('Claude m\'a demandé de te poser une question' in t for t in c2['texts'])
+        send(c2, outputTranscription={'text': 'Oui ?'}); send(c2, turnComplete=True)
+        await page2.wait_for_timeout(6500)
+        check('Voiture : après « Oui ? », sans un mot de lui, la question n\'est pas glissée', dites() == 0)
+        send(c2, inputTranscription={'text': 'Salut Wilson, tu peux me dire ce qu\'on va faire ?'}); send(c2, outputTranscription={'text': 'Pour quel client ?'}); send(c2, turnComplete=True)
+        await page2.wait_for_timeout(6500)
+        check('… Wilson attend sa réponse (« Pour quel client ? ») : pas glissée', dites() == 0)
+        send(c2, inputTranscription={'text': 'Aucun, je disais ça comme ça.'}); send(c2, outputTranscription={'text': 'D\'accord.'}); send(c2, turnComplete=True)
+        await page2.wait_for_timeout(2500)
+        check('… sa demande réglée : pas avant 5 s de calme', dites() == 0)
+        await page2.wait_for_timeout(3500)
+        txt = [t for t in c2['texts'] if 'Claude m\'a demandé de te poser une question' in t]
+        check('… 5 s de calme : l\'appli lui fait poser la question, mot pour mot (journal)', dites() == 1 and 'baisse la voix le soir' in txt[0] and txt[0].startswith('[Dis-lui exactement') and has2('Question de Claude [q3] : sa demande est réglée'), str(txt))
+        send(c2, outputTranscription={'text': 'Au fait, Claude m\'a demandé de te poser une question pour ma prochaine mise à jour : veux-tu que je baisse la voix le soir ?'}); send(c2, turnComplete=True)
+        await page2.wait_for_timeout(6500)
+        check('… notée posée, et pas redemandée dans la même discussion', await page2.evaluate("!!(wilson.questions.enCours && wilson.questions.enCours.posee)") and dites() == 1 and has2('Question de Claude posée à Timothée [q3]'))
+        await page2.evaluate("wilson.endConversation('test')"); await page2.wait_for_timeout(300)
+        await page2.evaluate("delete wilson._voitureBt")
         await page.evaluate("wilson.memoire.synchroniser()"); await page.wait_for_timeout(400)
         check('… et la tablette reçoit ce que le téléphone a retenu', 'Timothée part au travail à 7h30.' in await page.evaluate("wilson.memoire.items.map((x) => x.texte)"))
         check('Pas d\'erreur JavaScript (téléphone)', not any('PAGEERROR' in l for l in logs2), str([l for l in logs2 if 'PAGEERROR' in l][:3]))

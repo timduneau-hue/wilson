@@ -24,6 +24,7 @@ const CACHE_KEY = 'wilson.crm.cache', QUEUE_KEY = 'wilson.crm.attente', PENDING_
 // Demande de Timothée du 16/11/26 (soir) : hors de la voiture, une fiche gardée de plus d'une heure est relue ; en voiture,
 // celles préparées pour la journée servent jusqu'à 6 h (réponse immédiate, routes sans réseau). Sans réseau : la fiche gardée.
 const FRAIS_MS = 3600000;
+const DOUBLON_MS = 10 * 60000;   // une préparation 10 min au plus après un enregistrement du même genre pour le même client : doublon possible
 const JOURNEE_MS = 10 * 60000, BILAN_MS = 15 * 60000;      // journée et bilan récents : réponse immédiate (et sans réseau)
 const LECTURES = { crm_requete: 60000, crm_schema: 30000, crm_client: 45000, crm_journee: 45000, crm_bilan: 45000, crm_produit: 45000, crm_etat: 30000, crm_trouver: 30000, crm_annuaire: 60000 };
 const hm = (t) => { const d = new Date(t); return `${d.getHours()}h${pad(d.getMinutes())}`; };
@@ -205,7 +206,7 @@ export const CRM_TOOLS = [
       client: { type: 'STRING', description: 'le client concerné : la société (vide pour une tâche personnelle)' },
       contact: { type: 'STRING', description: "la personne vue, appelée ou concernée, s'il la cite (« j'ai vu Julien », « avec le magasinier ») : son nom tel qu'il l'a dit" },
       texte: { type: 'STRING', description: 'ce qu\'il a dit, mis au propre sans rien ajouter (vide pour un simple rendez-vous)' },
-      date: { type: 'STRING', description: "tel qu'il l'a dit : « demain », « jeudi », « le 30 », « 30/10 »… (tâche : jour du rappel ; compte rendu : jour de l'échange, vide = aujourd'hui ; rdv : jour du rendez-vous)" },
+      date: { type: 'STRING', description: "tel qu'il l'a dit : « demain », « jeudi », « le 30 », « 30/10 »… (tâche : jour du rappel, quand il veut y penser ; le jour d'un rendez-vous ou d'un envoi dont parle la tâche va dans le texte, pas ici : s'il précise ce jour-là ensuite, garde le jour du rappel qu'il a donné ; compte rendu : jour de l'échange, vide = aujourd'hui ; rdv : jour du rendez-vous)" },
       heure: { type: 'STRING', description: 'rendez-vous : « 10h00 »' },
       echange: { type: 'STRING', enum: ['visite', 'appel'], description: 'compte rendu : visite ou appel' } },
       required: ['type'] } },
@@ -562,11 +563,15 @@ export class Crm {
       p.relu = type === 'note' ? `Note pour ${qui} : « ${texte} ».`
         : `Compte rendu ${p.echange === 'appel' ? 'd\'appel' : 'de visite'}${d ? ' du ' + jourDit(d) : ''}, ${qui} : « ${texte} ».`;
     }
+    // Journal du 18/11/26, 11h24 (voiture) : tâche enregistrée pour vendredi, puis « non, il faut que ça apparaisse
+    // aujourd'hui » → une 2e tâche préparée et enregistrée, et la 1re, fausse, restait dans Mes tâches sans qu'il le sache.
+    // Le CRM ne permet pas à Wilson d'effacer : la relecture le lui dit, pour qu'il la supprime lui-même.
+    const D = this.ecritRecent, ajout = D && Date.now() - D.at < DOUBLON_MS && D.type === type && (D.cle || '') === p.cle ? D : null;
     this.pending = p; this.dernierEnregistre = null;     // nouvelle préparation : « déjà enregistré » ne vaut plus
     this.log(`à confirmer : ${p.relu}`, true);
     if (this.app.showConfirm) this.app.showConfirm(p);
     return { ok: true, pending: p,
-      dire: `Rien n'est encore écrit. Relis-lui exactement : « ${p.relu} » puis demande « Je l'enregistre ? ». N'appelle crm_confirmer qu'après son « oui » ; s'il corrige, rappelle crm_noter.${habituel ? ` (Il n'a cité personne : c'est le contact habituel, ${nomDit(p.contact)}, parmi ${nbContacts} contacts. Dis bien son nom en relisant ; s'il en cite un autre, rappelle crm_noter avec contact = cette personne.)` : ''}` };
+      dire: `Rien n'est encore écrit. Relis-lui exactement : « ${p.relu} » puis demande « Je l'enregistre ? ». N'appelle crm_confirmer qu'après son « oui » ; s'il corrige, rappelle crm_noter.${ajout ? ` (ATTENTION : « ${ajout.relu} » est DÉJÀ enregistré, il y a ${Math.max(1, Math.round((Date.now() - ajout.at) / 60000))} min : celle-ci s'ajoutera en plus, je ne peux pas effacer l'autre. Si c'est une correction de la précédente (et pas une deuxième demande), après ta relecture, dis-lui en une phrase que la précédente reste aussi dans Mes tâches et qu'il pourra la supprimer dans le CRM, puis demande « Je l'enregistre ? ».)` : ''}${habituel ? ` (Il n'a cité personne : c'est le contact habituel, ${nomDit(p.contact)}, parmi ${nbContacts} contacts. Dis bien son nom en relisant ; s'il en cite un autre, rappelle crm_noter avec contact = cette personne.)` : ''}` };
   }
 
   // Verrou : y a-t-il un « oui » de Timothée APRÈS la préparation ? heard : [{ t, text, n }] (ce qu'il a dit, horodaté ;
@@ -612,6 +617,7 @@ export class Crm {
     this.log(`enregistré : ${p.relu}`, true);
     this._perimer(p.cle);                                 // sa fiche sera relue (demande de Timothée du 16/11/26)
     this.dernierEnregistre = { at: Date.now(), relu: p.relu };
+    this.ecritRecent = { at: Date.now(), relu: p.relu, type: p.type, cle: p.cle };   // pour prévenir d'un doublon (18/11/26)
     if (p.type === 'tache') this.journee = null;          // la journée gardée n'a pas cette tâche
     const jour = p.date ? jourDit(new Date(+p.date.slice(6), +p.date.slice(3, 5) - 1, +p.date.slice(0, 2))) : '';
     return p.type === 'tache'
