@@ -11,6 +11,7 @@ import { deviceName } from './remote.js';
 import { joliNom } from './qui.js';
 
 const KEY_M = 'wilson.messages', KEY_G = 'wilson.garde', KEY_N = 'wilson.famille.noms';
+const KEY_VE = 'wilson.visage.envoye', KEY_VR = 'wilson.visage.recu';   // V1 : copie du visage de Timothée (tablette → téléphone)
 const GARDER_MS = 14 * 24 * 3600000;
 const AUTO_MS = 45 * 60000;          // G1 : garde automatique, personne vu depuis 45 min (hors nuit)
 const VIDE_MS = 2 * 60000;           // garde demandée : la pièce doit être restée vide 2 min avant qu'un retour compte
@@ -36,7 +37,7 @@ export const FAMILLE_TOOLS = [
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['deposer', 'lire', 'statut', 'annuler'] }, pour: S, de: S, texte: S,
       aussi_pour_moi: { type: 'BOOLEAN' }, a_la_maison: { type: 'BOOLEAN' }, apres: S }, required: ['action'] } },
   { name: 'visages', behavior: 'BLOCKING',
-    description: "Les visages que tu reconnais : apprendre (« apprends mon visage, je suis Louis » : prenom ; la personne doit être seule devant toi et te regarder ; avant d'appeler, dis « Regarde-moi bien… »), oublier (prenom), liste, qui (qui te regarde en ce moment). Tout reste sur la tablette.",
+    description: "Les visages que tu reconnais : apprendre (« apprends mon visage, je suis Louis » : prenom ; la personne doit être seule devant toi et te regarder ; avant d'appeler, dis « Regarde-moi bien… »), oublier (prenom), liste, qui (qui te regarde en ce moment). Les visages restent sur la tablette ; seul celui de Timothée est copié sur son téléphone.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['apprendre', 'oublier', 'liste', 'qui'] }, prenom: S }, required: ['action'] } },
   { name: 'garde', behavior: 'BLOCKING',
     description: "Garde de la maison (« on part, surveille la maison », « on est rentrés », « la maison est sous garde ? ») : activer, arreter, etat. Pendant la garde tu écoutes les sons de la maison (fumée, verre brisé, alarme : e-mail à Timothée ; sonnette, on frappe : raconté au retour ; plus les aboiements de chien) et tu signales un visage inconnu.",
@@ -116,8 +117,19 @@ export class Famille {
     for (const m of this.msgs.filter((x) => x.local)) { const r = await this._script({ action: 'msg_deposer', msg: m }); if (r && r.ok) m.local = false; else break; }
     for (const m of this.msgs.filter((x) => x.remis && x.remisLocal && !x.local)) { const r = await this._script({ action: 'msg_remis', id: m.id, t: m.remis.t, a: m.remis.a }); if (r && r.ok) m.remisLocal = false; }
     for (const m of this.msgs.filter((x) => x.annule && x.annuleLocal && !x.local)) { const r = await this._script({ action: 'msg_annuler', id: m.id }); if (r && r.ok) m.annuleLocal = false; }
-    const r = await this._script({ action: 'msg_lire', noms: this.telephone || !this.qui ? undefined : this.qui.liste(), appareil: deviceName() });
+    // V1 (réponse de Timothée du 18/11/26, 14h38) : son visage appris sur la tablette est copié sur son téléphone, par le script.
+    // La tablette l'envoie quand il a changé (appris, réappris, oublié) ; le téléphone le reçoit s'il est plus récent que le sien.
+    // Jamais les visages de la famille. Script pas encore à jour : il ignore tout ça (pas de « visage_ok »), on réessaiera.
+    const Q = this.qui, tablette = deviceName() === 'tablette', vp = lire(KEY_VE, { t: 0, n: 0 });
+    const ex = tablette && Q ? Q.exporter(PROPRIO) : null;
+    const envoi = tablette && Q ? (ex ? (ex.t !== vp.t || !vp.n ? ex : null) : vp.n ? { t: Date.now(), desc: [] } : null) : null;
+    const r = await this._script({ action: 'msg_lire', noms: this.telephone || !Q ? undefined : Q.liste(), appareil: deviceName(),
+      ...(envoi ? { visage_proprio: envoi } : {}), ...(this.telephone && Q ? { visage_t: lire(KEY_VR, 0) } : {}) });
     if (!r || !r.ok) { this._sauver(); return false; }
+    if (envoi && r.visage_ok) { ecrire(KEY_VE, { t: envoi.t, n: envoi.desc.length }); this.log(envoi.desc.length ? `Visages : visage de ${PROPRIO} envoyé à son téléphone (${envoi.desc.length} empreintes)` : `Visages : ${PROPRIO} oublié, copie du téléphone effacée`); }
+    if (this.telephone && Q && r.visage_proprio && (+r.visage_proprio.t || 0) > lire(KEY_VR, 0)) {
+      Q.copier(PROPRIO, r.visage_proprio); ecrire(KEY_VR, +r.visage_proprio.t);
+    }
     const locaux = this.msgs.filter((m) => m.local || m.remisLocal || m.annuleLocal);
     const vus = new Set((r.messages || []).map((m) => m.id));
     this.msgs = (r.messages || []).map((m) => { const L = locaux.find((x) => x.id === m.id); return L ? { ...m, ...(L.remis && !m.remis ? { remis: L.remis, remisLocal: true } : {}), ...(L.annule ? { annule: L.annule, annuleLocal: true } : {}) } : m; })
@@ -349,16 +361,16 @@ export class Famille {
       const p = Q.trouver(prenom);
       if (!p) return `Je ne connais pas de visage nommé « ${prenom} ».`;
       Q.oublier(p.nom); this.synchroniser().catch(() => {});
-      return `Visage de ${p.nom} oublié (effacé de la tablette). Confirme en une phrase.`;
+      return `Visage de ${p.nom} oublié (effacé de ${this.telephone ? 'ce téléphone' : 'la tablette'}). Confirme en une phrase.`;
     }
     if (action === 'apprendre') {
-      if (this.telephone) return 'Les visages s\'apprennent sur la tablette du salon (la caméra du téléphone ne sert pas à ça). Dis-le simplement.';
+      if (this.telephone) return `Les visages s'apprennent sur la tablette du salon${norm(prenom) === norm(PROPRIO) ? ' : celui de Timothée appris là-bas arrive tout seul sur son téléphone' : ''}. Dis-le simplement.`;
       if (!this.app.vision) return 'La caméra est coupée : je ne peux pas apprendre un visage.';
       const nom = joliNom(prenom); if (!nom) return 'Quel prénom ? Demande-lui.';
       const r = await Q.apprendre(nom, { onPas });
       if (!r.ok) return `Apprentissage raté : ${r.raison} Dis-le-lui simplement et propose de recommencer.`;
       this.synchroniser().catch(() => {});
-      return `Visage de ${r.nom} appris (${r.n} empreintes, gardées sur la tablette seulement)${r.encore ? ', en plus de ce que je connaissais déjà' : ''}. Dis-lui en une phrase que tu le reconnaîtras maintenant.`;
+      return `Visage de ${r.nom} appris (${r.n} empreintes, gardées sur la tablette${norm(r.nom) === norm(PROPRIO) ? ' et copiées sur son téléphone' : ' seulement'})${r.encore ? ', en plus de ce que je connaissais déjà' : ''}. Dis-lui en une phrase que tu le reconnaîtras maintenant.`;
     }
     return 'Action inconnue.';
   }
