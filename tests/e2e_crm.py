@@ -145,6 +145,10 @@ async def main():
         check('… la carte de confirmation disparaît', await page.evaluate("document.getElementById('cards').hidden"))
         r = await tool('crm_confirmer', {}, 'c12')
         check('Rien en attente : une 2e confirmation n\'écrit rien (et ne fait rien redire : « déjà enregistré », 04/11/26)', r and 'DÉJÀ ENREGISTRÉ' in r and len(sc['writes']) == 1, str(r)[:80])
+        # Journal du 18/11/26, 11h24 : tâche enregistrée pour vendredi, puis corrigée → une 2e s'ajoutait, la 1re restait sans qu'il le sache
+        r = await tool('crm_noter', {'type': 'tache', 'client': 'Gaudin', 'texte': 'Rappeler pour le devis volets', 'date': 'demain'}, 'c12b')
+        check('Tâche refaite juste après pour le même client : prévenu que la précédente est déjà enregistrée et reste (à supprimer dans le CRM)', r and 'DÉJÀ enregistré' in r and 'pourra la supprimer dans le CRM' in r and len(sc['writes']) == 1, str(r)[:400])
+        await page.evaluate("wilson.crm.pending = null; wilson.hideCard('confirm')")
 
         # Compte rendu → brouillon ; RDV sans heure → il demande l'heure
         fin_tour(); await asyncio.sleep(0.1)
@@ -153,7 +157,7 @@ async def main():
         r = await tool('crm_noter', {'type': 'tache', 'client': 'Gaudin', 'texte': 'Rappeler Gaudin'}, 'c13b')
         check('Tâche sans jour : il demande pour quand (journal du 25/10 : rappel mis au jour même)', r and 'Il manque le jour du rappel' in r and await page.evaluate("document.getElementById('cards').hidden"), str(r))
         r = await tool('crm_noter', {'type': 'compte_rendu', 'client': 'Gaudin', 'texte': 'Il veut 40 fenêtres, devis Hoppe à faire', 'echange': 'visite'}, 'c14')
-        check('Compte rendu : relecture « Compte rendu de visite, Menuiserie Gaudin »', r and 'Compte rendu de visite, Menuiserie Gaudin (Jean Gaudin)' in r, str(r))
+        check('Compte rendu : relecture « Compte rendu de visite, Menuiserie Gaudin »', r and 'Compte rendu de visite, Menuiserie Gaudin (Jean Gaudin)' in r and 'DÉJÀ enregistré' not in r, str(r))
         fin_tour(); await asyncio.sleep(0.1)
         heard("Oui c'est bon."); await asyncio.sleep(0.2)
         r = await tool('crm_confirmer', {}, 'c15')
