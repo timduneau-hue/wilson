@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.3';
+const VERSION = '1.45.4';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -1139,6 +1139,7 @@ class App {
     // Coupé par la famille : garde courte (la personne continue de parler) ; sinon garde complète contre l'écho.
     this.playEndAt = this._cutAt ? this._cutAt - (ECO_TAIL_MS - 300) : performance.now();
     this.lastActivity = performance.now(); this.face.setTalk(0);
+    if (!this._cutAt && this.questions) this.questions.finiDeParler();   // question de Claude dite jusqu'au bout (18/11/26)
   }
 
   async _say(text) {
@@ -1199,6 +1200,8 @@ class App {
     const depuis = (t) => (t ? `${Math.round((performance.now() - t) / 1000)} s` : '—');
     { // 7 septies : la passe de mémoire relit la discussion 15 s après (en arrière-plan) ; les questions de Claude posées sont notées tout de suite
       const t0 = this._convDebut || 0, t1 = Date.now(), qs = this.questions.poseesSansReponse(this.convId); this._convDebut = 0;
+      // 18/11/26 : question de Claude pas finie, ou dite à l'instant sans un mot de Timothée après → reposée à la discussion suivante.
+      this.questions.finDiscussion({ joue: !!(this.audio.playing || this.voice.speaking), entenduIlYa: this._heardAt ? performance.now() - this._heardAt : Infinity });
       if (t0 && why !== 'essai de voix') setTimeout(() => this._passeMemoire(t0, t1, qs), 15000);
     }
     this.log(`Fin de conversation (${why}) — dernière parole de Wilson il y a ${depuis(this.playEndAt)}, de Timothée il y a ${depuis(this._heardAt)}${this._voitureBt ? ', en voiture' : ''}`); this._byName = false; this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false; this._searchMs = 0; this._vv = null; this._vvHerite = null;
@@ -1426,6 +1429,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     });
     this.audio.on('drained', () => {
       this.playEndAt = performance.now(); this.lastActivity = this.playEndAt; this.face.setTalk(0);
+      if (this.questions) this.questions.finiDeParler();      // question de Claude dite jusqu'au bout (18/11/26)
       if (this.endAfterSpeech) { this.endAfterSpeech = false; const id = this.convId; setTimeout(() => id === this.convId && this.endConversation('au revoir'), 700); }
     });
   }
@@ -1442,6 +1446,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     const live = this.audio.playing, tts = this.voice.speaking;
     if (!live && !tts) return;
     this.log(`Coupé (${why})`);
+    this.questions.coupe(why);                           // question de Claude pas finie : reposée plus tard (18/11/26)
     this.playEndAt = -1e9; this.face.setTalk(0);
     this.face.setEmotion('ecoute', 2500); this.face.play('startle');
     if (live) {
@@ -1544,6 +1549,7 @@ Nous sommes ${fmtDate()}.${nv}`;
         return;
       }
       if (this._liveTurn && this._liveTurn.sec > 0.3 && !ours) this.log(`Coupé par Google après ${this._liveTurn.sec.toFixed(1)} s de réponse (il a cru entendre parler)`);
+      if (!ours) this.questions.coupe('Google');         // question de Claude pas finie : reposée plus tard (18/11/26)
       this.audio.flush(); this.face.setTalk(0); this._liveTurn = null;
     });
     b.on('turn', ({ user, wilson }) => {
