@@ -156,6 +156,32 @@ async def main():
 
         # ---- G : la garde ----
         await page.evaluate("wilson.famille.oreille.start = function () { this.worker = {}; }; wilson.famille.oreille.stop = function () { this.worker = null; }")
+        # Garde COUPÉE (réponse de Timothée du 18/11/26, 16h27 : « simplement la garde de la maison, l'envoi des alertes ») :
+        # ni demandée, ni automatique, ni venue d'un autre appareil, aucune alerte ; le code reste en sommeil (vérifié ensuite).
+        import time
+        gdesc = [f.get('description', '') for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', []) if f['name'] == 'garde']
+        check('Garde coupée par défaut, dite à Gemini (outil et consigne)', await page.evaluate("wilson.famille.coupee === true") and gdesc and 'COUPÉE' in gdesc[0] and 'La garde de la maison est coupée' in sysp and 'surveille la maison » : outil garde (activer)' not in sysp, str(gdesc))
+        await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000); cg = conns[-1]
+        ng = len([x for x in st['calls'] if x['action'] == 'garde_ecrire'])
+        r = await outil(page, cg, 'g0', 'garde', {'action': 'activer'})
+        check('Garde coupée : « surveille la maison » → rien d\'activé, il le dit, rien d\'envoyé au script', 'RIEN N\'EST ACTIVÉ' in r and 'coupée' in r and await page.evaluate("!wilson.famille.garde.on") and st['garde'] is None and len([x for x in st['calls'] if x['action'] == 'garde_ecrire']) == ng, r)
+        r = await outil(page, cg, 'g00', 'garde', {'action': 'etat'})
+        check('… état : coupée', 'coupée' in r, r)
+        await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
+        await page.evaluate("__regarde(false); wilson.vision.hasPerson = false; wilson.vision.faces = 0; wilson.presenceAt = performance.now() - 46 * 60000")
+        await page.wait_for_timeout(1500)
+        check('… personne vu depuis 45 min : pas de garde automatique', await page.evaluate("!wilson.famille.garde.on") and not has('Garde activée'))
+        st['garde'] = {'on': True, 'mode': 'demandee', 't': int(time.time() * 1000) + 1000, 'par': 'téléphone'}
+        await page.evaluate("wilson.famille.synchroniser()"); await page.wait_for_timeout(500)
+        check('… garde demandée par un autre appareil (ancienne version) : ignorée', await page.evaluate("!wilson.famille.garde.on") and has('ignorée, la garde est coupée'))
+        st['garde'] = None
+        await page.evaluate("wilson.famille._alerter({ genre: 'fumee', score: 0.5, t: Date.now() })"); await page.wait_for_timeout(500)
+        check('… aucune alerte envoyée', not st['alertes'])
+        await page.evaluate("localStorage.setItem('wilson.garde', JSON.stringify({ on: true, mode: 'demandee', t: Date.now(), depuis: Date.now(), evenements: [] })); wilson.famille.garde = JSON.parse(localStorage.getItem('wilson.garde'))")
+        await page.wait_for_timeout(1500)
+        check('… une garde restée en route (avant la mise à jour) est arrêtée, partagée', await page.evaluate("!wilson.famille.garde.on") and st['garde'] and not st['garde']['on'] and has('Garde arrêtée (la garde est coupée)'), str(st['garde']))
+        st['garde'] = None
+        await page.evaluate("wilson.famille.coupee = false; __regarde(true); wilson.presenceAt = performance.now()"); await page.wait_for_timeout(300)
         await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000); c3 = conns[-1]
         r = await outil(page, c3, 'g1', 'garde', {'action': 'activer'})
         check('« On part, surveille la maison » : garde activée, partagée (G1)', 'Garde activée' in r and await page.evaluate("wilson.famille.garde.on && wilson.famille.garde.mode === 'demandee'") and st['garde'] and st['garde']['on'], r)
@@ -320,6 +346,10 @@ async def main():
         check('… dit → remis', (st['msgs']['tel1'].get('remis') or {}).get('a') == 'Timothée', str(st['msgs']['tel1']))
         r = await outil(page, c6, 'p1', 'messages', {'action': 'deposer', 'pour': 'Marie', 'texte': 'j\'ai pris le pain'})
         check('Téléphone : message pour Marie déposé, la tablette le remettra', 'la tablette du salon' in r, r)
+        g_avant = st['garde']
+        r = await outil(page, c6, 'p2c', 'garde', {'action': 'activer'})
+        check('Téléphone, garde coupée : « surveille la maison » → rien demandé à la tablette, il le dit', 'coupée' in r and st['garde'] == g_avant, r)
+        await page.evaluate("wilson.famille.coupee = false")
         r = await outil(page, c6, 'p2', 'garde', {'action': 'activer'})
         check('Téléphone : « surveille la maison » → garde demandée à la tablette par le script', 'tablette' in r and st['garde']['on'] and st['garde']['par'] == 'téléphone', r)
         r = await outil(page, c6, 'p3', 'visages', {'action': 'apprendre', 'prenom': 'Timothée'})

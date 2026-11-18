@@ -249,6 +249,7 @@ export class SettingsUI {
     this.crmStatus(false); this.oreilleStatus();
     $('s-objectif').value = s.objectifActifs ? String(s.objectifActifs) : '';
     $('s-gardeauto').checked = s.gardeAuto !== false; $('s-gardephoto').checked = s.gardePhoto !== false;
+    $('s-gardeauto').disabled = $('s-gardephoto').disabled = !!this.app.famille.coupee;   // garde coupée (18/11/26)
     this.renderVisages();
     const gs = $('s-gardestatus'); gs.hidden = false; gs.className = 'status'; gs.textContent = `Garde : ${this.app.famille.decrire()} — messages : ${this.app.famille.decrireMessages()}`;
     const sy = $('s-sync'), sys = this.app.sync.state;

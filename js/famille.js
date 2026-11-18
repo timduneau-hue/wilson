@@ -18,6 +18,11 @@ const VIDE_MS = 2 * 60000;           // garde demandée : la pièce doit être r
 const ALERTE_ECART_MS = 10 * 60000;  // G3 : une alerte du même genre toutes les 10 min au plus
 const REMISE_ECART_MS = 2 * 60000;   // M3 : une tentative de remise toutes les 2 min au plus
 const PROPRIO = 'Timothée';          // le téléphone est celui de Timothée
+// Garde de la maison COUPÉE (décision de Timothée du 18/11/26, 16h27, réponse à la question de Claude : « simplement la garde
+// de la maison, l'envoi des alertes ») : plus de garde automatique ni demandée (ici ou par un autre appareil), plus aucune
+// alerte par e-mail ni récit au retour. La caméra, le regard et la reconnaissance des visages ne changent pas.
+// Le code de la garde reste en sommeil : famille.coupee = false le rallume (tests).
+export const GARDE_COUPEE = true;
 const TOUS = /^(tous|tout le monde|toute la famille|la famille|famille|everyone|nous|nous deux|nous tous|vous|vous deux|les deux|la maison)$/;
 // Rappel « quand tu nous verras » (journal du 05/11/26, 11h01 : « dès que Wilson à la maison, sur la tablette, nous verra ce
 // soir… ») : un message que la personne se laisse à elle-même (et à la famille), dit à la maison seulement, pas avant une heure.
@@ -40,7 +45,7 @@ export const FAMILLE_TOOLS = [
     description: "Les visages que tu reconnais : apprendre (« apprends mon visage, je suis Louis » : prenom ; la personne doit être seule devant toi et te regarder ; avant d'appeler, dis « Regarde-moi bien… »), oublier (prenom), liste, qui (qui te regarde en ce moment). Les visages restent sur la tablette ; seul celui de Timothée est copié sur son téléphone.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['apprendre', 'oublier', 'liste', 'qui'] }, prenom: S }, required: ['action'] } },
   { name: 'garde', behavior: 'BLOCKING',
-    description: "Garde de la maison (« on part, surveille la maison », « on est rentrés », « la maison est sous garde ? ») : activer, arreter, etat. Pendant la garde tu écoutes les sons de la maison (fumée, verre brisé, alarme : e-mail à Timothée ; sonnette, on frappe : raconté au retour ; plus les aboiements de chien) et tu signales un visage inconnu.",
+    description: GARDE_COUPEE ? "Garde de la maison : COUPÉE depuis le 18/11/26, à la demande de Timothée (plus de surveillance de la maison ni d'alertes). Si on te demande de surveiller la maison, de l'arrêter ou si elle est sous garde : appelle-le quand même (activer, arreter ou etat) et dis simplement ce qu'il répond, sans rien promettre d'autre." : "Garde de la maison (« on part, surveille la maison », « on est rentrés », « la maison est sous garde ? ») : activer, arreter, etat. Pendant la garde tu écoutes les sons de la maison (fumée, verre brisé, alarme : e-mail à Timothée ; sonnette, on frappe : raconté au retour ; plus les aboiements de chien) et tu signales un visage inconnu.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['activer', 'arreter', 'etat'] } }, required: ['action'] } },
   { name: 'agenda', behavior: 'BLOCKING',   // demande de Timothée du 04/11/26, 21h26
     description: "L'agenda « Famille » (Google Agenda partagé de Timothée et Camille, en jaune : médecin des enfants, soirées, week-ends…). TOUT événement qu'on te demande de créer va dans cet agenda, que Timothée et Camille voient tous les deux (règle du 06/11/26) ; jamais ailleurs ; le CRM (crm_noter, rdv) seulement quand Timothée parle du CRM ou d'un compte rendu de visite, dans le doute l'agenda Famille. Quand tu ajoutes, dis que c'est dans l'agenda Famille. ajouter : si le créneau est déjà pris, rien n'est ajouté : tu le lui dis et tu demandes s'il veut l'ajouter quand même (alors rappelle ajouter avec quand_meme = true) ; titre court et clair (« Médecin Louis », « Soirée chez Paul », « Week-end chez mamie »), debut = date et heure locales au format 2026-11-12T10:00, ou la date seule 2026-11-14 avec journee = true pour un jour entier ; fin facultative (pour un week-end : le dernier jour) ; lieu facultatif. lire : du = premier jour (2026-11-14), jours = combien de jours (7 par défaut) — « qu'est-ce qu'on a ce week-end ? ». annuler : seulement ce que tu viens d'ajouter, si tu t'es trompé. Calcule les dates à partir d'aujourd'hui ; si le jour ou l'heure n'est pas clair, demande avant d'ajouter.",
@@ -64,6 +69,7 @@ export class Famille {
     this.msgs = lire(KEY_M, []).filter((m) => m && Date.now() - m.t < GARDER_MS);
     this.nomsScript = lire(KEY_N, []);
     this.garde = lire(KEY_G, null) || { on: false, t: 0 };
+    this.coupee = GARDE_COUPEE;
     this.oreille = new OreilleGarde({ log: (m) => this.log(m), onEvenement: (e) => this._evenement(e) });
     this._lireAt = 0; this._remiseAt = 0; this.remise = null; this.promis = null; this.etatScript = '';
     this.alertesN = 0; this._alerteAt = {};
@@ -136,7 +142,9 @@ export class Famille {
       .concat(locaux.filter((x) => !vus.has(x.id)));
     this._sauver();
     if (Array.isArray(r.noms)) { this.nomsScript = r.noms; ecrire(KEY_N, r.noms); }
-    if (r.garde && (+r.garde.t || 0) > (this.garde.t || 0)) {                       // garde demandée sur un autre appareil
+    if (this.coupee && r.garde && r.garde.on && (+r.garde.t || 0) > (this.garde.t || 0)) {   // garde coupée (18/11/26) : ignorée
+      if (this._gardeIgnoree !== r.garde.t) { this._gardeIgnoree = r.garde.t; this.log(`Garde demandée depuis un autre appareil (${r.garde.par || '?'}) : ignorée, la garde est coupée`); }
+    } else if (r.garde && (+r.garde.t || 0) > (this.garde.t || 0)) {                // garde demandée sur un autre appareil
       const avant = this.garde.on;
       this.garde = { ...this.garde, on: !!r.garde.on, mode: r.garde.mode || 'demandee', t: r.garde.t, depuis: r.garde.on ? (avant ? this.garde.depuis : Date.now()) : 0, par: r.garde.par || '' };
       if (r.garde.on && !avant) { this.garde.evenements = []; this.garde.vide = 0; }
@@ -154,7 +162,8 @@ export class Famille {
     if (A.remote && A.remote.on && now - this._lireAt > periode && navigator.onLine) this.synchroniser().catch(() => {});
     // G1 : garde automatique (tablette seulement : un téléphone ne voit jamais personne, il est dans une poche).
     // Garde automatique : tablette du salon seulement (un téléphone est dans une poche, un PC peut être au bureau).
-    if (deviceName() === 'tablette' && v && A.settings.gardeAuto !== false && !this.garde.on && !A._isNight() && A.started
+    if (this.coupee) { if (this.garde.on) this._finGarde('la garde est coupée'); else if (this.oreille.on) this.oreille.stop(); }
+    if (!this.coupee && deviceName() === 'tablette' && v && A.settings.gardeAuto !== false && !this.garde.on && !A._isNight() && A.started
       && now - (A.presenceAt || 0) > AUTO_MS) this.activer('auto', 'personne vu depuis 45 min');
     if (this.garde.on) {
       if (this.garde.mode === 'auto' && v && v.looking) { this.presence('quelqu\'un me regarde'); return; }   // G5 : la maison n'est plus vide
@@ -231,6 +240,7 @@ export class Famille {
 
   // ---------- G : la garde ----------
   activer(mode = 'demandee', pourquoi = '') {
+    if (this.coupee) return false;
     if (this.garde.on && this.garde.mode === 'demandee') return false;
     const t = Date.now();
     this.garde = { on: true, mode, t, depuis: t, par: deviceName(), evenements: (this.garde.on ? this.garde.evenements : []) || [], vide: mode === 'auto' ? t : 0 };
@@ -271,6 +281,7 @@ export class Famille {
     if (URGENT.includes(e.genre)) this._alerter(e);
   }
   async _alerter(e) {
+    if (this.coupee) return;
     const now = Date.now();
     if (now - (this._alerteAt[e.genre] || 0) < ALERTE_ECART_MS) return;
     this._alerteAt[e.genre] = now;
@@ -375,6 +386,11 @@ export class Famille {
     return 'Action inconnue.';
   }
   async _outilGarde({ action }) {
+    if (this.coupee) {
+      this.log(`Garde : « ${action} » demandé, la garde est coupée (décision de Timothée du 18/11/26)`);
+      return action === 'arreter' ? 'La garde de la maison est déjà coupée : Timothée l\'a arrêtée le 18/11/26 (plus de surveillance ni d\'alertes). Rien à arrêter. Dis-le simplement, en une phrase.'
+        : `${action === 'activer' ? 'RIEN N\'EST ACTIVÉ. ' : ''}La garde de la maison est coupée : Timothée l'a arrêtée le 18/11/26 (plus de surveillance de la maison ni d'alertes par e-mail). Dis-le simplement, en une phrase${action === 'activer' ? ' ; s\'il veut la remettre, il peut te faire une remarque pour ta prochaine mise à jour' : ''}.`;
+    }
     if (action === 'etat') return this.decrire(true);
     if (action === 'activer') {
       if (this.telephone) {
@@ -457,6 +473,7 @@ export class Famille {
 
   decrire(pourGemini = false) {
     const G = this.garde, ev = G.evenements || [];
+    if (this.coupee && !G.on) return pourGemini ? 'La garde de la maison est coupée (décision de Timothée du 18/11/26) : ni surveillance ni alertes.' : 'coupée (décision de Timothée du 18/11/26 : ni surveillance ni alertes)';
     if (!G.on) return pourGemini ? 'La garde n\'est pas activée.' : `non${this.oreille.panne ? ' (oreille en panne : ' + this.oreille.panne + ')' : ''}`;
     const txt = `activée (${G.mode === 'auto' ? 'automatique' : 'demandée'}) depuis ${heure(G.depuis || Date.now())}${G.vide ? ', pièce vide' : ', la pièce n\'est pas encore vide'}${ev.length ? `, noté : ${ev.map((e) => `${NOMS[e.genre] || e.genre} à ${heure(e.t)}`).join(', ')}` : ', rien de noté'}`;
     return pourGemini ? `Garde ${txt}.` : `${txt}${this.oreille.on ? `, oreille ${this.oreille.ready ? `prête (${this.oreille.stats.n} analyses, ${Math.round(this.oreille.stats.ms)} ms)` : 'en chargement'}` : ''}${this.alertesN ? `, ${this.alertesN} alerte(s)` : ''}`;
