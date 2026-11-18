@@ -87,3 +87,5 @@ sans carte graphique) : le regard y est simulé (`listenMode: 'toujours'` ou `vi
 | `e2e_android_micro.py` | Appli Android 3 (PLAN 9, A12) : c'est l'appli qui écoute ; aucun micro ouvert par la page, son de l'appli (40 ms, 16 kHz) dans le tampon, voix et silence détectés, envoyé à Gemini ; relancé après 2,5 s sans son ; anti-écho changé → micro de l'appli relancé ; appli sans micro → micro de la page, dit dans le journal |
 
 Remarque du 16/11/26 20h45 : « ceci est un essai, il n'y a rien à corriger » — pas de correction : essai de l'atelier annoncé comme tel par Timothée.
+
+Remarques du 18/11/26 08h53 : « Timothée veut que Wilson arrête toutes les fonctions de surveillance » et « … désactiver la surveillance et la prise de photos » — pas de correction : ce n'est pas un bug mais un choix (garde de la maison seulement, ou aussi la caméra qui sert à savoir quand on regarde Wilson) ; le PC de la maison lui a posé la question, la correction suivra sa réponse.
