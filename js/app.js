@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.6';
+const VERSION = '1.45.7';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -2713,7 +2713,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       this.log(`CRM refusé (${name}) : ${aut.qui ? `c'est ${aut.qui} qui me regarde` : 'je ne reconnais pas Timothée'} — le CRM est réservé à Timothée`, true);
       const dire = aut.qui && aut.qui !== 'quelqu\'un que je ne connais pas' ? `Désolé ${aut.qui}, le CRM, c'est seulement pour Timothée.`
         : !aut.camera ? `Le CRM, c'est seulement pour Timothée : ${aut.tel ? 'hors de la voiture, ' : ''}je dois voir ton visage, et la caméra est coupée${aut.tel ? ' (Réglages), ou relie le téléphone à la voiture' : ''}.`
-          : !aut.appris ? "Le CRM, c'est seulement pour Timothée, et je ne connais pas encore son visage sur cet appareil : Timothée, dis-moi « apprends mon visage, je suis Timothée »."
+          : !aut.appris ? (aut.tel ? "Le CRM, c'est seulement pour Timothée, et je n'ai pas encore reçu son visage de la tablette du salon : il arrive tout seul sur le téléphone quand il y est appris." : "Le CRM, c'est seulement pour Timothée, et je ne connais pas encore son visage sur cet appareil : Timothée, dis-moi « apprends mon visage, je suis Timothée ».")
           : "Le CRM, c'est seulement pour Timothée, et je ne le reconnais pas là : regarde-moi bien et redemande.";
       return { echec: true, info: `REFUSÉ : le CRM est réservé à Timothée (règle de Timothée) et ${aut.qui ? `c'est ${aut.qui} qui te regarde` : 'tu ne reconnais pas son visage en ce moment'}. Dis seulement : « ${dire} » Aucune information du CRM.`, dire };
     }
@@ -2900,7 +2900,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     this.log(`Remarque refusée : ${aut.qui ? `c'est ${aut.qui} qui me regarde` : 'je ne reconnais pas Timothée'} — seul Timothée fait corriger le programme`, true);
     return aut.qui && aut.qui !== 'quelqu\'un que je ne connais pas' ? `Désolé ${aut.qui}, il n'y a que Timothée qui peut me faire corriger.`
       : !aut.camera ? "Il n'y a que Timothée qui peut me faire corriger, et je dois voir son visage : la caméra est coupée."
-      : !aut.appris ? "Il n'y a que Timothée qui peut me faire corriger, et je ne connais pas encore son visage sur cet appareil : Timothée, dis-moi « apprends mon visage, je suis Timothée »."
+      : !aut.appris ? (aut.tel ? "Il n'y a que Timothée qui peut me faire corriger, et je n'ai pas encore reçu son visage de la tablette du salon : il arrive tout seul sur le téléphone quand il y est appris." : "Il n'y a que Timothée qui peut me faire corriger, et je ne connais pas encore son visage sur cet appareil : Timothée, dis-moi « apprends mon visage, je suis Timothée ».")
       : "Il n'y a que Timothée qui peut me faire corriger, et je ne te reconnais pas là : regarde-moi bien et redis ta remarque.";
   }
 
@@ -3280,7 +3280,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       // Même explication que pour le CRM : visage pas encore appris sur cet appareil → comment l'apprendre (14/11/26, 16h42:48 :
       // sur le téléphone, « C'est moi là, regarde, c'est Timothée » → « on essaiera d'apprendre ton visage plus tard »).
       const dire = aut.qui && aut.qui !== 'quelqu\'un que je ne connais pas' ? `Désolé ${aut.qui}, les e-mails, c'est seulement pour Timothée.`
-        : aut.camera && !aut.appris ? "Les e-mails, c'est seulement pour Timothée, et je ne connais pas encore son visage sur cet appareil : Timothée, dis-moi « apprends mon visage, je suis Timothée »."
+        : aut.camera && !aut.appris ? (aut.tel ? "Les e-mails, c'est seulement pour Timothée, et je n'ai pas encore reçu son visage de la tablette du salon : il arrive tout seul sur le téléphone quand il y est appris." : "Les e-mails, c'est seulement pour Timothée, et je ne connais pas encore son visage sur cet appareil : Timothée, dis-moi « apprends mon visage, je suis Timothée ».")
           : 'Les e-mails, c\'est seulement pour Timothée : regarde-moi bien et redemande.';
       return { echec: true, info: `REFUSÉ : ses e-mails sont privés, réservés à Timothée. Dis seulement : « ${dire} » Aucun contenu d'e-mail.`, dire };
     }

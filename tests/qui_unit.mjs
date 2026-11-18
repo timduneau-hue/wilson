@@ -3,7 +3,7 @@
 // avaient plus de 15 s ; sa remarque a été refusée dans ce trou (09h23:54) et l'outil visages a dit « pas assez sûr » (09h22:03).
 let T = 0;
 Object.defineProperty(globalThis, 'performance', { value: { now: () => T }, configurable: true, writable: true });
-const { Qui } = await import('../js/qui.js');
+const { Qui, coderVisage, decoderVisage, distance } = await import('../js/qui.js');
 
 let ok = 0, ko = 0;
 const check = (nom, cond, detail = '') => { if (cond) { ok++; console.log('✅', nom); } else { ko++; console.log('❌', nom, detail); } };
@@ -50,6 +50,23 @@ Q = nouveau(); analyse(Q, 0.7, 0); analyse(Q, 0.7, 1500);
 check('Camille sûre', Q.actuel.sur && Q.actuel.nom === 'Camille');
 check('Timothée juste après : une analyse ne suffit pas', !analyse(Q, 0.3, 3000).sur);
 check('… deux, oui', analyse(Q, 0.3, 4500).sur && Q.actuel.nom === 'Timothée');
+
+// 4. Copie du visage de Timothée de la tablette vers son téléphone (réponse du 18/11/26, 14h38, question q261115a ; V1).
+const vrai = Array.from({ length: 128 }, (_, i) => Math.sin(i * 1.7) * 0.18);
+const code = coderVisage(vrai), retour = decoderVisage(code);
+check('Empreinte codée courte (une propriété du script : 9 ko pour 24 empreintes)', code.length < 200, String(code.length));
+check('… et relue presque à l\'identique (écart très loin du seuil 0,5)', retour && retour.length === 128 && distance(vrai, retour) < 0.01, retour && distance(vrai, retour));
+check('Code abîmé : rien', decoderVisage('abc') === null && decoderVisage('') === null);
+const tab = nouveau(); tab.personnes = [{ nom: 'Timothée', desc: [vrai, vrai.map((x) => -x)], t: 111 }, { nom: 'Camille', desc: [vrai.map((x) => x / 2)], t: 5 }];
+const ex = tab.exporter('Timothée');
+check('Tablette : seul le visage demandé part (Timothée), codé, avec son heure', ex && ex.t === 111 && ex.desc.length === 2 && ex.desc.every((c) => typeof c === 'string'), JSON.stringify(ex).slice(0, 80));
+let tel = nouveau(); tel.personnes = [];
+check('Téléphone : copie reçue', tel.copier('Timothée', ex) === 'copie' && tel.liste().join() === 'Timothée' && tel.trouver('Timothée').copie);
+check('… reconnu avec la copie (deux analyses proches)', (() => { tel.personnes[0].desc.push([0, 0]); analyse(tel, 0.3, 100000); return analyse(tel, 0.3, 101500).sur && tel.actuel.nom === 'Timothée'; })());
+check('Une copie n\'est jamais renvoyée par le téléphone', tel.exporter('Timothée') === null);
+check('Oublié sur la tablette (empreintes vides) : copie effacée', tel.copier('Timothée', { t: 222, desc: [] }) === 'oublie' && !tel.liste().length);
+tel = nouveau();
+check('Visage appris sur le téléphone lui-même : jamais écrasé par la copie', tel.copier('Timothée', ex) === '' && tel.trouver('Timothée').desc.length === 1 && !tel.trouver('Timothée').copie);
 
 console.log(`\n${ok}/${ok + ko} vérifications OK`);
 process.exit(ko ? 1 : 0);

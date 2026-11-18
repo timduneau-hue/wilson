@@ -44,6 +44,8 @@ async def main():
             elif a == 'msg_lire':
                 if d.get('noms'): st['noms'] = d['noms']
                 body = {'ok': True, 'messages': [m for m in st['msgs'].values() if not m.get('annule')], 'noms': st['noms'], 'garde': st['garde']}
+                if d.get('visage_proprio') and d.get('appareil') == 'tablette': st['visage'] = d['visage_proprio']; body['visage_ok'] = True   # V1 : copie du visage de Timothée
+                if 'visage_t' in d and st.get('visage') and st['visage']['t'] > (d['visage_t'] or 0): body['visage_proprio'] = st['visage']
             elif a == 'msg_remis': st['msgs'][d['id']]['remis'] = {'t': d['t'], 'a': d['a']}
             elif a == 'msg_annuler': st['msgs'][d['id']]['annule'] = 1
             elif a == 'garde_ecrire': st['garde'] = d['garde']
@@ -230,7 +232,15 @@ async def main():
         stockage = await page.evaluate("localStorage.getItem('wilson.visages') || ''")
         check('Visages : « oublie le visage de Louis » efface (V2)', 'oublié' in r and 'Louis' not in stockage and await page.evaluate("!wilson.qui.liste().includes('Louis')"), r)
         regl = await page.evaluate("localStorage.getItem('wilson.settings')")
-        check('Empreintes jamais dans les réglages partagés, ni envoyées au script (V1)', 'desc' not in regl and not any('desc' in json.dumps(x) for x in st['calls']), '')
+        avec = [x for x in st['calls'] if 'desc' in json.dumps(x)]
+        check('Empreintes jamais dans les réglages partagés ; au script, seulement celles de Timothée, codées, pour son téléphone (V1, réponse du 18/11/26, 14h38)',
+              'desc' not in regl and avec and all(x['action'] == 'msg_lire' and list(x) and set(x['visage_proprio']) == {'t', 'desc'} and all(isinstance(c, str) and ':' in c for c in x['visage_proprio']['desc']) for x in avec)
+              and st.get('visage') and len(st['visage']['desc']) == 1, str(avec)[:300])
+        dec = await page.evaluate("import('./js/qui.js').then((m) => m.decoderVisage(%s))" % json.dumps(st['visage']['desc'][0] if st.get('visage') else ''))
+        check('… c\'est bien le visage de Timothée (pas celui de Marie ni de Louis)', dec and abs(dec[0] - 0.1) < 0.002 and abs(dec[1] - 0.2) < 0.002, str(dec))
+        envois = [x for x in st['calls'] if x.get('visage_proprio')]
+        await page.evaluate("wilson.famille.synchroniser()"); await page.wait_for_timeout(300)
+        check('… envoyé une seule fois tant qu\'il ne change pas', len([x for x in st['calls'] if x.get('visage_proprio')]) == len(envois), str(len(envois)))
         check('… seulement les prénoms partent au script (pour le téléphone)', st['noms'] and set(st['noms']) <= {'Timothée', 'Marie', 'Louis'}, str(st['noms']))
         await page.evaluate("wilson.continuous = false; wilson.endConversation('test')"); await page.wait_for_timeout(300)
 
@@ -292,6 +302,13 @@ async def main():
         page, logs = await ouvrir(TELEPHONE, {**base, 'camera': False})
         await page.evaluate("wilson.famille.synchroniser()"); await page.wait_for_timeout(500)
         check('Téléphone : les prénoms de la tablette arrivent par le script', await page.evaluate("wilson.famille.noms().includes('Marie')"))
+        check('Téléphone : le visage de Timothée appris sur la tablette y est copié (réponse du 18/11/26, 14h38), pas ceux de la famille',
+              await page.evaluate("wilson.qui.liste().join() === 'Timothée' && wilson.qui.trouver('Timothée').copie && Math.abs(wilson.qui.trouver('Timothée').desc[0][1] - 0.2) < 0.002"),
+              await page.evaluate("JSON.stringify(wilson.qui.personnes)"))
+        check('… le téléphone ne renvoie jamais rien au script', not any(x.get('visage_proprio') for x in st['calls'] if x.get('appareil') == 'téléphone'))
+        n_copie = len([l for l in logs if 'reçu de la tablette' in l])
+        await page.evaluate("wilson.famille.synchroniser()"); await page.wait_for_timeout(300)
+        check('… reçu une seule fois (pas redemandé tant qu\'il ne change pas)', n_copie == 1 and len([l for l in logs if 'reçu de la tablette' in l]) == 1, str(n_copie))
         n3 = len(conns)
         await page.wait_for_timeout(2000)
         check('Téléphone : jamais de discussion ouverte de lui-même pour un message (remarque du 04/11/26, 17h57)', len(conns) == n3)

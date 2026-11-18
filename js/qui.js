@@ -2,7 +2,10 @@
 //
 // vision-worker.js redresse le visage (150 × 150) ; qui-worker.js en tire une « empreinte » (128 nombres) ; ici on compare
 // avec les empreintes apprises. Règles :
-//  V1 — les empreintes restent dans le stockage de cet appareil (`wilson.visages`) : jamais synchronisées ni envoyées ;
+//  V1 — les empreintes restent dans le stockage de cet appareil (`wilson.visages`) : jamais synchronisées ni envoyées,
+//       sauf celles de Timothée, de la tablette vers SON téléphone (sa réponse du 18/11/26, 14h38, question q261115a : « prends
+//       l'image mémorisée dans la tablette de la maison et enregistre-la pour celle du téléphone ») : codées (coderVisage),
+//       elles passent par son script (famille.gs, msg_lire) ; celles de la famille ne quittent jamais la tablette ;
 //  V3 — « sûr » seulement si 2 des 3 dernières analyses donnent la même personne, assez près et nettement devant la suivante ;
 //  V4 — une analyse toutes les 1,5 s au plus, toutes les 20 s une fois la personne sûre ; rien de chargé tant que personne
 //       n'a été appris.
@@ -18,6 +21,20 @@ const QUALITE = { eye: 22, yaw: 32, pitch: 32 };    // œil à œil en pixels, a
 export const distance = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s); };
 const norm = (x) => String(x || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 export const joliNom = (x) => String(x || '').trim().replace(/\s+/g, ' ').replace(/^./, (c) => c.toUpperCase()).slice(0, 30);
+
+// Empreinte codée pour la copie vers le téléphone (V1) : 128 nombres → « échelle:octets en base64 » (≈ 180 caractères, une
+// propriété du script ne dépasse pas 9 ko). Arrondi à 1/127 du plus grand nombre : écart de distance négligeable (seuil 0,5).
+export function coderVisage(d) {
+  const m = Math.max(1e-9, ...d.map((x) => Math.abs(x))), b = new Int8Array(d.length);
+  d.forEach((x, i) => { b[i] = Math.max(-127, Math.min(127, Math.round((x / m) * 127))); });
+  let s = ''; for (const x of new Uint8Array(b.buffer)) s += String.fromCharCode(x);
+  return `${m.toPrecision(6)}:${btoa(s)}`;
+}
+export function decoderVisage(c) {
+  const [m, b64] = String(c || '').split(':'), e = +m;
+  if (!(e > 0) || !b64) return null;
+  try { const u = Uint8Array.from(atob(b64), (x) => x.charCodeAt(0)); return Array.from(new Int8Array(u.buffer), (x) => Math.round((x / 127) * e * 10000) / 10000); } catch (_) { return null; }
+}
 
 // Personne la plus proche (et la suivante) : distance d'une personne = la plus petite sur ses empreintes.
 export function identifier(desc, personnes) {
@@ -178,8 +195,9 @@ export class Qui {
     }
     const p = this.trouver(A.nom);
     if (p) { p.desc = p.desc.concat(A.desc).slice(-24); p.t = Date.now(); } else this.personnes.push({ nom: A.nom, desc: A.desc, t: Date.now() });
+    if (p) delete p.copie;                                     // réappris ici : ce n'est plus une copie
     this._sauver(); this.hist = [];
-    this.log(`Visages : ${A.nom} appris (${A.desc.length} empreintes) — gardées sur cet appareil seulement`);
+    this.log(`Visages : ${A.nom} appris (${A.desc.length} empreintes) — gardées sur cet appareil${A.nom === 'Timothée' ? ' (et copiées sur son téléphone)' : ' seulement'}`);
     A.fin({ ok: true, n: A.desc.length, nom: A.nom, encore: !!p });
   }
   annulerApprendre() { if (this.appris) { this.appris.desc = []; this._finApprendre(); } }
@@ -191,6 +209,25 @@ export class Qui {
     this.log(`Visages : ${p.nom} oublié`);
     if (!this.personnes.length) this._arreter();
     return true;
+  }
+  // ---------- V1 : le visage de Timothée, copié de la tablette sur son téléphone ----------
+  // Tablette : ses empreintes codées (et l'heure où elles ont changé), ou null s'il n'est pas appris ici (pas une copie).
+  exporter(nom) {
+    const p = this.trouver(nom);
+    return p && !p.copie ? { t: p.t || 1, desc: p.desc.slice(-24).map(coderVisage) } : null;
+  }
+  // Téléphone : la copie reçue remplace la précédente ; un visage appris sur cet appareil même n'est jamais écrasé.
+  // desc vide : Timothée oublié sur la tablette → la copie est effacée. Renvoie 'copie', 'oublie' ou ''.
+  copier(nom, { t = 0, desc = [] } = {}) {
+    const p = this.trouver(nom);
+    if (p && !p.copie) return '';
+    const l = (desc || []).map(decoderVisage).filter((x) => x && x.length);
+    if (!l.length) { if (!p) return ''; this.personnes = this.personnes.filter((x) => x !== p); this._sauver(); this.hist = []; if (this.actuel && this.actuel.nom === p.nom) this._poser(null); this.log(`Visages : ${p.nom} oublié sur la tablette, copie effacée`); if (!this.personnes.length) this._arreter(); return 'oublie'; }
+    if (p) { p.desc = l; p.t = t; } else this.personnes.push({ nom: joliNom(nom), desc: l, t, copie: true });
+    this._sauver(); this.hist = [];
+    this.log(`Visages : visage de ${joliNom(nom)} reçu de la tablette (${l.length} empreintes)`);
+    if (this.vision) this._demarrer();
+    return 'copie';
   }
   _sauver() { try { localStorage.setItem(KEY, JSON.stringify({ v: 1, personnes: this.personnes })); } catch (e) { this.log('Visages : stockage impossible (' + e.message + ')'); } }
 
