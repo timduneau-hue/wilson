@@ -195,6 +195,18 @@ check('Message renvoyé après une coupure (même id) : pas de doublon, pas d\'�
 check('Message incomplet refusé', JF({ action: 'msg_deposer', msg: { pour: 'Marie' } }).ok === false);
 fa = JF({ action: 'msg_lire', noms: ['Timothée', 'Marie'] });
 check('Lecture : messages et prénoms de la tablette (prénoms seulement)', fa.ok && fa.messages.length === 1 && JSON.parse(props.famille_noms).length === 2 && fa.noms.includes('Marie'));
+// Visage de Timothée copié de la tablette sur son téléphone (réponse du 18/11/26, 14h38, question q261115a)
+const VC = '0.180000:AAECAwQFBgcICQoLDA0ODw==';
+fa = JF({ action: 'msg_lire', appareil: 'tablette', visage_proprio: { t: 100, desc: [VC, VC, '<script>', 42] } });
+check('Visage de Timothée envoyé par la tablette : gardé (empreintes codées seulement), « visage_ok »', fa.ok && fa.visage_ok && JSON.parse(props.visage_proprio).desc.length === 2 && JSON.parse(props.visage_proprio).t === 100 && !fa.visage_proprio);
+check('… pas envoyé par un autre appareil : ignoré', !JF({ action: 'msg_lire', appareil: 'téléphone', visage_proprio: { t: 500, desc: [VC] } }).visage_ok && JSON.parse(props.visage_proprio).t === 100);
+fa = JF({ action: 'msg_lire', appareil: 'téléphone', visage_t: 0 });
+check('Téléphone sans copie : il le reçoit', fa.visage_proprio && fa.visage_proprio.desc[0] === VC && fa.visage_proprio.t === 100);
+check('… déjà à jour : rien de renvoyé', !JF({ action: 'msg_lire', appareil: 'téléphone', visage_t: 100 }).visage_proprio && !JF({ action: 'msg_lire' }).visage_proprio);
+JF({ action: 'msg_lire', appareil: 'tablette', visage_proprio: { t: 200, desc: [] } });
+fa = JF({ action: 'msg_lire', appareil: 'téléphone', visage_t: 100 });
+check('Oublié sur la tablette : le téléphone reçoit une liste vide (il efface sa copie)', fa.visage_proprio && fa.visage_proprio.t === 200 && fa.visage_proprio.desc.length === 0);
+check('Propriété « visage_proprio » jamais prise pour un message', JF({ action: 'msg_lire' }).messages.length === 1);
 fa = JF({ action: 'msg_remis', id: 'abc1', t: 2000, a: 'Marie' });
 check('Remis : date et personne', fa.ok && JSON.parse(props.msg_abc1).remis.a === 'Marie');
 JF({ action: 'msg_annuler', id: 'abc1' });
