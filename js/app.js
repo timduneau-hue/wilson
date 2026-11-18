@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.4';
+const VERSION = '1.45.5';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -47,6 +47,7 @@ const VERSION = '1.45.4';
 // s'il était en pleine discussion, puis se recharge.
 const MAJ_VERIF_MS = 5 * 60000;
 const PREROLL_MS = 1600;          // R2 : le début de la phrase (avant que le regard soit confirmé, 0,6 s au moins) est transmis
+const VISAGE_ATTENTE_MS = 2000;  // 18/11/26 : au regard, attente de la reconnaissance du visage avant d'ouvrir (consigne de Gemini)
 const SEG_GAP_MS = 700;           // R1 (01/11/26) : deux morceaux de voix séparés de plus de 0,7 s = deux phrases
 const SEG_VU_MIN = 8;             // R1 : une phrase « dite en le regardant » = au moins 8 blocs de 20 ms de voix avec le regard confirmé
 const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
@@ -713,6 +714,26 @@ class App {
     this.startConversation('prenom');
   }
 
+  // Journal du 18/11/26 (09h21:56, 09h23:09, 09h26:03, 09h27:59) : la discussion s'ouvrait au regard 1 à 3 s avant que son
+  // visage soit reconnu ; la consigne de Gemini, écrite à l'ouverture, disait alors « tu ne sais pas encore qui te regarde » :
+  // « Désolé, je ne te reconnais pas encore. Tu peux me dire ton prénom ? » (09h22:09), et la question de Claude, réservée à
+  // Timothée reconnu, n'était jamais dans la consigne. À la maison, quand la reconnaissance tourne et que le visage vu n'est
+  // pas encore sûr, on l'attend 2 s au plus avant d'ouvrir (ce qu'il dit pendant ce temps est gardé et envoyé ensuite).
+  _attendreVisage(max = VISAGE_ATTENTE_MS) {
+    const Q = this.qui, v = this.vision, ok = (A) => !!(A && (A.sur || A.inconnu));
+    if (this._voitureBt || (this.famille && this.famille.telephone) || !Q || !Q.on || !Q.ready || !v || !v.faces || ok(Q.qui())) return Promise.resolve(null);
+    const t0 = performance.now();
+    return new Promise((fin) => {
+      const iv = setInterval(() => {
+        const A = Q.qui(), ms = Math.round(performance.now() - t0);
+        if (!ok(A) && ms < max && this.state === 'eveil' && v.faces) return;
+        clearInterval(iv);
+        this.log(`Visages : ${A && A.sur ? `${A.nom} reconnu` : A && A.inconnu ? 'visage inconnu' : 'pas encore reconnu'} ${ms} ms après le regard, avant d'ouvrir la discussion`);
+        fin(A);
+      }, 100);
+    });
+  }
+
   // opts.handle : reprendre une session de Gemini (même fil), après un appel ou une coupure de réseau.
   async startConversation(reason, opts = {}) {
     if (this.outils && this.outils.sonne) this.outils._arreterSonnerie();
@@ -760,6 +781,10 @@ class App {
     this.pending = preroll;
     this.discard = false; this.endAfterSpeech = false; this.brain.handle = opts.handle || null;
     this.lastActivity = performance.now();
+    if (reason === 'regard' && !opts.handle) {
+      await this._attendreVisage();
+      if (this.convId !== myConv || this.state !== 'eveil') return;    // arrêtée pendant l'attente (appel…)
+    }
     try {
       await this.brain.connect({ key: this.settings.apiKey, model: this.settings.model, voice: this.settings.voice, system: this._system(), interrupts: this.settings.bargeIn === 'directe', extra: this._extraTools(), garder: this._voitureBt ? OUTILS_VOITURE : null });
     } catch (e) {

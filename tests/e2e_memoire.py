@@ -276,6 +276,30 @@ async def main():
         await page.evaluate("wilson._passeMemoire(Date.now() - 4000, Date.now(), [])")
         check('Quota épuisé sur un modèle : le suivant prend le relais, et il n\'est plus essayé pendant 1 h', m1[:2] == ['gemini-3.8-flash', 'gemini-3.5-flash-lite'] and st['modeles'][:1] == ['gemini-3.5-flash-lite'], f"{m1} puis {st['modeles']}")
         st['quota'] = set()
+        # Journal du 18/11/26 (09h21:56) : discussion ouverte au regard 1 à 3 s avant que son visage soit reconnu → consigne sans
+        # son prénom (« je ne te reconnais pas encore, tu peux me dire ton prénom ? ») et jamais de question de Claude.
+        await page.evaluate("wilson.questions.posees.q3 = Date.now() - 61 * 60000; wilson.questions._pasCetteFois = null; wilson.questions.enCours = null")
+        await page.evaluate("__qui(null); wilson.qui.ready = true; if (!wilson.qui.personnes.length) wilson.qui.personnes = [{ nom: 'Timothée', desc: [[0.1, 0.2]] }]; __regarde(true)")
+        t0r = time.time()
+        await page.evaluate("wilson.startConversation('regard'); setTimeout(() => __qui({ nom: 'Timothée', sur: true }), 800)")
+        await page.wait_for_function('wilson.brain.open', timeout=8000); c = conns[-1]
+        sysr = c['setup']['systemInstruction']['parts'][0]['text']
+        check('Ouverte au regard avant que son visage soit reconnu : la consigne l\'attend (Timothée, question de Claude)', 'La personne qui te regarde en ce moment : Timothée' in sysr and 'Une question de Claude pour Timothée' in sysr, sysr[-900:])
+        check('… noté au journal, en moins de 2 s', has('Visages : Timothée reconnu') and has('ms après le regard, avant d\'ouvrir la discussion') and time.time() - t0r < 4)
+        await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
+        await page.evaluate("__qui(null); __regarde(true)")
+        t0r = time.time()
+        await page.evaluate("wilson.startConversation('regard')")
+        await page.wait_for_function('wilson.brain.open', timeout=8000); c = conns[-1]
+        check('Pas reconnu au bout de 2 s : la discussion s\'ouvre quand même, sans prénom ni question', has('Visages : pas encore reconnu') and time.time() - t0r < 5 and 'Une question de Claude' not in c['setup']['systemInstruction']['parts'][0]['text'])
+        await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
+        await page.evaluate("__qui({ nom: 'Timothée', sur: true }); __regarde(true)")
+        t0r = time.time()
+        await page.evaluate("wilson.startConversation('regard')")
+        await page.wait_for_function('wilson.brain.open', timeout=8000)
+        check('Déjà reconnu : aucune attente', time.time() - t0r < 1.5 and sum('ms après le regard' in l for l in logs) == 2)
+        await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
+        await page.evaluate("wilson.qui.ready = false")
         bil = await page.evaluate("wilson.bilan()")
         check('Bilan : mémoire et questions', 'souvenir' in bil.get('Mémoire', '') and 'en attente' in bil.get('Questions de Claude', ''), json.dumps({k: bil.get(k) for k in ['Mémoire', 'Questions de Claude']}, ensure_ascii=False))
         check('Pas d\'erreur JavaScript (tablette)', not any('PAGEERROR' in l for l in logs), str([l for l in logs if 'PAGEERROR' in l][:3]))
