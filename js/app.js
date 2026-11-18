@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.8';
+const VERSION = '1.45.9';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -65,6 +65,7 @@ const NOM_RELAIS_MS = 3000;       // vérification de « Wilson » sans réponse
 const APRES_OUTIL_MS = 3000;      // muet après le résultat d'un outil : relance au bout de 3 s (5 s avant le 05/11/26)
 const QUESTION_CALME_MS = 5000;   // question de Claude : posée après 5 s de calme, sa demande réglée (journal du 18/11/26)
 const ATTENTE_GOOGLE_MS = 3000;   // voiture : phrase transcrite, plus un mot depuis 3 s et pas de réponse → fin de phrase forcée (« réponds » au bout de 5 s avant la 1.29.0)
+const ATTENTE_EXPLIQUE_MS = 6000; // … 6 s (9 s si le micro croit encore entendre une voix) quand il explique encore quelque chose (remarque du 18/11/26, 17h58)
 const MICRO_RETENU_MS = 1500;     // après une fin de phrase forcée : micro retenu, pour que Google ne reparte pas sur le bruit
 const REPONDS_APRES_MS = 2500;    // … et toujours rien : « réponds-lui maintenant »
 const NOM_SON_MAX_MS = 12000;     // son envoyé pour la vérification : tout ce qui a été dit depuis la précédente, 12 s au plus
@@ -3804,12 +3805,18 @@ Nous sommes ${fmtDate()}.${nv}`;
     // lu, transcription 1 s plus tard → chien de garde désarmé, Wilson muet jusqu'à la veille).
     if (AO2 && (this._heardAt || 0) > AO2.at + 300 && (this._heardTurnN || 0) > AO2.turnN) this._apresOutil = null;
     const outilEnCours = this._outilsEnCours > 0 || !!(this._searches && this._searches.size) || !!(this._analyses && [...this._analyses.values()].some((A) => !A.cancelled && !A.fond));
+    // Remarque du 18/11/26, 17h58:01 (« arrête de me couper quand je t'explique quelque chose d'un peu long ») : à 17h56:41,
+    // une explication a eu sa fin forcée au bout de 4,5 s alors qu'il continuait. Il a annoncé une explication (« un point que
+    // je voudrais aborder », « j'ai pas fini ») ou la phrase s'arrête sur « euh », « et », une virgule… (VP.phraseEnCours) :
+    // 6 s sans un mot (9 s si le micro entend encore une voix) au lieu de 3 s (4,5 s).
+    let attente = ATTENTE_GOOGLE_MS;
     if (vb && this.state === 'conversation' && this.mode === 'live' && this.brain.open && !this.paused && !this.netWait
       && this._heardTurnN === this._turnN && this._heardAt && now - this._heardAt > ATTENTE_GOOGLE_MS && this._nudgedTurn !== this._turnN
-      && !this.audio.playing && !this.audio.micTaken && ((!this.audio.speaking && now - (this.audio.lastVoicedAt || 0) > 1500) || now - this._heardAt > ATTENTE_GOOGLE_MS + 1500)
+      && !this.audio.playing && !this.audio.micTaken && (attente = VP.phraseEnCours(this.brain.inText) ? ATTENTE_EXPLIQUE_MS : ATTENTE_GOOGLE_MS) && now - this._heardAt > attente
+      && ((!this.audio.speaking && now - (this.audio.lastVoicedAt || 0) > 1500) || now - this._heardAt > attente * 1.5)
       && !this._liveTurn && !this._apresOutil && !outilEnCours && (this._heardAt || 0) > (this._outilRepAt || 0) && !(this._vv && this._vv.n === this._turnN && this._vv.held.length)) {
       this._nudgedTurn = this._turnN;
-      this.log(`Google attend encore la fin de ta phrase (${((now - this._heardAt) / 1000).toFixed(0)} s sans un mot, bruit de la route ?) : fin de phrase forcée`);
+      this.log(`Google attend encore la fin de ta phrase (${((now - this._heardAt) / 1000).toFixed(0)} s sans un mot, ${attente > ATTENTE_GOOGLE_MS ? 'il expliquait quelque chose : attendu plus longtemps' : 'bruit de la route ?'}) : fin de phrase forcée`);
       this._forcerFinPhrase();
     }
     this._questionAuCalme(now, outilEnCours);              // question de Claude : l'appli choisit le moment (18/11/26)

@@ -155,5 +155,14 @@ for (const [t, e] of [['Timothée signale que mes phrases sont coupées quand je
   ['Le visage manque de vie', 'ton visage est un peu figé'], ['Bug', 'rien à voir'], ['Le devis de la synthèse est faux', '']])
   check(`remarque dite : « ${t.slice(0, 45)} »`, !V.remarqueInventee(t, e));
 
+// Il explique encore (remarque du 18/11/26, 17h58:01, voiture : « arrête de me couper quand je t'explique quelque chose de long »)
+for (const t of ["Non mais je viens de te dire que il y avait un point que je voudrais aborder, c'était de valider les clients.",
+  "Quand, quand je sors d'une visite, euh", 'Je voulais te dire,', 'Je voudrais que', "Ouais, mais j'ai pas fini ma phrase. J'ai pas", "Attends, je t'explique. Quand je sors de chez un client.", "Qui me le propose au moment d'enregistrer dans la fenêtre d'enregistrement. Que je puisse choisir euh avoir la liste de tous ceux qui bossent et puis euh moi je"])
+  check(`il explique encore : « ${t.slice(0, 50)} »`, V.phraseEnCours(t));
+for (const t of ["Parce qu'il est quelle heure là ?", 'Il est quelle heure ?', 'Éteins la lumière.', 'Mets un rappel à 18h', "Tu as enregistré ce que je viens de te dire ou pas là ?", 'Vas-y, guide-moi vers euh, Miroiterie 35.', '',
+  "Pour la prochaine mise à jour, en voiture, supprime la détection de son. Ouais, écoute, visiblement on va pas y arriver, s'il faut que je t'appelle dix fois…",
+  "Oui, ça me va mais je voudrais que tu arrêtes aussi de me couper.", "Là, je reviens de l'entreprise Gallet. Et où j'ai vu Christophe, mais j'ai aussi vu les deux Sylvain."])
+  check(`phrase finie (pas plus d'attente) : « ${t.slice(0, 50)} »`, !V.phraseEnCours(t));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

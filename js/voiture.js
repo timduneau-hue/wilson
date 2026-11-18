@@ -259,3 +259,22 @@ export function remarqueInventee(texte, entendu) {
   if (mots.length < 2 || !plat(entendu).trim()) return false;          // trop court pour juger, ou rien d'entendu : on laisse passer
   return !mots.some((m) => dits.has(racine(m)));
 }
+
+// Il explique encore quelque chose (remarque du 18/11/26, 17h58:01, voiture : « je voudrais que tu arrêtes de me couper quand
+// je suis en train de t'expliquer quelque chose d'un peu long ») : à 17h56:41, « il y avait un point que je voudrais
+// aborder, c'était de valider les clients. » a eu sa fin de phrase forcée au bout de 4,5 s ; il continuait (« Quand, quand
+// je sors d'une visite… ») et Wilson a répondu sur une phrase pas finie. Il a annoncé qu'il allait expliquer (« un point que
+// je voudrais aborder », « je vais t'expliquer », « j'ai pas fini »), ou la phrase s'arrête sur une virgule, « euh », « et »,
+// « que », « de »… : app.js attend plus longtemps avant de la croire finie. Pas « … » ni une phrase seulement longue :
+// « s'il faut que je t'appelle dix fois… » (05/11/26, 14h48) était finie, et il attendait déjà trop la réponse.
+const MOTS_SUITE = new Set(('euh euhh heu hum bah ben et mais ou donc alors puis que qu quand parce pour avec sans de du des d le la les l '
+  + "un une a au aux en sur dans chez qui si comme enfin genre c c'est c'etait j'ai je j tu il elle on nous vous mon ma mes ton ta tes son sa ses ce cet cette ces leur leurs").split(/\s+/).filter(Boolean));
+const ANNONCE = /\b(je (voudrais|veux|vais|dois) (t'expliquer|te (dire|parler|raconter|expliquer|demander)|aborder|parler de|expliquer)|(un|une|deux|trois|plusieurs|quelques) (points?|choses?|trucs?|sujets?) (que|qu'|a |dont)|j'ai (un|une|deux|trois|plusieurs|quelques) (points?|choses?|trucs?|sujets?|questions?|idees?)\b|je t'explique|laisse[- ]moi (finir|expliquer|parler|terminer)|(j'ai|je n'ai|j'avais) pas (fini|termine)|je n'ai pas (fini|termine)|attends,? (je|j'ai))/;
+export function phraseEnCours(t) {
+  const x = plat(t).replace(/\s+/g, ' ').trim();
+  if (!x) return false;
+  if (ANNONCE.test(x)) return true;                                               // il a annoncé une explication dans ce tour
+  if (/(,|-)$/.test(x)) return true;                                              // « … et puis, »
+  const mots = x.replace(/[^a-z0-9' ]+/g, ' ').trim().split(' ').filter(Boolean);
+  return !/[.?!…]$/.test(x) && mots.length > 0 && MOTS_SUITE.has(mots[mots.length - 1].replace(/'$/, ''));
+}
