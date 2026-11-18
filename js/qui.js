@@ -101,7 +101,13 @@ export class Qui {
     this.hist.push({ ...r, at: now }); if (this.hist.length > 3) this.hist.shift();
     const bons = this.hist.filter((h) => h.nom === r.nom && h.d < SUR && h.d2 - h.d >= ECART && now - h.at < 15000);
     const loin = this.hist.filter((h) => h.d >= PROBABLE && now - h.at < 15000);
-    const sur = bons.length >= 2, inconnu = !sur && loin.length >= 2 && r.d >= PROBABLE;
+    // Journal du 18/11/26 : une fois sûr, le visage n'est revu que toutes les 20 s (V4) ; les analyses d'avant avaient alors plus
+    // de 15 s, seule la nouvelle comptait, et « sûr » tombait à chaque fois pendant 2 s (« c'est Timothée » noté toutes les 22 s).
+    // Sa remarque a été refusée dans ce trou (09h23:54, « je ne reconnais pas Timothée », reconnu à 09h23:32 et 09h23:55), et
+    // l'outil visages a répondu « pas assez sûr » (09h22:03). Une personne déjà sûre, revue de près et nettement devant la
+    // suivante, le reste : c'est la 2e analyse sur 3 qui la confirme (V3).
+    const A0 = this.actuel, revu = !!(A0 && A0.sur && A0.nom === r.nom && now - A0.at < REVOIR_MS + 10000 && r.d < SUR && r.d2 - r.d >= ECART);
+    const sur = bons.length >= 2 || revu, inconnu = !sur && loin.length >= 2 && r.d >= PROBABLE;
     this._poser({ nom: sur ? r.nom : null, sur, inconnu, d: Math.round(r.d * 100) / 100, at: now, faces: M.faces || (this.vision ? this.vision.faces : 1), facing: !!M.facing, probable: !sur && r.d < PROBABLE ? r.nom : null });
   }
 
