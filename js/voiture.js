@@ -18,11 +18,24 @@ export function estTravail(t, { clients = [] } = {}) {
   const x = plat(t).trim();
   if (!x || PAS_TRAVAIL.test(x)) return false;
   if (/prochaine mise a jour|remarque|pour ta mise a jour/.test(x)) return false;        // une remarque sur Wilson : outil remarque
+  if (refusEcriture(x)) return false;                                                     // « pas besoin de me rajouter une tâche » (19/11/26, 16h13)
   if (MOTS_TRAVAIL.test(x) || RACINES_TRAVAIL.test(x)) return true;
   // « Appelle Pipard » (un client) — mais pas « s'il faut que je t'appelle dix fois » (c'est Wilson qu'il appelle)
   if (/(^|[^'a-z])(appelle|appeler|telephone a|telephoner a) (?!moi\b|toi\b|wilson\b)/.test(x)) return true;
   return clients.some((c) => { const n = plat(c).replace(/[^a-z0-9 ]+/g, ' ').trim(); return n.length >= 4 && n.split(' ').some((m) => m.length >= 4 && new RegExp('\\b' + m + '\\b').test(x)); });
 }
+// Il REFUSE qu'on écrive (journal du 19/11/26, 16h13:00, en voiture : « il y a pas besoin de valider, je t'ai dit que c'était
+// fait déjà. T'as pas besoin de me rajouter une tâche… ») : « Pardon, je n'ajoute rien » a été retenu par le verrou de vérité,
+// qui a exigé crm_noter (« tâche » = écriture) : un compte rendu en trop a été préparé, qu'il a fallu supprimer. Vrai seulement
+// si, une fois les refus ôtés, il ne reste aucune autre demande d'écrire (« pas besoin de valider, note plutôt… » en est une).
+const REFUS_ECRITURE = /\b(?:pas (?:besoin|la peine)|inutile)(?: de| d')\s*(?:me |m'|le |la |l'|les |lui |en |une |un )*(?:r?ajout\w*|not\w*|valid\w*|enregistr\w*|mettre|met|cre\w*|marqu\w*|fair\w* (?:une?|de) (?:tache|note|compte[- ]rendu))\b[^.!?,;]*|\b(?:ne|n') ?(?:me |m'|le |la |l'|en )?(?:r?ajoute|note|mets|met|cree|enregistre|marque)s? (?:rien|pas|plus)\b[^.!?,;]*/g;
+export function refusEcriture(t) {
+  const x = plat(t);
+  if (!x.match(REFUS_ECRITURE)) return false;
+  return !estEcriture(x.replace(REFUS_ECRITURE, ' '));
+}
+// Wilson dit qu'il a écrit (pas un simple « c'est noté » d'accord) : jamais vrai sans crm_confirmer.
+export function annonceEcritureFaite(t) { return /\b(c'est (enregistre|ajoute|cree)|j'ai (ajoute|enregistre|cree|prepare)|c'est pret dans (le|ton) crm)\b/.test(plat(t)); }
 // Une écriture demandée (visite, compte rendu, tâche, rendez-vous) : jamais l'analyste (lecture seule) à sa place.
 export function estEcriture(t) {
   return /\b(note|notes|noter|enregistre|enregistrer|indique|indiquer|ajoute|ajouter|mets|mettre|marque|marquer|compte[- ]rendu|tache|cree|creer)\b|j'ai vu|je suis passe|je reviens de/.test(plat(t));

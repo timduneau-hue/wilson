@@ -128,6 +128,25 @@ export class Maison {
     return null;
   }
 
+  // Remarque du 19/11/26, 08h55 : « quand je demande de démarrer la voiture pour la faire chauffer, il manque le chauffage et
+  // le dégivrage avant et arrière », alors qu'à 08h42 l'appli avait bien demandé les trois et que la voiture avait « confirmé »
+  // (seulement l'état de la clim du module). Pour le journal (Claude cherche la cause) : ce que Home Assistant voit vraiment de
+  // la voiture une minute après, chauffage, consigne, dégivrages, état du module et dernier refus. Rien n'est envoyé à la voiture.
+  async etatVoiture(signal) {
+    const all = await this._fetch('/api/states', { signal });
+    if (!all.ok || !Array.isArray(all.json)) return null;
+    const nom = (x) => String((x.attributes || {}).friendly_name || x.entity_id);
+    const parts = [];
+    for (const x of all.json) {
+      const id = x.entity_id || '', d = id.split('.')[0], a = x.attributes || {};
+      if (d === 'climate' && this._voiture({ nom: nom(x), id })) parts.push(`${nom(x)} : ${x.state}${a.temperature != null ? ` (consigne ${a.temperature})` : ''}${a.hvac_action ? `, ${a.hvac_action}` : ''}`);
+      else if (d === 'switch' && this._voiture({ nom: nom(x), id })) parts.push(`${nom(x)} : ${x.state}`);
+      else if (/^sensor\..*remote_climate_state$/.test(id)) parts.push(`clim du module : ${x.state}`);
+      else if (/^event\..*command_error$/.test(id) && Date.parse(x.state) > Date.now() - 600000) parts.push(`refus du module à ${new Date(Date.parse(x.state)).toTimeString().slice(0, 5).replace(':', 'h')} : ${String(a.detail || '?').slice(0, 120)}`);
+    }
+    return parts.length ? parts.join(' ; ') : null;
+  }
+
   // ---------- Inventaire ----------
   // Appareils pilotables : états (/api/states) + pièce et « caché » (un modèle de Home Assistant). Les interrupteurs de
   // réglage (LED, arrêt automatique, mise à jour) et les prises cachées (devenues des lumières) sont écartés.

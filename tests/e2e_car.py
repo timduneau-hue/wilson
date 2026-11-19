@@ -97,7 +97,7 @@ async def main():
         st = await page.evaluate("({ car: !!wilson.car, cls: document.body.classList.contains('car'), vision: !!wilson.vision, hint: document.getElementById('car-hint').textContent, ov: !document.getElementById('car').hidden })")
         check('Mode voiture : écran voiture, caméra coupée, « Dis Wilson »', st['car'] and st['cls'] and st['ov'] and not st['vision'] and 'Wilson' in st['hint'], str(st))
         await page.wait_for_timeout(1500)
-        acts = [c['action'] for c in sc['calls']]
+        acts = [c['action'] for c in sc['calls'] if c['action'] != 'crm_annuaire']   # (l'annuaire est lu au démarrage depuis la 1.42.0)
         check('Journée préparée : agenda du jour puis fiche du RDV', acts[:2] == ['crm_journee', 'crm_client'], str(acts))
         await page.screenshot(path=os.path.join(S, 'shots', 'voiture.png'))
 
