@@ -20,6 +20,8 @@ node qui_unit.mjs                                        # reconnaissance des vi
 node relais_unit.mjs                                     # relais Claude du PC et CRM en lecture seule (PLAN 10)
 ```
 
+Sur le PC de la maison (Windows), Chromium ne termine jamais `audioWorklet.addModule` : lancer les tests avec `PYTHONPATH=tests\pc_audio` (le relais le fait tout seul pour l'atelier), qui remplace le module audio par un ScriptProcessor sur les pages locales.
+
 | Fichier | Ce qui est vérifié |
 |---|---|
 | `e2e.py` | Mode direct (Gemini Live simulé) : réveil, parole, coupure, outils, réglages |

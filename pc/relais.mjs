@@ -477,6 +477,14 @@ export class Relais {
       const args = argumentsAtelier({ consigne: fs.readFileSync(path.join(this.dir, 'consigne-correction.md'), 'utf8'), modele: modelePour(this.cfg.modele), effort: 'high' });
       const env = { ...process.env, ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER || '' };
       delete env.ANTHROPIC_API_KEY;                                         // jamais de facturation à l'usage : l'abonnement seulement
+      // 19/11/26 : sur le PC de la maison, Chromium ne charge jamais le module audio (audioWorklet.addModule) et tous les
+      // tests e2e restaient bloqués, donc plus rien n'était publié. tests\pc_audio\sitecustomize.py le remplace, pour les
+      // tests lancés ici seulement ; PYTHONIOENCODING : les tests affichent des émojis.
+      if (process.platform === 'win32') {
+        const shim = path.join(base, DEPOTS_ATELIER.wilson, 'tests', 'pc_audio');
+        env.PYTHONPATH = [shim, env.PYTHONPATH].filter(Boolean).join(path.delimiter);
+        env.PYTHONIOENCODING = 'utf-8';
+      }
       const p = spawn(this.exe(), args, { cwd: base, env, windowsHide: true, detached: process.platform !== 'win32' });
       let out = '', err = '';
       const minuteur = setTimeout(() => { arreterArbre(p); ko(new Error(`la correction n'a pas fini en ${ATELIER_MAX_MS / 60000} min`)); }, ATELIER_MAX_MS);
