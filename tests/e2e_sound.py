@@ -153,6 +153,15 @@ async def main():
         check('Batterie débranchée : jamais signalée de lui-même', r == [False, False, False, False, False], str(r))
 
         errs = [l for l in logs if 'PAGEERROR' in l]
+        # ---- Trous dans la voix (journal du 19/11/26, 16h05 et 18h23 : voix « coupée net, saccadée » quand le réseau rame) ----
+        r = await page.evaluate("""(async () => { const A = wilson.audio, z = new Int16Array(2400), att = (ms) => new Promise((ok) => setTimeout(ok, ms));
+          A.flush(); A.nouveauTour(); const base = A.avance || (A.mobile ? 0.18 : 0.06);
+          A.play(z); await att(600); A.play(z); const t1 = A.trous, s1 = A.trousSec, av = A.avance;
+          await att(3600); A.play(z); const t3 = A.trous;
+          A.nouveauTour(); await att(500); A.play(z); const r = { base, t1, s1, av, t3, t2: A.trous, av2: A.avance }; A.flush(); A.nouveauTour(); return r; })()""")
+        check('Voix qui se tait en pleine réponse (réseau en retard) : trou compté avec sa durée (avant : jamais compté)', r['t1'] == 1 and r['s1'] >= 0.3, str(r))
+        check('… voix gardée d\'avance agrandie après un trou, redescend d\'un cran à la réponse suivante', r['av'] > r['base'] and r['base'] <= r['av2'] < r['av'], str(r))
+        check('… pause voulue de plus de 3 s (outil attendu) et début d\'une nouvelle réponse : pas comptés comme trous', r['t3'] == 1 and r['t2'] == 0, str(r))
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
         await b.close()
     print(f"\n{sum(results)}/{len(results)} vérifications OK")

@@ -13,7 +13,7 @@ export class AudioIO {
     this.listeners = { frame: [], speechstart: [], speechend: [], drained: [], mic: [], info: [] };
     // Micro pris par le téléphone (appel) : Android ne donne plus que du silence numérique (zéros), ou coupe la piste.
     this.micTaken = false; this.takenN = 0; this._muted = false; this._zero = false; this._zeroMs = 0; this._liveMs = 0;
-    this.sources = []; this.nextTime = 0; this.outLevel = 0; this.outRound = 0;
+    this.sources = []; this.nextTime = 0; this.outLevel = 0; this.outRound = 0; this._tourNeuf = true; this.trous = 0; this.trousSec = 0;
     this.gainDb = 0; this.aec = false; this.playedSec = 0;
     this.micDevice = null; this.micInfo = ''; this.btIn = false;
     this.natif = false; this._natifAt = 0; this._natifKo = false; this.natifRelances = 0;
@@ -376,10 +376,23 @@ export class AudioIO {
     const buf = this.ctx.createBuffer(1, f.length, rate); buf.copyToChannel(f, 0);
     const src = this.ctx.createBufferSource(); src.buffer = buf; src.connect(this.out);
     const now = this.ctx.currentTime;
+    // Avance (voix gardée d'avance) : 0,18 s sur le téléphone, 0,06 s ailleurs. Journal du 19/11/26, 16h05 et 18h23 (voix
+    // « coupée net, saccadée » en voiture quand le réseau rame) : un trou en pleine réponse n'était compté que si un morceau
+    // jouait encore (jamais, puisque la voix s'était tue), et l'avance restait trop courte. Maintenant chaque trou est compté
+    // avec sa durée, et l'avance grandit après un trou (jusqu'à 0,8 s sur le téléphone), puis redescend doucement.
+    const base = this.mobile ? 0.18 : 0.06, max = this.mobile ? 0.8 : 0.4;
+    if (!(this.avance >= base)) this.avance = base;
     if (this.nextTime < now + 0.03) {                               // petite avance pour une voix sans à-coups
-      if (this.nextTime > 0 && this.sources.length) this.trous = (this.trous || 0) + 1;   // trou en pleine réponse (réseau en retard)
-      this.nextTime = now + (this.mobile ? 0.18 : 0.06);
+      const silence = this.nextTime > 0 ? now - this.nextTime : Infinity;
+      // Trou en pleine réponse : la réponse avait déjà commencé (pas un nouveau tour) et la voix s'est tue moins de 3 s
+      // (au-delà, c'est une pause voulue : résultat d'outil attendu).
+      if (!this._tourNeuf && silence <= 3) {
+        this.trous = (this.trous || 0) + 1; this.trousSec = (this.trousSec || 0) + Math.max(0, silence) + this.avance;
+        this.avance = Math.min(max, this.avance + (this.mobile ? 0.2 : 0.12));
+      }
+      this.nextTime = now + this.avance;
     }
+    this._tourNeuf = false;
     src._debut = this.nextTime; src._duree = buf.duration;
     src.start(this.nextTime); this.nextTime += buf.duration; this.playedSec += buf.duration;
     this.sources.push(src);
@@ -415,7 +428,12 @@ export class AudioIO {
   // Silence immédiat (on lui coupe la parole).
   flush() {
     for (const s of this.sources) { try { s.onended = null; s.stop(); } catch (_) {} }
-    this.sources = []; this.nextTime = 0; this._emit('drained');
+    this.sources = []; this.nextTime = 0; this._tourNeuf = true; this._emit('drained');
+  }
+  // Fin d'une réponse : les trous comptés repartent de zéro, l'avance redescend d'un cran (le réseau a pu revenir).
+  nouveauTour() {
+    this._tourNeuf = true; this.trous = 0; this.trousSec = 0;
+    const base = this.mobile ? 0.18 : 0.06; this.avance = Math.max(base, (this.avance || base) - 0.1);
   }
 
   // Niveau de la voix de Wilson pour animer la bouche ; « round » ≈ voyelles sombres (o, ou).

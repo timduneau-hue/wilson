@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.19';
+const VERSION = '1.45.20';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -1500,7 +1500,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       for (const r of rs || []) {
         if (r.name === 'exprimer_emotion') continue;
         const txt = typeof r.response?.result === 'string' ? r.response.result : JSON.stringify(r.response || {});
-        this.log(`Outil ${r.name} → Gemini : « ${txt.replace(/\s+/g, ' ').slice(0, 160)} »${r.scheduling ? ` (${r.scheduling})` : ''}`, true);
+        this.log(`Outil ${r.name} → Gemini : « ${txt.replace(/\s+/g, ' ').slice(0, 600)} »${r.scheduling ? ` (${r.scheduling})` : ''}`, true);
         this._noteChiffres(txt);                                                   // chiffres qui ont une source (garde du 05/11/26)
         if (!/ne correspond pas à ce que tu as entendu|Personne ne te regardait/.test(txt)) this._noteSource(txt);   // noms qui ont une source (protocole voiture)
       }
@@ -1522,7 +1522,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       if (!muet && !fond && !dejaDit) this._apresOutil = { at: performance.now(), conv: this.convId, turnN: this._turnN, noms: (rs || []).map((r) => r.name).join(', ') };
     };
     b.sendText = (t) => {
-      this.log(`Consigne à Gemini : « ${String(t).replace(/\s+/g, ' ').slice(0, 160)} »`, true); this._noteChiffres(t);
+      this.log(`Consigne à Gemini : « ${String(t).replace(/\s+/g, ' ').slice(0, 400)} »`, true); this._noteChiffres(t);
       // Protocole voiture : un résultat donné en message (analyste, outil fini après coup) ou une phrase dictée par l'appli
       // peut être dit ; une simple relance (« réponds-lui ») ne lève pas le verrou.
       if (RE_CONSIGNE_FONDEE.test(String(t))) { if (!/^\[ATTENTION/.test(String(t))) this._noteSource(t); this._vvFonde('un résultat donné en message'); }
@@ -1602,7 +1602,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       const vv = this._protocole && this._vv && this._vv.n === this._turnN - 1 ? this._vv : null;
       if (vv && this._vvFin(vv, user, wilson) === 'jete') {
         this._liveTurn = null;
-        if (user) { this.log(`Entendu : « ${user.slice(0, 160)} »`, true); (this._entendus = this._entendus || []).push(user); this._entendus.splice(0, this._entendus.length - 6); this._parleDepuis = true; }
+        if (user) { this.log(`Entendu : « ${user.slice(0, 600)} »`, true); (this._entendus = this._entendus || []).push(user); this._entendus.splice(0, this._entendus.length - 6); this._parleDepuis = true; }
         if (user) this.memory.addExchange(user, '', this.famille._parle());
         $('subtitle').textContent = '';
         return;
@@ -1612,13 +1612,13 @@ Nous sommes ${fmtDate()}.${nv}`;
         const did = this._didascalie === this._turnN - 1;
         this._doublon = null; this._didascalie = null; this._liveTurn = null; this._modelTalking = 0;
         this.log(did ? (VP.ditPasPourMoi(wilson) && !VP.estDidascalie(wilson) ? `« Ce n'est pas pour moi » coupé (il se tait vraiment, sans le dire) : « ${wilson.slice(0, 100)} »` : `Didascalie coupée (il voulait se taire, rien n'est dit) : « ${wilson.slice(0, 100)} »`) : `Réponse en double coupée (déjà dite) : « ${wilson.slice(0, 100)} »`, true);
-        if (did && user) { this.log(`Entendu : « ${user.slice(0, 160)} »`, true); (this._entendus = this._entendus || []).push(user); this._entendus.splice(0, this._entendus.length - 6); }
+        if (did && user) { this.log(`Entendu : « ${user.slice(0, 600)} »`, true); (this._entendus = this._entendus || []).push(user); this._entendus.splice(0, this._entendus.length - 6); }
         return;
       }
       if (this._retenu === this._turnN - 1) {
         // Réponse retenue (R1) : rien n'a été dit ; on note ce qu'il aurait dit, et surtout pas de relance.
         this._retenu = null; this._liveTurn = null; this._modelTalking = 0;
-        if (user) this.log(`Entendu (sans regard) : « ${user.slice(0, 160)} »`, true);
+        if (user) this.log(`Entendu (sans regard) : « ${user.slice(0, 600)} »`, true);
         this.log(`Wilson se tait (personne ne le regardait)${wilson ? ` — il aurait dit : « ${wilson.slice(0, 100)} »` : ''}`, true);
         this._nvSuivi(wilson, true);
         if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
@@ -1630,16 +1630,16 @@ Nous sommes ${fmtDate()}.${nv}`;
       // La suite d'une demande (outil) est dite : la permission donnée par l'outil s'arrête ; la prochaine phrase devra être
       // dite en le regardant (R1). Le toucher et les boutons gardent leurs 30 s.
       if (wilson && /^outil/.test(this._permisPour || '') && (this._outilRepAt || 0) >= (this._permisDepuis || 0) && !(this._searches && this._searches.size) && !(this._analyses && this._analyses.size)) this._permisJusqua = 0;
-      if (user) this.log(`Entendu : « ${user.slice(0, 160)} »`, true);
+      if (user) this.log(`Entendu : « ${user.slice(0, 600)} »`, true);
       const imgs = this._imgN || 0, T = this._liveTurn; this._imgN = 0;
       if (T && wilson) {
         const s = T.delay;
         this.log(`Délais (direct) : 1er son ${s != null ? s + ' s' : '?'} après la fin de ta phrase (${this.brain.modelUsed}${T.search ? `, dont recherche ${(T.search / 1000).toFixed(1)} s` : ''})`);
         this.remote.mesure({ google: s, voix: s != null ? Math.round((s + 0.06 + (this.audio.ctx.outputLatency || 0)) * 10) / 10 : null, modele: this.brain.modelUsed, reflexion: 'direct',
           recherche: T.search ? Math.round(T.search / 100) / 10 : null });
-        this.log(`Voix du direct : ${T.sec.toFixed(1)} s reçues${this.audio.trous ? `, ${this.audio.trous} trou(s) (voix arrivée en retard)` : ''}, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} photo(s) prise(s) à la demande${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
+        this.log(`Voix du direct : ${T.sec.toFixed(1)} s reçues${this.audio.trous ? `, ${this.audio.trous} trou(s) dans sa voix (${(this.audio.trousSec || 0).toFixed(1)} s de silence en tout, voix gardée d'avance portée à ${(this.audio.avance || 0).toFixed(2)} s)` : ''}, niveau de sortie max ${Math.round((this._outPeak || 0) * 100)} %, ${imgs} photo(s) prise(s) à la demande${this.vision ? `, lumière ${Math.round(this.vision.light * 100)} %` : ''}`);
       }
-      this._liveTurn = null; this._outPeak = 0; this.audio.trous = 0;
+      this._liveTurn = null; this._outPeak = 0; this.audio.nouveauTour();
       // Journal du 05/11/26, 11h05:35 (« Tu te rappelles pas ma dernière question ? » → « trou de mémoire ») : une demande
       // arrivée par l'oreille (« Wilson, j'en suis où dans mes clients actifs ? ») part en texte, sans transcription de
       // Google : elle n'entrait pas dans les derniers échanges, et la discussion suivante ne la connaissait pas.
@@ -1656,7 +1656,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       if (wilson) {
         this._demandeTexte = null;
         this._derniereReponse = { texte: wilson, at: performance.now(), coupee }; this._parleDepuis = false;
-        this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson); this._enregistreFaux(wilson); this._afficheSansOutil(wilson);
+        this.log('Wilson : ' + wilson.slice(0, 1500), true); /* 19/11/26 : réponse entière (avant : 120 caractères) */ this._remarqueOubliee(wilson); this._enregistreFaux(wilson); this._afficheSansOutil(wilson);
         this.famille.dit(wilson);                                                // message de la famille bien transmis (7 sexies, M3)
         this.questions.dit(wilson, this.convId);                                 // question de Claude posée à Timothée (7 septies, D)
         // Journal du 30/10/26, 22h39 : « To hear your thoughts on something specific, just let me know. » → il le redit en français.
@@ -2297,6 +2297,8 @@ Nous sommes ${fmtDate()}.${nv}`;
     if (this.brain.syncTools ? calls.length : calls.some((c) => c.name !== 'exprimer_emotion' && c.name !== 'memoriser')) { this._toolTurn = this._turnN; this._toolAt = performance.now(); }
     for (const c of calls) {
       const a = c.args || {};
+      // 19/11/26 (remarque de Timothée, 18h24) : chaque outil demandé par Gemini est noté, avec ce qu'il demande.
+      if (c.name !== 'exprimer_emotion') this.log(`Outil demandé : ${c.name} ${JSON.stringify(a).slice(0, 300)}`);
       // Journal du 11/11/26, 11h55:28 et 21h03:30 : « Je regarde où tu en es… » / « Je prépare ton briefing… » dit (permis),
       // puis l'outil du MÊME tour refusé (« voix 0.0 s ») : la fin de cette petite phrase remettait le compte à zéro, et
       // Timothée a dû redemander. Un outil appelé dans un tour qui a déjà eu le droit de parler est permis.
