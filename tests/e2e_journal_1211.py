@@ -373,6 +373,7 @@ async def main():
         r = resp(c, 'j1') or ''
         check('« Ma journée » : rendez-vous du CRM et agendas Google réunis (avec le nom de l\'agenda)', ok and '10h00 : M LEBRE Jean, LEBRE' in r and 'Dans ses agendas Google' in r and 'Réunion agence (Nantes) [agenda BOSCHAT LAVEIX]' in r and 'Médecin Louis' in r, r[:500])
         check('… le rendez-vous client déjà dans le CRM n\'est pas redit', 'RDV LEBRE' not in r, r[:500])
+        check('… un événement de l\'agenda Famille : « pas forcément le sien » dit à Gemini (journal du 19/11/26, 18h25:51)', 'Médecin Louis [agenda Famille]' in r and 'pas forcément le sien' in r, r[:700])
         check('… demandé en lecture seule, tous les agendas, pour ce jour-là', any(x.get('action') == 'agenda_lire' and x.get('tous') is True and x.get('jours') == 1 for x in st['calls']))
         # ---------- 13 bis. « Tu m'amènes à mon prochain rendez-vous » (journal du 19/11/26, 11h17:14) ----------
         # Gemini avait choisi le rendez-vous de 11h00, déjà fait (il était 11h17) : il a dû le reprendre.

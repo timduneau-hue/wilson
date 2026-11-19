@@ -352,6 +352,7 @@ async def main():
         st['agenda'].pop()
         r = await outil(page, c7, 'a5', 'agenda', {'action': 'lire', 'du': j, 'jours': 3})
         check('« On a quoi ce week-end ? » : événements lus et dits', 'Week-end chez mamie' in r and 'Médecin Louis' in r and '(Angers)' in r, r)
+        check('… agenda partagé : « pas forcément le sien », pas de « tu as » (journal du 19/11/26, 18h25:51)', "pas forcément le sien" in r and "ne dis pas « tu as »" in r, r)
         await page.evaluate("wilson.continuous = false; wilson.endConversation('test')"); await page.wait_for_timeout(300)
 
         # ---- Q : réactions muettes ----
