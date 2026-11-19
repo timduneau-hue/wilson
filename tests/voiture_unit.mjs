@@ -123,6 +123,11 @@ check('… et le client refusé est Grandbat, pas ABM', V.clientRefuse("Moi, je 
 check('« Là, tu m\'emmènes chez Grandbat, je veux pas ! » : reproche', V.guidageDit("Là, tu m'emmènes chez Grandbat, je veux pas !") === 'non');
 check('« pourquoi tu as activé le GPS alors que j\'ai pas dit qu\'on allait à Lèbre ? » : reproche (06/11)', V.guidageDit("Et pourquoi tu as activé le GPS alors que j'ai pas dit que on allait à Lèbre ?") === 'non');
 check('« Tu m\'emmènes chez Lebre ? » : demande', V.guidageDit("Tu m'emmènes chez Lebre ?") === 'oui');
+// Journal du 19/11/26, 16h23:50 (1.45.17) : « Tu peux pas le mettre directement sur mon GPS. » refusé (« il ne l'a pas demandé »)
+for (const u of ['Tu peux pas Tu peux pas le mettre directement sur mon GPS.', 'Tu peux pas me mettre le GPS vers Gaudin ?', 'Tu pourrais pas me guider chez ABM ?', "Tu ne peux pas m'emmener chez Lebre ?"])
+  check(`demande en forme de question négative : « ${u} »`, V.guidageDit(u) === 'oui', V.guidageDit(u));
+for (const u of ["Tu peux pas lancer le GPS sans me demander, je t'ai rien demandé.", 'Pourquoi tu peux pas le mettre sur le GPS ?', 'Tu peux pas me guider, je vais pas chez lui.', "Tu peux pas savoir ce que le GPS m'a fait."])
+  check(`toujours pas une demande : « ${u} »`, V.guidageDit(u) !== 'oui', V.guidageDit(u));
 for (const u of ['tu supprime la destination dans le GPS là.', 'Tu supprimes toutes les le GPS là, enlève-le.', 'Arrête le guidage', 'Coupe la navigation', "J'ai plus besoin du GPS"])
   check(`arrêter le guidage : « ${u} » (relancé deux fois le 12/11)`, V.guidageDit(u) === 'arret' && V.estArretGuidage(u), V.guidageDit(u));
 for (const u of ['Mathieu Onjubaud', 'Oui. Oui.', 'Voilà.', 'Qui est le magasinier chez ABM ?', 'Je vais voir Yoann là, il y a des sujets à aborder ?'])

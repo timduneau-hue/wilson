@@ -9,7 +9,7 @@ pip install playwright && playwright install chromium   # une fois
 python3 make_voix.py                                     # voix de synthèse pour l'oreille du mode voiture (espeak-ng + mbrola-fr1/fr4)
 cd .. && python3 -m http.server 8765 --bind 127.0.0.1 &  # servir l'appli (dossier racine du dépôt)
 cd tests && for t in e2e.py e2e_eco.py e2e_echo.py e2e_conn.py e2e_key.py e2e_update.py stream_unit.py e2e_gaze.py e2e_speed.py e2e_remote.py e2e_sound.py e2e_live_search.py e2e_attention.py e2e_sync.py e2e_vision_health.py e2e_crm.py e2e_car.py e2e_journal_2510.py e2e_route.py e2e_question.py e2e_maison.py e2e_adresse.py e2e_outils.py e2e_regard_sur.py e2e_bluetooth.py e2e_doublon.py e2e_voiture_0411.py e2e_oreille_0411.py e2e_crm_0411.py e2e_sourd_0411.py e2e_famille.py e2e_memoire.py e2e_journal_0511.py e2e_journal_0511b.py e2e_journal_0511c.py e2e_journal_0511d.py e2e_journal_1211.py e2e_android.py e2e_android_micro.py e2e_claude.py e2e_journal_1011.py e2e_journal_1311.py e2e_journal_1411.py e2e_journal_1611.py; do python3 $t; done
-node voiture_unit.mjs                                    # règles du protocole voiture sur les phrases du journal
+node voiture_unit.mjs                                    # règles du protocole voiture sur les phrases du journal (1.45.17 : « tu peux pas le mettre sur mon GPS ? » = une demande)
 node annuaire_unit.mjs                                   # annuaire du CRM gardé sur l'appareil : retrouver le client et la personne (1.45.16 : son final « é / è » : -et = -ais = -é)
 python3 e2e_famille_modeles.py                           # visages et sons avec les vrais modèles (lent)
 node apps_script_unit.js                                 # script Apps Script du journal, avec une fausse feuille
@@ -103,3 +103,7 @@ Remarque du 19/11/26 08h55 : « quand je demande de démarrer la voiture pour la
 Réponse du 19/11/26 08h56 à la question qmwltsivs (« désactiver la surveillance et l'envoi d'alertes par e-mail quand il n'y a personne ») — pas de correction : déjà fait dans la 1.45.8 (garde coupée), confirmé par le PC de la maison à 08h59.
 
 Remarque du 19/11/26 16h06 : « La voix coupe sans arrêt, problème de son ou de réseau à vérifier » (téléphone, en voiture) — pas de correction ici : traitée par le PC de la maison (16h08, question posée avant de corriger : petits trous au milieu des mots, ou arrêt net en pleine phrase ?).
+
+Remarques du 19/11/26 16h09 : « Problème de compréhension pour naviguer vers l'entreprise […] : il faut proposer l'itinéraire vers la société, pas seulement les contacts, et mieux gérer les noms similaires » et « Problème pour trouver l'entreprise […] pour le guidage, Wilson proposait des contacts à la place » (téléphone, en voiture) — pas de correction ici : traitées par le PC de la maison (16h12, correction du CRM à merger ; 16h13, partie Wilson prête mais pas publiée, ses tests sont bloqués). Les finales -et / -ais de l'annuaire du téléphone sont déjà corrigées dans la 1.45.16.
+
+Remarques du 19/11/26 16h14 : « un résumé de tout l'historique de la discussion depuis 16h environ » et « un historique de ce qui s'est passé depuis 16h et un diagnostic pour la prochaine mise à jour » — pas de correction : demande de bilan, fait par le PC de la maison (16h14 et 16h16).
