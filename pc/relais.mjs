@@ -5,7 +5,7 @@
 // Relais 10 (décision de Timothée du 16/11/26) : l'ATELIER. Une remarque faite à Wilson (« il y a un bug ») arrive ici tout de
 // suite ; Claude corrige le code (dépôts wilson et crm-boschat, clonés dans atelier\) et lance les tests, sans pouvoir ni
 // pousser ni publier lui-même ; c'est le relais qui ouvre ensuite la demande de modification sur GitHub (gh, compte de
-// Timothée). Wilson : publiée seule si « Vérifier » et le gardien sont d'accord ; CRM : attend toujours le Merge de Timothée.
+// Timothée). Wilson et CRM : publiés seuls si les vérifications passent (plus aucun Merge depuis le 19/11/26).
 // Lancé tout seul à l'ouverture de session (boucle.cmd, fenêtre cachée) ; Node 18 ou plus, sans bibliothèque.
 
 import { spawn, spawnSync, execFile, execFileSync } from 'node:child_process';
@@ -458,7 +458,7 @@ export class Relais {
       for (const cle of Object.keys(DEPOTS_ATELIER)) { const l = this.publier(base, cle, res[cle], q, quand); if (l) liens.push(l); }
       const s = Math.round((Date.now() - t0) / 1000);
       const dire = res.dire || (liens.length ? 'Correction proposée.' : res.question ? '' : 'Rien à corriger dans le code pour cette remarque.');
-      rendu = { ok: true, dire, question: res.question || '', detail: liens.map((l) => `${l.depot === 'crm-boschat' ? 'CRM (touche Merge pour le mettre en ligne)' : 'Wilson (publié seul si les vérifications passent)'} : ${l.url}`).join('\n'), duree: s, etapes: r.etapes || 0 };
+      rendu = { ok: true, dire, question: res.question || '', detail: liens.map((l) => `${l.depot === 'crm-boschat' ? 'CRM' : 'Wilson'} (publié seul si les vérifications passent) : ${l.url}`).join('\n'), duree: s, etapes: r.etapes || 0 };
       this.journal(`correction finie en ${Math.round(s / 60)} min : ${dire}${res.question ? ' — question : ' + res.question : ''}`);
     } catch (e) {
       rendu = { ok: false, erreur: String(e.message || e).slice(0, 400), duree: Math.round((Date.now() - t0) / 1000) };
