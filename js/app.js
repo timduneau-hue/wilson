@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.11';
+const VERSION = '1.45.12';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -3680,7 +3680,12 @@ Nous sommes ${fmtDate()}.${nv}`;
       // Un téléphone bouge tout le temps (dans la main, en voiture) : plus de « Oulà, ça a bougé ! » (journal du 25/10/26).
       if (this.car || deviceName() === 'téléphone') return;
       this.face.setEmotion('peur', 2500);
-      if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText('[La tablette vient d\'être secouée ou déplacée.]');
+      if (!(this.state === 'conversation' && this.mode === 'live' && this.brain.open)) return;
+      // Journal du 19/11/26, 08h40:56 : la tablette a bougé pendant que Wilson lui disait un message ; la consigne a fait couper
+      // sa réponse par Google, le message est resté à moitié dit, et « Tu peux répéter ? » (08h41:16, 08h41:20) a eu deux
+      // fois « oups, ça a bougé ! ». Pendant qu'il parle (ou que sa réponse arrive) : seulement la tête de peur, rien à Gemini.
+      if (this.speaking || this._liveTurn) { this.log('Tablette secouée pendant qu\'il parle : rien dit à Gemini, sa phrase continue'); return; }
+      this.brain.sendText('[La tablette vient d\'être secouée ou déplacée.]');
     });
     s.on('battery', (b) => {
       const was = this.battery; this.battery = b;

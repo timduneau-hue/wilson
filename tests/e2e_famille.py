@@ -185,6 +185,29 @@ async def main():
         check('… Louis le regarde au calme : le message de Timothée ne lui est pas dit', not any('pense au pain' in t for t in cl['texts']), str(cl['texts']))
         await page.evaluate("wilson.endConversation('test'); __regarde(false); __qui(null); wilson.famille.msgs.forEach((m) => { if (m.id === 'mt2') m.annule = 1; })"); await page.wait_for_timeout(300)
 
+        # ---- Journal du 19/11/26, 08h40:56 : nouvelle de la voiture de la veille (18/11, 09h29) dite le lendemain matin
+        # (« Mais c'était hier ») → périmée au bout de 2 h ; les autres messages ne changent pas ----
+        ids = await page.evaluate("""(() => { const F = wilson.famille, now = Date.now();
+          F.msgs.push({ id: 'nv_vieux', pour: 'Timothée', de: 'Wilson', texte: 'Nouvelles de la voiture (9h29) : la voiture a refusé la commande.', t: now - 23 * 3600000 },
+            { id: 'nv_frais', pour: 'Timothée', de: 'Wilson', texte: 'Nouvelles de la voiture (8h42) : la voiture confirme : le chauffage est en route.', t: now - 30 * 60000 },
+            { id: 'mv_vieux', pour: 'Timothée', de: 'Marie', texte: 'pense au garage', t: now - 23 * 3600000 });
+          const l = F.enAttente('Timothée').map((m) => m.id);
+          F.msgs.forEach((m) => { if (/^(nv_|mv_)/.test(m.id)) m.annule = 1; });
+          return l; })()""")
+        check('Nouvelle de la voiture de la veille : plus dite (périmée au bout de 2 h, journal du 19/11/26, 08h40)', 'nv_vieux' not in ids, str(ids))
+        check('… nouvelle de la voiture d\'il y a 30 min et message de Marie de la veille : toujours dits', 'nv_frais' in ids and 'mv_vieux' in ids, str(ids))
+
+        # ---- Journal du 19/11/26, 08h40:56 : tablette secouée pendant que Wilson parle → rien à Gemini (sa réponse était coupée
+        # et « Tu peux répéter ? » donnait « oups, ça a bougé ! ») ; au calme, la réaction reste ----
+        await page.evaluate("__regarde(true); __qui({ nom: 'Timothée', sur: true }); wilson.startConversation('regard')")
+        await page.wait_for_function('wilson.brain.open && wilson.state === "conversation"', timeout=8000); cs = conns[-1]
+        await page.wait_for_timeout(500)
+        await page.evaluate("wilson._liveTurn = { t: performance.now(), sec: 2, delay: null, search: 0 }; wilson.sensors._emit('shake', 9)"); await page.wait_for_timeout(300)
+        check('Tablette secouée pendant qu\'il parle : rien dit à Gemini (journal du 19/11/26, 08h40:56)', not any('secouée' in t for t in cs['texts']) and has('secouée pendant qu\'il parle'), str(cs['texts']))
+        await page.evaluate("wilson._liveTurn = null; wilson.sensors._emit('shake', 9)"); await page.wait_for_timeout(300)
+        check('… secouée au calme : Gemini le sait, comme avant', any('secouée' in t for t in cs['texts']), str(cs['texts']))
+        await page.evaluate("wilson.endConversation('test'); __regarde(false); __qui(null)"); await page.wait_for_timeout(300)
+
         # ---- G : la garde ----
         await page.evaluate("wilson.famille.oreille.start = function () { this.worker = {}; }; wilson.famille.oreille.stop = function () { this.worker = null; }")
         # Garde COUPÉE (réponse de Timothée du 18/11/26, 16h27 : « simplement la garde de la maison, l'envoi des alertes ») :
