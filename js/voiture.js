@@ -47,10 +47,15 @@ export function estArretGuidage(t) {
 // (il n'en parle pas). Morceau par morceau, le dernier l'emporte : « Je veux pas aller chez A. Je veux aller chez B. » = oui
 // (08h45:25, refusé à tort : « Pardon, je ne lance rien »).
 const VOEU = /\b(je (veux|voudrais|souhaite|dois|voulais)|j'aimerais|faut que j'aille|emmene[- ]moi|amene[- ]moi|guide[- ]moi|conduis[- ]moi|lance|mets|met|definis?|on y va|allons|vas-y)\b/;
+// « Tu peux pas le mettre directement sur mon GPS ? » (journal du 19/11/26, 16h23:50) est une demande, pas un refus : ce
+// « pas » est celui d'une question (« tu ne pourrais pas… ? »). Seulement s'il n'y a aucun reproche dans la phrase.
+const DEMANDE_NEG = /\btu (ne )?(peux|pourrais|pourras|sais|saurais) (pas|plus) ((me|m'|le|la|l'|les|nous|y|moi|donc|directement|juste|simplement)\s*)*(mettre|lancer|guider|emmener|amener|envoyer|conduire|programmer|definir|afficher)\b/;
 export function guidageDit(t) {
   if (estArretGuidage(t)) return 'arret';
-  const morceaux = plat(t).split(/[.!?;]+|,\s*|\bmais\b|\bplutot\b|\bpar contre\b/).map((c) => c.trim()).filter(Boolean);
+  const tout = plat(t), demandeNeg = !refusItineraire(t) && !/\bsans (me |m')?(demander|rien)\b|\brien demande\b/.test(tout);
+  const morceaux = tout.split(/[.!?;]+|,\s*|\bmais\b|\bplutot\b|\bpar contre\b/).map((c) => c.trim()).filter(Boolean);
   const vus = morceaux.map((c) => {
+    if (demandeNeg && DEMANDE_NEG.test(c) && (estItineraire(c) || /\b(emmener|amener|guider|conduire)\b/.test(c))) return 'OUI';
     const neg = refusItineraire(c) || /\b(pas|plus|jamais)\b/.test(c);
     if (estItineraire(c)) return neg ? 'non' : VOEU.test(c) ? 'OUI' : 'oui';
     return neg && /\b(aller|emmen|amen|guid|navig|gps|chez)/.test(c) ? 'non' : '';
