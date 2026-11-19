@@ -16,6 +16,7 @@ envoyé en « question » à Claude (lecture seule) ; « Tu as besoin d'autre ch
 11. Question au CRM : les mots exacts de Timothée accompagnent la question résumée par Wilson.
 12. « Tu as besoin d'autre chose ? » à la fin d'une réponse : coupé.
 13. « Ma journée » : rendez-vous du CRM et agendas Google réunis, sans doublon.
+13 bis. « Mon prochain rendez-vous » (19/11/26, 11h17) : le prochain d'après l'heure, pas celui déjà commencé.
 14. CRM pas encore à jour (pas d'annuaire) : le CRM rend la mauvaise société → rien n'est lancé, il fait confirmer.
 """
 import asyncio, re, json, os, base64, time
@@ -98,6 +99,8 @@ async def ouvrir(p, avec_annuaire):
             else:   # le CRM d'avant la correction : un sigle de trois lettres retrouve la société dont un mot lui ressemble
                 q = (d.get('client') or '').upper()
                 body = fiche('GRANDBAT E ET S AB FRANCE 548X') if 'ABM' in q else fiche('LEBRE') if 'LEBRE' in q else {'ok': True, 'texte': 'Aucun client ne correspond.'}
+        elif a == 'crm_journee' and st.get('rdv') is not None:    # 13 bis : rendez-vous à l'heure du test
+            body = {'ok': True, 'jour': '?', 'rdv': st['rdv'], 'taches': 0, 'texte': "Aujourd'hui : " + ' ; '.join(f"{r['heure']} : {r['contact']}, {r['societe']}" for r in st['rdv'])}
         elif a == 'crm_journee':
             body = {'ok': True, 'jour': '12/11/2026', 'rdv': [{'cle': '["M LEBRE Jean","LEBRE"]', 'contact': 'M LEBRE Jean', 'societe': 'LEBRE', 'ville': 'Vigneux-de-Bretagne', 'heure': '10h00'}], 'taches': 0,
                     'texte': "Aujourd'hui, jeudi 12/11/26 : 1 rendez-vous.\n- 10h00 : M LEBRE Jean, LEBRE (Vigneux-de-Bretagne)\nAucune tâche due."}
@@ -342,6 +345,49 @@ async def main():
         check('« Ma journée » : rendez-vous du CRM et agendas Google réunis (avec le nom de l\'agenda)', ok and '10h00 : M LEBRE Jean, LEBRE' in r and 'Dans ses agendas Google' in r and 'Réunion agence (Nantes) [agenda BOSCHAT LAVEIX]' in r and 'Médecin Louis' in r, r[:500])
         check('… le rendez-vous client déjà dans le CRM n\'est pas redit', 'RDV LEBRE' not in r, r[:500])
         check('… demandé en lecture seule, tous les agendas, pour ce jour-là', any(x.get('action') == 'agenda_lire' and x.get('tous') is True and x.get('jours') == 1 for x in st['calls']))
+        # ---------- 13 bis. « Tu m'amènes à mon prochain rendez-vous » (journal du 19/11/26, 11h17:14) ----------
+        # Gemini avait choisi le rendez-vous de 11h00, déjà fait (il était 11h17) : il a dû le reprendre.
+        lt = time.localtime(); mn = lt.tm_hour * 60 + lt.tm_min
+        if 60 <= mn <= 21 * 60:
+            hm = lambda m: f'{m // 60}h{m % 60:02d}'
+            st['rdv'] = [{'cle': json.dumps(['M ANJUBAULT Mathieu', 'A B M'], ensure_ascii=False), 'contact': 'M ANJUBAULT Mathieu', 'societe': 'A B M', 'heure': hm(mn - 20)},
+                         {'cle': json.dumps(['M LEBRE Jean', 'LEBRE'], ensure_ascii=False), 'contact': 'M LEBRE Jean', 'societe': 'LEBRE', 'heure': hm(mn + 120)}]
+            await page.evaluate("wilson.crm.journee = null")
+            n = len(await nav())
+            await demande(c, "Neve Wilson, tu m'amènes à mon prochain rendez-vous.")
+            outil(c, 'itineraire', {'client': 'ABM'}, 'p1')
+            ok = await attendre(lambda: resp(c, 'p1') is not None, 8)
+            N = await nav()
+            check('« Mon prochain rendez-vous » : guidé vers celui qui vient (LEBRE, dans 2 h), pas celui commencé il y a 20 min (A B M, choisi par Gemini)',
+                  ok and len(N) == n + 1 and N[-1][1] == 'LEBRE' and 'LEBRE' in (resp(c, 'p1') or '') and has('son prochain rendez-vous'), f'{N[-1:]} {resp(c, "p1")}')
+            parle(c, "C'est parti, je te guide vers Lebre.", sec=0.6); await page.wait_for_timeout(700)
+            await demande(c, 'Wilson, amène-moi chez mon prochain client maintenant.')
+            outil(c, 'itineraire', {'client': 'prochain rendez-vous'}, 'p2')
+            ok = await attendre(lambda: resp(c, 'p2') is not None, 8)
+            N = await nav()
+            check('… client « prochain rendez-vous » donné par Gemini : LEBRE aussi', ok and N[-1][1] == 'LEBRE' and 'REFUSÉ' not in (resp(c, 'p2') or ''), f'{N[-1:]} {resp(c, "p2")}')
+            parle(c, "C'est parti, je te guide vers Lebre.", sec=0.6); await page.wait_for_timeout(700)
+            await demande(c, 'Non Wilson, emmène-moi à mon prochain rendez-vous chez ABM.')
+            outil(c, 'itineraire', {'client': 'ABM'}, 'p3')
+            ok = await attendre(lambda: resp(c, 'p3') is not None, 8)
+            N = await nav()
+            check('… il nomme le client (« chez ABM ») : c\'est lui qui décide, A B M', ok and N[-1][1] == 'A B M', f'{N[-1:]} {resp(c, "p3")}')
+            parle(c, "C'est parti, je te guide vers ABM.", sec=0.6); await page.wait_for_timeout(700)
+            await page.evaluate("wilson._crmRecents && wilson._crmRecents.clear()")   # (même demande dans les 20 s : pas relancée, autre sujet)
+            await demande(c, "Non Wilson, je sors de A B M, l'autre d'après.")
+            outil(c, 'itineraire', {'client': 'LEBRE'}, 'p4')
+            ok = await attendre(lambda: resp(c, 'p4') is not None, 8)
+            check('… « l\'autre d\'après » : le choix de Gemini est gardé', ok and (await nav())[-1][1] == 'LEBRE', resp(c, 'p4'))
+            parle(c, "C'est parti, je te guide vers Lebre.", sec=0.6); await page.wait_for_timeout(700)
+            st['rdv'] = [st['rdv'][0]]; await page.evaluate("wilson.crm.journee = null")
+            n = len(await nav())
+            await demande(c, 'Emmène-moi à mon prochain rendez-vous.')
+            outil(c, 'itineraire', {'client': 'prochain rendez-vous'}, 'p5')
+            ok = await attendre(lambda: resp(c, 'p5') is not None, 8)
+            check('… plus de rendez-vous à venir : rien n\'est lancé, il demande chez qui aller', ok and "RIEN N'EST LANCÉ" in (resp(c, 'p5') or '') and len(await nav()) == n, resp(c, 'p5'))
+            parle(c, "Je ne vois plus de rendez-vous aujourd'hui dans ton CRM : chez qui veux-tu aller ?", sec=0.6); await page.wait_for_timeout(700)
+            st['rdv'] = None; await page.evaluate("wilson.crm.journee = null")
+        else: print('(13 bis non lancé : entre 21h00 et 1h00, les heures du test passeraient minuit)')
         check('Aucune erreur de page (avec annuaire)', not any('PAGEERROR' in l or l.startswith('Erreur :') for l in logs), str([l for l in logs if 'PAGEERROR' in l or l.startswith('Erreur :')][:3]))
         await b.close()
 
