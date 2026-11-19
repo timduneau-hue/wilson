@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.14';
+const VERSION = '1.45.15';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -1706,6 +1706,9 @@ Nous sommes ${fmtDate()}.${nv}`;
       if (this._protocole) {
         const vv = this._vvTour();
         if (!vv.outil && !vv.hold && (vv.travail || this._travailRecent()) && (VP.annonceRecherche(t) || VP.affirmeFait(t))) this._vvRetenir(vv, 'il annonce une recherche ou affirme un fait sans outil');
+        // « C'est parti, je te guide vers … » sans l'outil itineraire (journal du 19/11/26, 14h08:52 : « Hermès à Lu », réponse au
+        // choix entre deux clients, n'était pas une demande de travail) : retenu, l'outil doit d'abord lancer le guidage.
+        if (!vv.outil && !vv.hold && VP.annonceGuidage(t)) this._vvRetenir(vv, 'il annonce le guidage sans l\'avoir lancé');
         if (vv.hold && !vv.outil) return;                                // rien d'affiché non plus
         this._vvNoms(vv, t);
       }
@@ -2122,7 +2125,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     const S = this._sansOutil && this._sansOutil.k === k && now - this._sansOutil.at < 120000 ? this._sansOutil : (this._sansOutil = { k, n: 0 });
     S.n++; S.at = now;
     const u = VP.plat(user);
-    const quoi = VP.estItineraire(user) ? 'itineraire avec le nom du client'
+    const quoi = VP.estItineraire(user) || VP.annonceGuidage(dit) ? 'itineraire avec le nom du client (rien n\'est lancé tant que l\'outil ne l\'a pas fait)'
       : VP.estEcriture(user) ? 'crm_noter (une visite : type compte_rendu, échange visite, texte « Visite » et les personnes vues), puis relis-lui la phrase préparée'
       : VP.questionContacts(user) ? 'crm_contacts avec le nom du client'
       : /contact|telephone|numero|adresse|fiche|derniere visite|qui (est|sont)/.test(u) ? 'crm_client avec le nom du client'
@@ -2131,7 +2134,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       this.brain.sendText(`[Ta réponse (« ${String(dit || '').slice(0, 100)} ») n'a PAS été dite : tu n'as consulté aucun outil, elle n'était pas vérifiée. Timothée a dit : « ${String(user || '').slice(0, 220)} ». Appelle maintenant ${quoi}, sans rien dire avant. Sans résultat d'outil, tu ne sais rien. Si tu n'as pas compris sa demande, demande-lui simplement de la redire.]`);
       return;
     }
-    if (VP.estEcriture(user) || VP.estItineraire(user) || !this.crm.on || !user) {
+    if (VP.estEcriture(user) || VP.estItineraire(user) || VP.annonceGuidage(dit) || !this.crm.on || !user) {
       this.log('Verrou de vérité : toujours aucun outil — je lui fais redemander');
       this._vvDicte('[Dis-lui seulement : « Je n\'ai pas réussi. Redis-moi le nom du client et ce que tu veux, s\'il te plaît. »]');
       return;
@@ -3097,7 +3100,9 @@ Nous sommes ${fmtDate()}.${nv}`;
     let j = null;
     try { j = await this.crm.agenda("aujourd'hui", signal); } catch (_) { j = null; }
     if (!j || !j.ok) return null;
-    const p = VP.prochainRdv(j.rdv || [], new Date());
+    // relié à la voiture après le début d'un rendez-vous : il en sort (journal du 19/11/26, 14h07:47)
+    const opts = { voitureDepuis: this._voitureBt ? this._voitureBtDepuis : null }, quitte = VP.rdvQuitte(j.rdv || [], new Date(), 15, opts);
+    const p = VP.prochainRdv(j.rdv || [], new Date(), 15, opts);
     if (!p) {
       if (!parClient) return null;
       this.log(`Itinéraire : il demande son prochain rendez-vous, mais il n'en a plus aujourd'hui dans le CRM`, true);
@@ -3105,7 +3110,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     }
     const n = (x) => VP.plat(x).replace(/[^a-z0-9]+/g, ' ').trim();
     if (!parClient && client && (n(client).includes(n(p.societe)) || n(p.societe).includes(n(client)))) return null;   // déjà le bon
-    this.log(`Itinéraire : « ${(phrase || client).slice(0, 80)} » → son prochain rendez-vous, ${p.heure} ${p.societe}${client && !parClient ? ` (pas « ${client} »)` : ''}`, true);
+    this.log(`Itinéraire : « ${(phrase || client).slice(0, 80)} » → son prochain rendez-vous, ${p.heure} ${p.societe}${client && !parClient ? ` (pas « ${client} »)` : ''}${quitte ? ` ; il sort de celui de ${quitte.heure} (${quitte.societe}) : relié à la voiture après son début` : ''}`, true);
     return { client: p.societe };
   }
 
@@ -3827,6 +3832,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     const vb = this._voitureBt;
     if (vb !== !!this._voitureBtVu && this.started) {
       this._voitureBtVu = vb;
+      this._voitureBtDepuis = vb ? Date.now() : null;            // monté dans la voiture à cette heure (prochain rendez-vous)
       if (vb) {
         // Remarque du 05/11/26, 15h54 : pas de caméra en voiture (ni regard, ni visages, ni réactions).
         if (this.vision) { this.vision.stop(); this.vision = null; this.qui.attacher(null); this.log('Voiture : caméra éteinte'); }

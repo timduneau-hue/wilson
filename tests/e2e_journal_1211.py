@@ -17,6 +17,8 @@ envoyé en « question » à Claude (lecture seule) ; « Tu as besoin d'autre ch
 12. « Tu as besoin d'autre chose ? » à la fin d'une réponse : coupé.
 13. « Ma journée » : rendez-vous du CRM et agendas Google réunis, sans doublon.
 13 bis. « Mon prochain rendez-vous » (19/11/26, 11h17) : le prochain d'après l'heure, pas celui déjà commencé.
+13 ter. Relié à la voiture après le début d'un rendez-vous (19/11/26, 14h07) : il en sort, c'est le suivant.
+13 quater. « C'est parti, je te guide vers … » sans l'outil (19/11/26, 14h08-14h09) : pas dit, itineraire demandé.
 14. CRM pas encore à jour (pas d'annuaire) : le CRM rend la mauvaise société → rien n'est lancé, il fait confirmer.
 """
 import asyncio, re, json, os, base64, time
@@ -386,6 +388,40 @@ async def main():
             ok = await attendre(lambda: resp(c, 'p5') is not None, 8)
             check('… plus de rendez-vous à venir : rien n\'est lancé, il demande chez qui aller', ok and "RIEN N'EST LANCÉ" in (resp(c, 'p5') or '') and len(await nav()) == n, resp(c, 'p5'))
             parle(c, "Je ne vois plus de rendez-vous aujourd'hui dans ton CRM : chez qui veux-tu aller ?", sec=0.6); await page.wait_for_timeout(700)
+            # 13 ter. Journal du 19/11/26, 14h07:47 : relié à la voiture à 14h07:33, « amène-moi mon prochain rendez-vous » →
+            # celui de 14h00, d'où il sortait. Monté dans la voiture après le début d'un rendez-vous : il en sort.
+            st['rdv'] = [{'cle': json.dumps(['M ANJUBAULT Mathieu', 'A B M'], ensure_ascii=False), 'contact': 'M ANJUBAULT Mathieu', 'societe': 'A B M', 'heure': hm(mn - 7)},
+                         {'cle': json.dumps(['M LEBRE Jean', 'LEBRE'], ensure_ascii=False), 'contact': 'M LEBRE Jean', 'societe': 'LEBRE', 'heure': hm(mn + 90)}]
+            await page.evaluate("wilson.crm.journee = null; wilson._crmRecents && wilson._crmRecents.clear(); wilson._voitureBtDepuis = Date.now()")
+            ln = len(logs); n = len(await nav())
+            await demande(c, 'Amène-moi mon prochain rendez-vous.')
+            outil(c, 'itineraire', {'client': 'prochain rendez-vous'}, 'p6')
+            ok = await attendre(lambda: resp(c, 'p6') is not None, 8)
+            N = await nav()
+            check('Relié à la voiture 7 min après le début du rendez-vous d\'A B M : il en sort, guidé vers LEBRE (14h07:47)',
+                  ok and len(N) == n + 1 and N[-1][1] == 'LEBRE' and any("il sort de celui de" in l and 'A B M' in l for l in logs[ln:]), f'{N[-1:]} {[l for l in logs[ln:] if "Itinéraire" in l]}')
+            parle(c, "C'est parti, je te guide vers Lebre.", sec=0.6); await page.wait_for_timeout(700)
+            await page.evaluate("wilson.crm.journee = null; wilson._crmRecents && wilson._crmRecents.clear(); wilson._voitureBtDepuis = Date.now() - 30 * 60000")
+            await demande(c, 'Amène-moi mon prochain rendez-vous.')
+            outil(c, 'itineraire', {'client': 'prochain rendez-vous'}, 'p7')
+            ok = await attendre(lambda: resp(c, 'p7') is not None, 8)
+            check('… relié avant le début (il roule depuis 30 min, en retard) : toujours A B M', ok and (await nav())[-1][1] == 'A B M', f'{(await nav())[-1:]} {resp(c, "p7")}')
+            parle(c, "C'est parti, je te guide vers ABM.", sec=0.6); await page.wait_for_timeout(700)
+            # 13 quater. Journal du 19/11/26, 14h08:29 à 14h09:14 : « C'est parti, je te guide vers … » dit sans l'outil
+            # itineraire, laissé passer (« réponse qui n'affirme rien ») : rien n'était lancé.
+            for k, (dit, rep) in enumerate([('Oui, amène-moi mon prochain rendez-vous.', "C'est parti, je te guide vers Lebre."),
+                                             ('Hermès à Lu', "C'est parti, je te guide vers Hermit'alu.")]):
+                await page.wait_for_timeout(1500)
+                ln = len(logs); n = len(await nav()); nt = len(c['texts']); joue0 = await page.evaluate("wilson.audio.playedSec")
+                await page.evaluate("wilson._sansOutil = null")
+                await demande(c, dit)
+                parle(c, rep, sec=2.0); await page.wait_for_timeout(900)
+                joue = (await page.evaluate("wilson.audio.playedSec")) - joue0
+                ok = await attendre(lambda: any('itineraire' in t and "n'a PAS été dite" in t for t in c['texts'][nt:]), 4)
+                check(f'« {rep} » sans l\'outil (« {dit} ») : pas dit, Gemini doit lancer itineraire d\'abord',
+                      ok and any('JAMAIS DITE' in l for l in logs[ln:]) and not any("n'affirme rien" in l for l in logs[ln:]) and joue < 0.9 and len(await nav()) == n,
+                      f'{joue:.1f} s {[l for l in logs[ln:] if "Verrou" in l]} {c["texts"][nt:]}')
+                parle(c, 'Pour quel client ?', sec=0.5); await page.wait_for_timeout(700)
             st['rdv'] = None; await page.evaluate("wilson.crm.journee = null")
         else: print('(13 bis non lancé : entre 21h00 et 1h00, les heures du test passeraient minuit)')
         check('Aucune erreur de page (avec annuaire)', not any('PAGEERROR' in l or l.startswith('Erreur :') for l in logs), str([l for l in logs if 'PAGEERROR' in l or l.startswith('Erreur :')][:3]))

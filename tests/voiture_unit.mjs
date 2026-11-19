@@ -178,7 +178,25 @@ for (const t of ['Non Wilson, je sors de menuiserie de la le l\'autre d\'après.
   check('15h00 : TROISIEME (16h30)', (V.prochainRdv(rdv, a(15, 0)) || {}).societe === 'TROISIEME');
   check('18h00 : plus de rendez-vous', V.prochainRdv(rdv, a(18, 0)) === null);
   check('aucun rendez-vous', V.prochainRdv([], a(9, 0)) === null);
+  // Journal du 19/11/26, 14h07:47 : relié à la voiture à 14h07, rendez-vous de 14h00 dont il sort
+  const r2 = [{ societe: 'FER MET', heure: '14h00' }, { societe: 'HERMIT', heure: '15h30' }];
+  check('14h07, relié à la voiture à 14h07 : il sort de FER MET (14h00) → HERMIT (15h30)', (V.prochainRdv(r2, a(14, 7), 15, { voitureDepuis: a(14, 7) }) || {}).societe === 'HERMIT');
+  check('… et le journal sait lequel il quitte (FER MET)', (V.rdvQuitte(r2, a(14, 7), 15, { voitureDepuis: a(14, 7) }) || {}).societe === 'FER MET');
+  check('11h17, relié à 11h16 : le rendez-vous de 11h00 est derrière lui → MENUISERIE GAUDIN', (V.prochainRdv(rdv, a(11, 17), 15, { voitureDepuis: a(11, 16) }) || {}).societe === 'MENUISERIE GAUDIN');
+  check('14h07, relié à 13h50 (il roule depuis, en retard) : toujours FER MET', (V.prochainRdv(r2, a(14, 7), 15, { voitureDepuis: a(13, 50) }) || {}).societe === 'FER MET');
+  check('14h03, relié à 14h00 pile (en retard, parti d\'ailleurs) : toujours FER MET', (V.prochainRdv(r2, a(14, 3), 15, { voitureDepuis: a(14, 0) }) || {}).societe === 'FER MET' && V.rdvQuitte(r2, a(14, 3), 15, { voitureDepuis: a(14, 0) }) === null);
+  check('relié hier : ignoré (marge de 15 min)', (V.prochainRdv(r2, a(14, 7), 15, { voitureDepuis: new Date(2026, 10, 18, 18, 0) }) || {}).societe === 'FER MET');
+  check('sans voiture : comme avant', (V.prochainRdv(r2, a(14, 7)) || {}).societe === 'FER MET');
 }
+
+// Guidage annoncé sans l'outil (journal du 19/11/26, 14h08:29 à 14h09:14 : « C'est parti, je te guide vers … » dit quatre fois,
+// rien n'était lancé)
+for (const w of ["C'est parti, je te guide vers Fer Met Alu.", "C'est parti, je te guide vers Hermit'alu.", "C'est reparti, je te guide vers Hermit'alu.",
+  "Pardon, c'est lancé maintenant, je te guide vers Hermit'alu.", 'Je lance le GPS.', "D'accord, je t'emmène chez Lebre.", 'Le guidage est relancé.'])
+  check(`guidage annoncé (pas sans outil) : « ${w} »`, V.annonceGuidage(w) && !V.sansFait(w, src));
+for (const w of ["Je te guide vers ABM à La Roche, c'est bien ça ?", 'Pardon, je ne lance rien.', "J'ai deux clients possibles pour Hermetalu : Hermit'alu ou Fer Met Alu. C'est lequel que tu veux ?",
+  'Pardon, je parlais pour le GPS. Tu me demandais quelque chose ?', 'Bonne route !', "Je ne peux pas arrêter le guidage moi-même."])
+  check(`pas une annonce de guidage : « ${w.slice(0, 50)} »`, !V.annonceGuidage(w));
 
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);
