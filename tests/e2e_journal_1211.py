@@ -19,6 +19,7 @@ envoyé en « question » à Claude (lecture seule) ; « Tu as besoin d'autre ch
 13 bis. « Mon prochain rendez-vous » (19/11/26, 11h17) : le prochain d'après l'heure, pas celui déjà commencé.
 13 ter. Relié à la voiture après le début d'un rendez-vous (19/11/26, 14h07) : il en sort, c'est le suivant.
 13 quater. « C'est parti, je te guide vers … » sans l'outil (19/11/26, 14h08-14h09) : pas dit, itineraire demandé.
+ 9 bis. Deux sociétés au nom proche : la personne citée (crm_noter, contact) choisit celle où elle travaille (19/11/26, 17h11).
 14. CRM pas encore à jour (pas d'annuaire) : le CRM rend la mauvaise société → rien n'est lancé, il fait confirmer.
 """
 import asyncio, re, json, os, base64, time
@@ -306,6 +307,32 @@ async def main():
         br = next((x for x in st['calls'] if x.get('action') == 'crm_brouillon'), {})
         check('« Oui » : brouillon envoyé au CRM avec la clé de Yoann Moreau (et pas d\'un autre contact)', ok and br.get('cle') == '["M MOREAU Yoann","A B M"]' and br.get('confirme') is True and br.get('echange') == 'visite', json.dumps(br, ensure_ascii=False)[:260])
         parle(c, "C'est prêt dans le CRM, dans tes tâches, rubrique « Dicté à Wilson ».", sec=0.8); await page.wait_for_timeout(900)
+
+        # ---------- 9 bis. Deux sociétés au nom proche, la personne citée les départage (journal du 19/11/26, 17h11) ----------
+        # une tâche pour une personne chez un client : deux sociétés possibles, il a dû redire trois fois le nom
+        # de la personne. Noms inventés ; l'annuaire du test reçoit deux sociétés de plus, puis il est remis comme avant.
+        DEUX = [['ARMOR OUVERTURES', 'M GIRAUD Jean Marie', 'Gérant', 'C3000001', 'Nantes', 'Nantes', '02 40 00 00 07', '', ''],
+                ['ARMOR OUVERTURES MAINTENANCE', 'M PETIT Luc', 'Technicien', 'C3000002', 'Nantes', 'Nantes', '02 40 00 00 08', '', ''],
+                ['ARMOR OUVERTURES MAINTENANCE', 'M GIRARD Paul', 'Technicien', 'C3000002', 'Nantes', 'Nantes', '02 40 00 00 09', '', '']]
+        await page.evaluate("(l) => { window.__d = [wilson.crm.dernier, wilson.crm.last, wilson.crm.dernierChoix]; wilson.crm.annuaire.charger({ ok: true, contacts: l, le: '19/11/2026 17h00' }); }", ANNUAIRE + DEUX)
+        await demande(c, 'Crée une nouvelle tâche pour Jean-Marie Giraut chez Armor Ouverture.')
+        outil(c, 'crm_noter', {'type': 'tache', 'client': 'Armor Ouverture', 'contact': 'Jean-Marie Giraut', 'texte': 'Rappeler pour le ferme-porte', 'date': "aujourd'hui"}, 'o1')
+        ok = await attendre(lambda: resp(c, 'o1') is not None, 6)
+        r = resp(c, 'o1') or ''
+        check('Deux sociétés au nom proche, la personne citée travaille dans une seule : celle-là, préparée pour elle (19/11/26, 17h11)', ok and 'ARMOR OUVERTURES (M GIRAUD Jean Marie)' in r and 'Plusieurs clients' not in r and 'MAINTENANCE' not in r, r[:260])
+        check('… et le journal dit pourquoi', has('le seul où travaille « Jean-Marie Giraut »'))
+        await page.evaluate("wilson.crm.dernier = window.__d[0]")      # sinon la société dont on vient de parler est reprise (30 min)
+        outil(c, 'crm_noter', {'type': 'tache', 'client': 'Armor Ouverture', 'contact': 'Sylvain Motel', 'texte': 'Rappeler', 'date': "aujourd'hui"}, 'o2')
+        ok = await attendre(lambda: resp(c, 'o2') is not None, 6)
+        r = resp(c, 'o2') or ''
+        check('Personne citée dans aucune des deux : il demande laquelle, et sait qu\'un nom de personne peut être sa réponse', ok and 'Plusieurs clients possibles' in r and 'ARMOR OUVERTURES MAINTENANCE' in r and 'nom d\'une personne' in r, r[:400])
+        await page.evaluate("wilson.crm.dernier = window.__d[0]")
+        outil(c, 'crm_noter', {'type': 'tache', 'client': 'Armor Ouverture', 'contact': 'Giraud', 'texte': 'Rappeler', 'date': "aujourd'hui"}, 'o3')
+        ok = await attendre(lambda: resp(c, 'o3') is not None, 6)
+        r = resp(c, 'o3') or ''
+        check('… un nom qui va dans les deux sociétés : il demande toujours laquelle', ok and 'Plusieurs clients possibles' in r, r[:300])
+        await page.evaluate("(l) => { wilson.crm.annuaire.charger({ ok: true, contacts: l, le: '12/11/2026 08h40' }); [wilson.crm.dernier, wilson.crm.last, wilson.crm.dernierChoix] = window.__d; wilson.crm.pending = null; }", ANNUAIRE)
+        parle(c, "Pour quelle société ?", sec=0.5); await page.wait_for_timeout(700)
 
         # ---------- 10. Une écriture n'est jamais une question ----------
         ncl = len(st['claude'])

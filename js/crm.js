@@ -302,7 +302,10 @@ export class Crm {
   // De qui parle-t-il ? { soc, contact (la personne reconnue, ou null), sur, e (fiche, si elle a été lue) } — ou { dire } :
   // ce qu'il faut lui dire (plusieurs clients possibles, client inconnu, CRM muet). L'annuaire d'abord (immédiat, sans
   // réseau) ; à défaut, le CRM. sur : assez certain pour agir sans redemander (P8).
-  async _qui(client, signal) {
+  // contact : la personne qu'il a citée avec le client (crm_noter). Journal du 19/11/26, 17h11 : une tâche pour une personne
+  // chez un client → deux sociétés au nom proche, et il a dû redire trois fois le nom de la personne, que Wilson ne savait
+  // pas utiliser : parmi les clients possibles, celle où travaille la personne citée est prise (à relire).
+  async _qui(client, signal, contact = '') {
     if (this._isLast(client) && this.dernier) { this.dernier.at = Date.now(); return { ...this.dernier, sur: true }; }
     if (this._isLast(client) && this.last) return { soc: this._socDeFiche(this.last), contact: null, sur: true, e: this.last };
     const net = nomNet(client), A = this.annuaire;
@@ -312,6 +315,14 @@ export class Crm {
       if (r.plusieurs) {
         const texte = this._plusieursTexte(client, r.plusieurs);
         this.dernierChoix = { at: Date.now(), dit: client, texte };
+        if (contact) {
+          const avec = r.plusieurs.map((x) => ({ g: x.g, contact: personneParmi(x.g.contacts, contact).contact })).filter((x) => x.contact);
+          if (avec.length === 1) {
+            const { g, contact: P } = avec[0];
+            this.log(`plusieurs clients possibles pour « ${net} » : je prends ${g.societe}, le seul où travaille « ${contact} » (${P.nom}) (à faire confirmer)`);
+            return this._retenir({ soc: this._socDeGroupe(g), contact: this._contactDe({ contact: P }), sur: false });
+          }
+        }
         // parmi les clients possibles, celui dont on parle depuis moins de 30 min est pris, à faire confirmer (P8)
         const D = this.dernier, pris = D && Date.now() - D.at < 30 * 60000 && r.plusieurs.find((x) => x.g.societe === D.soc.societe);
         if (pris) { this.log(`plusieurs clients possibles pour « ${net} » : je prends ${D.soc.societe}, celui dont on parlait (à faire confirmer)`); return this._retenir({ soc: this._socDeGroupe(pris.g), contact: pris.contact ? this._contactDe(pris) : null, sur: false, parmi: texte }); }
@@ -520,10 +531,11 @@ export class Crm {
       // Journal du 12/11/26, 09h53-09h57 : le compte rendu dicté pour une personne était préparé au nom du premier contact
       // de la fiche, et rien ne permettait de le corriger (« c'est nul »). Le client ET la personne viennent maintenant de ce
       // qu'il a dit : la personne citée (contact), ou celle par laquelle il a désigné le client.
-      const Q = await this._qui(a.client || a.contact || '', signal);
-      if (Q.dire) return { ok: false, dire: Q.dire };
-      const S = Q.soc; let c = Q.contact || null; nbContacts = S.contacts.length;
       const libre = /^(peu importe|n'importe|je (ne )?sais pas|personne|le contact (habituel|principal)|comme d'habitude)/.test(plat(a.contact || '').trim());
+      const Q = await this._qui(a.client || a.contact || '', signal, a.client && !libre ? a.contact || '' : '');
+      // plusieurs clients possibles : il répond souvent par le nom de la personne (journal du 19/11/26, 17h11:19 et 17h11:30)
+      if (Q.dire) return { ok: false, dire: Q.dire + (Q.choix && Q.choix.length ? ' S\'il te répond par le nom d\'une personne, ce n\'est pas qu\'il parle mal : rappelle crm_noter avec ce nom en contact et le client tel qu\'il l\'a dit, je prendrai la société où elle travaille.' : '') };
+      const S = Q.soc; let c = Q.contact || null; nbContacts = S.contacts.length;
       if (a.contact && a.client && !libre) {
         const P = personneParmi(S.contacts, a.contact);
         if (P.contact) c = P.contact;
