@@ -15,6 +15,7 @@ envoyé en « question » à Claude (lecture seule) ; « Tu as besoin d'autre ch
 10. Une écriture envoyée en crm_question : refusée, renvoyée vers crm_noter (rien à Claude).
 11. Question au CRM : les mots exacts de Timothée accompagnent la question résumée par Wilson.
 12. « Tu as besoin d'autre chose ? » à la fin d'une réponse : coupé.
+12 bis. Il refuse qu'on écrive (19/11/26, 16h13) : « je n'ajoute rien » dit, aucun outil exigé.
 13. « Ma journée » : rendez-vous du CRM et agendas Google réunis, sans doublon.
 13 bis. « Mon prochain rendez-vous » (19/11/26, 11h17) : le prochain d'après l'heure, pas celui déjà commencé.
 13 ter. Relié à la voiture après le début d'un rendez-vous (19/11/26, 14h07) : il en sort, c'est le suivant.
@@ -365,6 +366,26 @@ async def main():
         await demande(c, 'Note une tâche.')
         parle(c, 'Pour quel client ?', sec=0.6); await page.wait_for_timeout(700)
         check('… mais une vraie question (« Pour quel client ? ») est dite', not any('Question de trop' in l for l in logs[ln:]))
+        # 12 bis. Journal du 19/11/26, 16h13:00 : « pas besoin de me rajouter une tâche » → « je n'ajoute rien » retenu, puis
+        # crm_noter exigé par le verrou (un compte rendu en trop). Il refuse d'écrire : son « d'accord » est dit, aucun outil exigé.
+        await page.wait_for_timeout(1500)
+        ln = len(logs); nt = len(c['texts']); joue0 = await page.evaluate("wilson.audio.playedSec")
+        await page.evaluate("wilson._sansOutil = null")
+        await demande(c, "Non mais c'est bon, il y a pas besoin de valider, je t'ai dit que c'était fait déjà. T'as pas besoin de me rajouter une tâche pour dire que ça y est.")
+        parle(c, "Pardon, j'avais mal compris. C'est noté que c'est déjà fait, je n'ajoute rien.", sec=2.0); await page.wait_for_timeout(1500)
+        joue = (await page.evaluate("wilson.audio.playedSec")) - joue0
+        check('« Pas besoin de me rajouter une tâche » : « je n\'ajoute rien » dit, aucun outil exigé (19/11/26, 16h13)',
+              joue > 1.5 and not any("n'a PAS été dite" in t or 'crm_noter' in t for t in c['texts'][nt:]) and not any('JAMAIS DITE' in l for l in logs[ln:]),
+              f'{joue:.1f} s {[l for l in logs[ln:] if "Verrou" in l]} {c["texts"][nt:]}')
+        await page.wait_for_timeout(1500)
+        ln = len(logs); nt = len(c['texts']); joue0 = await page.evaluate("wilson.audio.playedSec")
+        await page.evaluate("wilson._sansOutil = null")
+        await demande(c, "Pas la peine de noter, c'est déjà fait.")
+        parle(c, "C'est prêt dans le CRM, dans tes tâches.", sec=2.0); await page.wait_for_timeout(1200)
+        joue = (await page.evaluate("wilson.audio.playedSec")) - joue0
+        ok = await attendre(lambda: any("je n'ajoute rien" in t and 'aucun outil' in t for t in c['texts'][nt:]), 4)
+        check('… il refuse mais Wilson dit avoir écrit (« C\'est prêt dans le CRM ») : pas dit, et pas de crm_noter exigé', ok and joue < 0.9 and not any('crm_noter' in t for t in c['texts'][nt:]), f'{joue:.1f} s {c["texts"][nt:]}')
+        parle(c, "D'accord, je n'ajoute rien.", sec=0.8); await page.wait_for_timeout(900)
 
         # ---------- 13. Ma journée : CRM et agendas Google ----------
         await demande(c, "Qu'est-ce que j'ai aujourd'hui ?")

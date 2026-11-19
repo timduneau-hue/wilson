@@ -240,6 +240,45 @@ async def main():
 
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
+
+        # 9. Remarque de Timothée du 19/11/26, 08h44:07 (tablette du salon) : « continuer de répondre même s'il tourne le regard,
+        # pas de veille tout de suite, au moins 30 secondes ». Tablette, discussion engagée en le regardant : 30 s ; sinon 3 s.
+        ctx2 = await b.new_context(bypass_csp=True, viewport={'width': 1280, 'height': 800}, permissions=['microphone', 'camera'], service_workers='block',
+                                   user_agent='Mozilla/5.0 (Linux; Android 11; SM-T720) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        await ctx2.add_init_script("localStorage.setItem('wilson.settings', JSON.stringify({apiKey:'AIzaTESTTESTTESTTESTTESTTESTTEST', listenMode:'regard', convTimeout: 12, v:3}));")
+        await ctx2.add_init_script(GAZE)
+        t = await ctx2.new_page(); tlogs = []
+        await t.route(re.compile(r'.*/vendor/(face_detection|models|mediapipe)/.*'), lambda r: asyncio.ensure_future(r.abort()))
+        t.on('console', lambda m: tlogs.append(m.text)); t.on('pageerror', lambda e: tlogs.append('PAGEERROR ' + str(e)))
+        await t.route_web_socket(re.compile(r'.*generativelanguage\.googleapis\.com.*'), handler)
+        await t.goto('http://127.0.0.1:8765/index.html')
+        await t.wait_for_function('window.wilson && wilson.state === "veille"', timeout=20000)
+        await t.wait_for_timeout(500)
+        await t.evaluate("window.__look = true")
+        await t.wait_for_function('wilson.state === "conversation"', timeout=8000)
+        await t.wait_for_timeout(1500)
+        check('Tablette : il parle en le regardant → discussion engagée', await t.evaluate("wilson._dialogueEngage() && wilson._graceRegard() === 30000"))
+        await t.evaluate("window.__look = false"); t0 = time.time()
+        await t.wait_for_timeout(6000)
+        st = await t.evaluate("({ p: !!wilson.paused, s: wilson.state, ok: wilson._reponsePermise(), adr: wilson._addressed() })")
+        check('… il détourne les yeux 6 s : pas de veille, il l\'écoute et peut encore lui répondre (remarque du 19/11/26, 08h44)', not st['p'] and st['s'] == 'conversation' and st['ok'] and st['adr'], str(st))
+        await t.wait_for_function('wilson.paused === true', timeout=30000)
+        dt = time.time() - t0
+        check('… veille au bout d\'environ 30 s sans regard', 28 <= dt <= 33 and any('Plus regardé depuis 30 s' in l for l in tlogs), f'{dt:.1f} s')
+        check('… en veille : il n\'écoute plus (micro coupé vers Gemini)', not await t.evaluate("wilson._addressed()"))
+        await t.evaluate("window.__look = true"); await t.wait_for_function('wilson.paused === false', timeout=3000)
+        await t.evaluate("wilson.endConversation('test')"); await t.wait_for_timeout(300)
+        # Discussion ouverte au regard, mais personne ne lui a parlé en le regardant (pas engagée) : 3 s, comme avant.
+        await t.evaluate("window.__look = true")
+        await t.wait_for_function('wilson.state === "conversation"', timeout=8000)
+        await t.evaluate("window.__look = false"); t0 = time.time()
+        await t.wait_for_timeout(900); await t.evaluate("wilson._segs = []; wilson._seg = null")   # (la voix de la dernière demi-seconde « regardée » oubliée)
+        await t.wait_for_function('wilson.paused === true', timeout=6000)
+        dt = time.time() - t0
+        check('Tablette, discussion pas engagée (personne ne lui a parlé en le regardant) : veille après 3 s, comme avant', 2.6 <= dt <= 4.2, f'{dt:.1f} s')
+        check('… et rien de permis sans regard', not await t.evaluate("wilson._reponsePermise()") and await t.evaluate("wilson._graceRegard()") == 3000)
+        errs = [l for l in tlogs if 'PAGEERROR' in l]
+        check('Aucune erreur JavaScript (tablette)', not errs, '; '.join(errs)[:300])
         await b.close()
     print(f"\n{sum(results)}/{len(results)} vérifications OK")
 

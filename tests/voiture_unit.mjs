@@ -203,5 +203,15 @@ for (const w of ["Je te guide vers ABM à La Roche, c'est bien ça ?", 'Pardon, 
   'Pardon, je parlais pour le GPS. Tu me demandais quelque chose ?', 'Bonne route !', "Je ne peux pas arrêter le guidage moi-même."])
   check(`pas une annonce de guidage : « ${w.slice(0, 50)} »`, !V.annonceGuidage(w));
 
+// Il refuse qu'on écrive (journal du 19/11/26, 16h13:00 : un compte rendu en trop préparé après « pas besoin de me rajouter une tâche »)
+for (const t of ["Non mais c'est bon c'est il y a pas besoin de valider, je t'ai dit que c'était fait déjà. T'as pas besoin de me rajouter une tâche pour dire que ça y est j'ai l",
+  'Pas la peine de noter.', 'Ne note rien.', "Non, n'ajoute rien.", 'Inutile de créer une tâche.', "Non, pas besoin de l'enregistrer."])
+  check(`refus d'écrire (pas une demande de travail) : « ${t.slice(0, 50)} »`, V.refusEcriture(t) && !V.estTravail(t));
+for (const t of ['Pas besoin de valider, note plutôt que les tee-shirts sont donnés.', 'Note que les tee-shirts sont donnés.', 'Ajoute une tâche pour relancer le client.',
+  'Pas besoin de chercher, note juste la visite.', 'Enregistre-le.', 'Oui.', 'Il ne faut pas oublier de noter la visite.'])
+  check(`pas un refus d'écrire : « ${t.slice(0, 50)} »`, !V.refusEcriture(t));
+check("« C'est noté que c'est déjà fait, je n'ajoute rien » n'annonce pas une écriture", !V.annonceEcritureFaite("Pardon, j'avais mal compris. C'est noté que c'est déjà fait, je n'ajoute rien."));
+for (const w of ["C'est prêt dans le CRM, dans tes tâches.", "J'ai ajouté la tâche.", "C'est enregistré."]) check(`écriture annoncée : « ${w} »`, V.annonceEcritureFaite(w));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

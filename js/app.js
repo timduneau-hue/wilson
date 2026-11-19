@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.20';
+const VERSION = '1.45.21';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -54,6 +54,8 @@ const TAIL_MS = 300;              // ne pas renvoyer la fin de sa propre voix
 const TAIL_NOAEC_MS = 700;        // idem sans annulation d'écho (coupure « prudente ») : l'écho de la pièce et du haut-parleur dure plus
 const TURN_GATE_MS = 5000;        // micro coupé pendant tout le tour de parole de Wilson (trous de réseau compris), 5 s max sans son
 const LOOK_GRACE_MS = 3000;       // R3 : on peut détourner les yeux 3 s ; au-delà, il se met en veille (règle de Timothée, 24/10/26)
+const VOITURE_ETAT_MS = 60000;     // voiture : ce que Home Assistant en voit, noté au journal 1 min après une commande (19/11/26, 08h55)
+const REGARD_DIALOGUE_MS = 30000; // … sur la tablette, une fois la discussion engagée : 30 s (remarque de Timothée du 19/11/26, 08h44)
 const LOOKED_IDLE_MS = 60000;     // tant qu'on le regarde, il reste à l'écoute, 60 s de silence au plus
 const SEARCH_MAX_MS = 30000;      // outil « chercher » : Wilson a dit qu'il cherchait, il répond quand il a l'info (filet : 30 s)
 const CRM_MAX_MS = 40000;         // question au CRM (script → CRM) : filet de sécurité
@@ -538,8 +540,17 @@ class App {
     if (v.looking) return true;
     // R3 : pendant une discussion, on peut détourner les yeux 3 s ; sinon il faut le regarder (1,5 s de marge de détection).
     // Depuis le 01/11/26 : à partir du dernier regard CONFIRMÉ (sureAt), plus d'une simple analyse « regarde » (lookAt).
-    return now - (v.sureAt || 0) < (this.state === 'conversation' ? LOOK_GRACE_MS : 1500);
+    return now - (v.sureAt || 0) < (this.state === 'conversation' ? this._graceRegard() : 1500);
   }
+  // Remarque de Timothée du 19/11/26, 08h44:07 (tablette du salon) : « que je continue de répondre même s'il tourne le regard
+  // et que je ne repasse pas en veille tout de suite, qu'il y ait un délai d'au moins 30 secondes » (pas forcément sur le
+  // téléphone). Sur la tablette, une fois la discussion ENGAGÉE (il a dit une phrase en le regardant : R1 pour commencer), il
+  // peut détourner les yeux 30 s : Wilson l'écoute et lui répond encore. Avant, ou ailleurs : 3 s, comme avant.
+  _graceRegard() {
+    if (this.state !== 'conversation' || deviceName() !== 'tablette' || !this._dialogueEngage()) return LOOK_GRACE_MS;
+    return REGARD_DIALOGUE_MS;
+  }
+  _dialogueEngage() { const t0 = this._convAt0 || 0; return (this._segs || []).some((S) => S.last >= t0 && S.vu >= SEG_VU_MIN); }
 
   // Le regard pilote la discussion (R3) : actif seulement avec la détection du regard.
   get _gazeMode() { const v = this.vision; return (this.settings.listenMode || 'regard') === 'regard' && !!(v && v.gazeReady && !v.stale); }
@@ -548,7 +559,7 @@ class App {
   _pause() {
     if (this.paused) return;
     this.paused = true; this._pausedAt = performance.now();
-    this.log(`Plus regardé depuis ${LOOK_GRACE_MS / 1000} s : veille (discussion gardée ${this.settings.convTimeout} s)`);
+    this.log(`Plus regardé depuis ${this._graceRegard() / 1000} s : veille (discussion gardée ${this.settings.convTimeout} s)`);
     const f = this.face; f.clearEmotion(); f.setMood('neutre'); f.setBrightness(0.45); f.setFps(40); f.setListen(-1);
     if (this.mode === 'live') { this.outBuf = []; this.outLen = 0; if (this.brain.open) this.brain.audioStreamEnd(); }
     if (this.ecoState) this.ecoState.cap = null;
@@ -692,6 +703,9 @@ class App {
   _reponsePermise(now = performance.now()) {
     if (!this._verrouRegard) return true;
     if (now < (this._permisJusqua || 0)) return true;
+    // tablette, discussion engagée en le regardant : il a détourné les yeux depuis moins de 30 s (remarque du 19/11/26, 08h44)
+    const v = this.vision, G = this._graceRegard();
+    if (G > LOOK_GRACE_MS && !this.paused && v && now - (v.sureAt || 0) < G) return true;
     return this._phraseRegardee(now);
   }
   // Pour le journal : ce que la caméra voyait (combien de visages, regard confirmé ou non, dernières phrases).
@@ -2114,6 +2128,14 @@ Nous sommes ${fmtDate()}.${nv}`;
       vv.held = [];
       return null;
     }
+    // Journal du 19/11/26, 16h13:00 : il refusait qu'on écrive (« pas besoin de me rajouter une tâche ») ; « Pardon, je
+    // n'ajoute rien » a été retenu, puis crm_noter exigé : un compte rendu en trop. Un « d'accord, je n'ajoute rien » est dit.
+    if (VP.refusEcriture(vv.user || user) && !VP.annonceEcritureFaite(wilson) && !VP.annonceGuidage(wilson) && !VP.annonceRecherche(wilson)) {
+      for (const [a, r] of vv.held) this.audio.play(a, r);
+      if (vv.held.length) { this.lastActivity = performance.now(); this.log(`Verrou de vérité : il ne veut rien faire écrire, réponse dite (« ${wilson.slice(0, 100)} »)`, true); }
+      vv.held = [];
+      return null;
+    }
     if (VP.sansFait(wilson, mots)) {
       const recu = vv.held.reduce((s, [a, r]) => s + a.length / (r || 24000), 0);
       for (const [a, r] of vv.held) this.audio.play(a, r);
@@ -2132,6 +2154,11 @@ Nous sommes ${fmtDate()}.${nv}`;
     const S = this._sansOutil && this._sansOutil.k === k && now - this._sansOutil.at < 120000 ? this._sansOutil : (this._sansOutil = { k, n: 0 });
     S.n++; S.at = now;
     const u = VP.plat(user);
+    if (VP.refusEcriture(user)) {                          // il refuse qu'on écrive : aucun outil exigé (journal du 19/11/26, 16h13)
+      this.log('Verrou de vérité : il ne veut rien faire écrire — aucun outil exigé', true);
+      this._vvDicte('[Il ne veut rien faire écrire dans le CRM : n\'appelle aucun outil. Dis-lui seulement : « D\'accord, je n\'ajoute rien. »]');
+      return;
+    }
     const quoi = VP.estItineraire(user) || VP.annonceGuidage(dit) ? 'itineraire avec le nom du client (rien n\'est lancé tant que l\'outil ne l\'a pas fait)'
       : VP.estEcriture(user) ? 'crm_noter (une visite : type compte_rendu, échange visite, texte « Visite » et les personnes vues), puis relis-lui la phrase préparée'
       : VP.questionContacts(user) ? 'crm_contacts avec le nom du client'
@@ -3154,6 +3181,9 @@ Nous sommes ${fmtDate()}.${nv}`;
   // à voix haute si elle est finie.
   async _suiviVoiture(a) {
     let s = null;
+    // Remarque du 19/11/26, 08h55 (« il manque le chauffage et le dégivrage avant et arrière ») : une minute après, ce que Home
+    // Assistant voit vraiment de la voiture est noté au journal, pour trouver la cause (rien n'est dit, rien n'est envoyé).
+    setTimeout(async () => { try { const e = await this.maison.etatVoiture(); if (e) this.log(`Voiture, 1 min après la commande : ${e}`, true); } catch (_) {} }, VOITURE_ETAT_MS);
     try { s = await this.maison.suiviVoiture(Date.now() - 3000, { chauffage: /chauffage/i.test(String(a.appareil || '')) && a.action !== 'eteindre' }); } catch (_) { return; }
     if (!s) return;
     this.log(`Voiture : ${s.texte}${s.detail ? ` — réponse du module : ${String(s.detail).slice(0, 160)}` : ''}`, true);
@@ -3823,7 +3853,7 @@ Nous sommes ${fmtDate()}.${nv}`;
         if (this.paused) {
           if (v.looking) this._resume();
           else if (now - this._pausedAt > keep) this.endConversation('plus regardé');
-        } else if (!this.speaking && !thinking && !searching && now - lastSeen > LOOK_GRACE_MS) this._pause();
+        } else if (!this.speaking && !thinking && !searching && now - lastSeen > this._graceRegard()) this._pause();
         else if (v.looking && !this.speaking && !thinking && !searching && idle > LOOKED_IDLE_MS) this.endConversation('silence');
       } else {
         if (this.paused) this._resume();

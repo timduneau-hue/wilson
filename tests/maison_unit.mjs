@@ -98,6 +98,14 @@ t(MAISON_TOOL.name === 'maison' && MAISON_TOOL.parameters.required[0] === 'deman
   t(r.ok && r.voiture && /mise en marche demandée/.test(r.info) && !/éteint/.test(r.info), 'dégivrage de la voiture : « demandé », pas « éteint » (11h10) : ' + r.info);
   r = await m2.commande({ appareil: 'climate.voiture_chauffage', action: 'eteindre' });
   t(r.ok && appels.slice(n2).some((a) => a[0] === 'climate/set_hvac_mode' && a[1].hvac_mode === 'off') && appels.slice(n2).some((a) => a[0] === 'switch/turn_off'), 'éteindre le chauffage de la voiture coupe aussi les dégivrages');
+  // Remarque du 19/11/26, 08h55 : ce que Home Assistant voit de la voiture, pour le journal (rien n'est envoyé à la voiture)
+  voit[0].state = 'auto'; voit[0].attributes.temperature = 28; voit[1].state = 'on';
+  voit.push({ entity_id: 'sensor.mg_remote_climate_state', state: 'on', attributes: {} },
+    { entity_id: 'event.mg_command_error', state: new Date(Date.now() - 30000).toISOString(), attributes: { detail: 'The key is detected inside the vehicle.' } });
+  const n3 = appels.length, ev = await m2.etatVoiture();
+  t(/Chauffage de la voiture : auto \(consigne 28\)/.test(ev) && /pare-brise de la voiture : on/.test(ev) && /lunette arrière de la voiture : off/.test(ev) && /clim du module : on/.test(ev) && /refus du module à \d\dh\d\d : The key/.test(ev) && !/salon/i.test(ev) && appels.length === n3,
+    'état de la voiture pour le journal (chauffage, dégivrages, module, refus), rien envoyé : ' + ev);
+  voit.splice(-2, 2); voit[0].state = 'off'; voit[1].state = 'off';
   t(/clé à l'intérieur/.test(motVoiture('return code: 8, message: The key is detected inside the vehicle. Please adjust and try again.(64)')) && /appli MG/.test(motVoiture('return code: 401, message: {"code":401}')), 'refus de la voiture traduits (clé dedans, appli MG ouverte)');
   // Journal du 12/11/26, 08h26:10 : l'anglais du module n'est plus jamais dit tel quel
   t(/service MG/.test(motVoiture('API call POST /vehicle/control failed unexpectedly')) && !/API|failed/.test(motVoiture('API call POST /vehicle/control failed unexpectedly'))
