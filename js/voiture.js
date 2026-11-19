@@ -79,12 +79,24 @@ export function prochainRdvDit(t) {
 }
 // Le prochain rendez-vous du jour à l'heure qu'il est : le premier dont l'heure n'est pas passée de plus de `marge` minutes
 // (en retard de quelques minutes, c'est encore celui-là ; commencé depuis plus longtemps, il en sort). null s'il n'y en a plus.
-export function prochainRdv(rdv, maintenant = new Date(), marge = 15) {
+// Journal du 19/11/26, 14h07:47 : relié à la voiture à 14h07:33, « amène-moi mon prochain
+// rendez-vous » → celui de 14h00, d'où il sortait (« je sors de chez … »), comme à 11h17 (relié à 11h16:45, rendez-vous de 11h00).
+// `voitureDepuis` (heure où le téléphone s'est relié à la voiture) : monté dans la voiture 5 min ou plus APRÈS le début d'un
+// rendez-vous, il en sort, ce n'est pas son prochain ; relié avant (il roule depuis) ou juste à l'heure, il est en retard, la
+// marge vaut.
+export function prochainRdv(rdv, maintenant = new Date(), marge = 15, { voitureDepuis = null } = {}) {
   const min = maintenant.getHours() * 60 + maintenant.getMinutes();
+  const V = voitureDepuis != null ? new Date(voitureDepuis) : null;
+  const vMin = V && !isNaN(V) && V.toDateString() === maintenant.toDateString() && V <= maintenant ? V.getHours() * 60 + V.getMinutes() : null;
   const l = (rdv || []).map((r) => { const m = /(\d{1,2})\s*h\s*(\d{2})?/.exec(String((r && r.heure) || '')); return m ? { r, m: +m[1] * 60 + +(m[2] || 0) } : null; })
     .filter((x) => x && x.r.societe).sort((a, b) => a.m - b.m);
-  const p = l.find((x) => x.m >= min - marge);
+  const p = l.find((x) => x.m >= min - marge && !(vMin != null && x.m < min && x.m <= vMin - 5));
   return p ? p.r : null;
+}
+// Le rendez-vous déjà commencé qu'il quitte (pour le journal), ou null.
+export function rdvQuitte(rdv, maintenant = new Date(), marge = 15, opts = {}) {
+  const p = prochainRdv(rdv, maintenant, marge, opts), q = prochainRdv(rdv, maintenant, marge);
+  return q && q !== p ? q : null;
 }
 // Ce que Wilson vient de dire propose-t-il d'y aller ? (son « oui » vaut alors demande)
 export function proposeGuidage(t) { return /\b(guid\w*|itineraire|gps|y aller|emmen\w*|on y va|navigu\w*|aller chez|destination|te conduire)\b/.test(plat(t)) && /\?/.test(String(t || '')); }
@@ -147,6 +159,18 @@ export function estOui(t) { const x = plat(t).trim(); return x.split(/\s+/).leng
 
 // Ce que Wilson dit pour annoncer une recherche (« Je regarde dans le CRM… ») : sans outil derrière, rien de vrai ne suit.
 export function annonceRecherche(t) { return /\b(je (re)?regarde|je cherche|je verifie|je consulte|je jette un (oeil|coup d'oeil))\b|dans (le|ton) crm|dans (la|sa) fiche/.test(plat(t)); }
+
+// Il annonce que le guidage est lancé (« C'est parti, je te guide vers … », « c'est relancé », « je lance le GPS »). Journal du
+// 19/11/26, 14h08:29 à 14h09:14 : dit quatre fois sans l'outil itineraire, et laissé passer comme « réponse qui n'affirme
+// rien » ; rien n'était lancé (« Non, GPS, ça s'active pas là »). Une question (« Je te guide vers …, c'est bien ça ? ») ou
+// une négation (« je ne lance rien ») n'annonce rien.
+export function annonceGuidage(t) {
+  return String(t || '').split(/(?<=[.!?…])\s+/).some((p) => {
+    const x = plat(p);
+    if (/\?\s*$/.test(p) || /\b(ne|n'|pas|plus|rien|jamais)\b|\bn'/.test(x)) return false;
+    return /\b(je t'y (guide|emmene|amene|conduis)|je te (re)?(guide|conduis|mene)|je t'(emmene|amene|y emmene)|c'est (re)?parti|c'est (re)?lance|(guidage|gps|itineraire|navigation)( est)? (re)?lance|je (re)?lance (le |la |l')?(gps|guidage|navigation|itineraire)|j'ai (re)?lance (le |la |l')?(gps|guidage|navigation|itineraire))\b/.test(x);
+  });
+}
 
 // Ce qui, dans sa bouche, affirme un fait du CRM (même sans nom propre ni chiffre).
 export function affirmeFait(t) {
@@ -215,7 +239,7 @@ export function horsTravail(t) {
 export function sansFait(t, mots) {
   const x = String(t || '').trim();
   if (!x) return true;
-  if (x.split(/\s+/).length > 35 || /\d/.test(x) || affirmeFait(x) || annonceRecherche(x)) return false;
+  if (x.split(/\s+/).length > 35 || /\d/.test(x) || affirmeFait(x) || annonceRecherche(x) || annonceGuidage(x)) return false;
   return nomsInventes(x, mots).length === 0;
 }
 
