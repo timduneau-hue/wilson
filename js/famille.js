@@ -26,6 +26,9 @@ export const GARDE_COUPEE = true;
 const TOUS = /^(tous|tout le monde|toute la famille|la famille|famille|everyone|nous|nous deux|nous tous|vous|vous deux|les deux|la maison)$/;
 // Nouvelle de la voiture déposée par Wilson pour Timothée (app.js, _garderNouvelleVoiture) : périmée au bout de 2 h.
 const NV_VALABLE_MS = 2 * 3600000;
+// L'agenda Famille est partagé (Timothée, Camille, les enfants) : un événement lu n'est pas forcément le sien. Journal du 19/11/26,
+// 18h25:51 : un rendez-vous de l'agenda Famille qui n'était pas le sien lui a été dit « tu as un rendez-vous… », il a dû corriger.
+export const FAMILLE_PAS_A_LUI = "Agenda partagé de la famille : un événement n'est pas forcément le sien ; sauf si le titre dit que c'est lui, ne dis pas « tu as » mais « sur l'agenda Famille, il y a… ».";
 const nouvelleVoiture = (m) => norm(m && m.de) === 'wilson' && /^Nouvelles de la voiture/.test(String((m && m.texte) || ''));
 // Rappel « quand tu nous verras » (journal du 05/11/26, 11h01 : « dès que Wilson à la maison, sur la tablette, nous verra ce
 // soir… ») : un message que la personne se laisse à elle-même (et à la famille), dit à la maison seulement, pas avant une heure.
@@ -445,7 +448,7 @@ export class Famille {
       if (!r || !r.ok) return pasPret(r);
       const l = r.evenements || [];
       if (!l.length) return `Rien dans l'agenda Famille${du ? ' sur cette période' : ' ces ' + (jours || 7) + ' prochains jours'}.`;
-      return `Agenda Famille : ${l.map((e) => `${jourDit(e.debut)}${e.journee ? (e.fin - e.debut > 86400000 * 1.5 ? ` au ${jourDit(e.fin - 1000)}` : ' (toute la journée)') : ' ' + heure(e.debut)} : ${e.titre}${e.lieu ? ' (' + e.lieu + ')' : ''}`).join(' ; ')}. Dis l'essentiel, simplement.`;
+      return `Agenda Famille : ${l.map((e) => `${jourDit(e.debut)}${e.journee ? (e.fin - e.debut > 86400000 * 1.5 ? ` au ${jourDit(e.fin - 1000)}` : ' (toute la journée)') : ' ' + heure(e.debut)} : ${e.titre}${e.lieu ? ' (' + e.lieu + ')' : ''}`).join(' ; ')}. ${FAMILLE_PAS_A_LUI} Dis l'essentiel, simplement.`;
     }
     if (action === 'ajouter') {
       const t = String(titre).trim(); if (!t) return 'Quel titre ? Demande-lui ce qu\'il faut noter.';

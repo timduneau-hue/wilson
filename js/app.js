@@ -20,7 +20,7 @@ import { Outils, OUTILS, OUTILS_NAMES } from './outils.js';
 import { ANALYSE_MAX_MS, reglesCRM } from './analyste.js';
 import { ClaudePC, CLAUDE_TOOL, MAIL_TOOL, phraseIndispo } from './claude.js';
 import { Qui } from './qui.js';
-import { Famille, FAMILLE_TOOLS, FAMILLE_TOOL_NAMES } from './famille.js';
+import { Famille, FAMILLE_TOOLS, FAMILLE_TOOL_NAMES, FAMILLE_PAS_A_LUI } from './famille.js';
 import { Reactions } from './reactions.js';
 import { Memoire, demandeEnCours } from './memoire.js';
 import { brancherStockage, bilanStockage } from './stockage.js';
@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.18';
+const VERSION = '1.45.19';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -2896,8 +2896,10 @@ Nous sommes ${fmtDate()}.${nv}`;
     const h = (t) => { const x = new Date(t); return `${x.getHours()}h${pad(x.getMinutes())}`; };
     const lignes = ev.slice(0, 12).map((e) => `- ${e.journee ? 'toute la journée' : `${h(e.debut)}-${h(e.fin)}`} : ${e.titre}${e.lieu ? ' (' + e.lieu + ')' : ''}${e.agenda ? ` [agenda ${e.agenda}]` : ''}`);
     const titre = g.tous ? 'Dans ses agendas Google ce jour-là (hors rendez-vous clients déjà cités)' : 'Dans l\'agenda Famille ce jour-là (ses autres agendas Google ne sont pas encore lus : script à mettre à jour)';
+    const fam = g.tous ? lignes.some((l) => /\[agenda [^\]]*famille[^\]]*\]$/i.test(l)) : lignes.length > 0;   // 19/11/26 : pas forcément les siens
+    const titreFam = fam ? `${titre} — ${FAMILLE_PAS_A_LUI}` : titre;
     this.log(`Journée : ${(r.rdv || []).length} rendez-vous au CRM, ${ev.length} événement(s) dans ${g.tous ? 'ses agendas Google' : 'l\'agenda Famille'}`);
-    return { ...r, texte: `${r.texte}\n${titre} : ${lignes.length ? '\n' + lignes.join('\n') : 'rien.'}` };
+    return { ...r, texte: `${r.texte}\n${titreFam} : ${lignes.length ? '\n' + lignes.join('\n') : 'rien.'}` };
   }
 
   // Écriture gardée faute de réseau, envoyée au retour du réseau (C8 bis) : Wilson le dit.
