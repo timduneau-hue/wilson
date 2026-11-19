@@ -92,5 +92,22 @@ check('Annuaire d’hier : prêt (sans réseau), à relire, et il dit de quand i
 check('Stockage illisible : annuaire vide, sans erreur', !new Annuaire({ stockage: { lire: () => '{pas du json', ecrire: () => true } }).pret);
 check('Clé de stockage', CLE_ANNUAIRE === 'wilson.annuaire' && boite.has(CLE_ANNUAIRE));
 
+// --- journal du 19/11/26, 16h05-16h09 (téléphone en voiture ; noms changés sauf la forme) : « Emmène-moi chez Bonnet » ---
+// Avant : « bonnet » → « bOn », « bonnais » → « bOne » : Bonnais jamais proposé, mais des contacts « Bonnel », « Bonnard ».
+check('Son final « é / è » : Bonnet = Bonnais = Bonné, Calais = Calé, Dupret = Duprès', sim('bonnet', 'bonnais') >= 0.92 && sim('bonne', 'bonnais') >= 0.92 && sim('calais', 'cale') >= 0.92 && sim('dupret', 'dupres') >= 0.92,
+  [sim('bonnet', 'bonnais'), sim('calais', 'cale'), sim('dupret', 'dupres')].join());
+const G = new Annuaire({ stockage: { lire: () => null, ecrire: () => true } });
+G.charger({ ok: true, contacts: [
+  L('BONNAIS SARL', 'M BERTIN Hugo', 'Gérant', 'C3000001', 'Bruz', '35170 Bruz'),
+  L('SOFRELEC', 'MME BONNEL Laure', 'Réapro', 'C3000002', 'Ancenis', '44150 Ancenis'),
+  L("MENUIS'ALU", 'M BONNARD Marc', 'Dirigeant', 'C3000003', 'Janzé', '35150 Janzé'),
+  L('ATELIER DUVAL', 'MME BONIN Annie', '', 'C3000004', 'Rennes', '35000 Rennes'),
+] });
+const g1 = (q) => { const r = G.choisir(q); return r.un ? r.un.g.societe : r.plusieurs ? r.plusieurs[0].g.societe : ''; };
+check('« Bonnet » → Bonnais en premier (pas les contacts Bonnel, Bonnard…)', g1('Bonnet') === 'BONNAIS SARL', JSON.stringify(G.chercher('Bonnet', 4).map((x) => [x.g.societe, x.score])));
+check('« entreprise Bonnet », « Bonnais » → Bonnais en premier', g1('entreprise Bonnet') === 'BONNAIS SARL' && g1('Bonnais') === 'BONNAIS SARL', g1('entreprise Bonnet'));
+check('… mais pas « sûr » sur un nom seulement entendu (il fait confirmer)', !G.choisir('Bonnet').sur);
+check('« Laure Bonnel » → toujours Sofrelec', g1('Laure Bonnel') === 'SOFRELEC', g1('Laure Bonnel'));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

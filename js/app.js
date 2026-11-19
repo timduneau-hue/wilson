@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.15';
+const VERSION = '1.45.16';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -1594,6 +1594,8 @@ Nous sommes ${fmtDate()}.${nv}`;
         else { this.log(`Pas mon nom dans « ${user.slice(0, 100)} » : je me tais et je me rendors`, true); this._gate = null; this.endConversation('pas mon nom'); return; }
       }
       this.discard = false; this._modelOut = (this._modelOut || 0) + 1; this._modelTalking = 0;
+      // Réponse coupée par Google (« […] » ajouté par brain.js) : elle n'est pas finie (journal du 19/11/26, 16h08:41).
+      const coupee = /\[…\]\s*$/.test(String(wilson || ''));
       wilson = cleanSpeech(wilson);
       this._emoTour = null;
       // Protocole voiture : verrou de vérité (réponse sans outil jamais dite, nom inventé corrigé).
@@ -1645,7 +1647,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       const userLog = user || (DT && DT.conv === this.convId && !DT.note && DT.texte ? (DT.note = true, DT.texte) : '');
       if (userLog || wilson) this.memory.addExchange(userLog, wilson, this.famille._parle());
       if (wilson) { (this._ditWilson = this._ditWilson || []).push({ t: performance.now(), text: wilson }); this._ditWilson.splice(0, this._ditWilson.length - 8); }
-      if (wilson) this._aDireDit(wilson);                                       // réponse attendue enfin donnée ?
+      if (wilson) this._aDireDit(wilson, coupee);                               // réponse attendue enfin donnée ?
       if (wilson) this._verifierChiffres(wilson);                               // chiffre inventé ? (journal du 05/11/26)
       if (user) (this._entendus = this._entendus || []).push(user), this._entendus.splice(0, this._entendus.length - 6);
       if (user) this._parleDepuis = true;
@@ -1653,7 +1655,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       if (user && this._apresOutil && this._turnN - 1 > this._apresOutil.turnN) this._apresOutil = null;
       if (wilson) {
         this._demandeTexte = null;
-        this._derniereReponse = { texte: wilson, at: performance.now() }; this._parleDepuis = false;
+        this._derniereReponse = { texte: wilson, at: performance.now(), coupee }; this._parleDepuis = false;
         this.log('Wilson : ' + wilson.slice(0, 120), true); this._remarqueOubliee(wilson); this._enregistreFaux(wilson); this._afficheSansOutil(wilson);
         this.famille.dit(wilson);                                                // message de la famille bien transmis (7 sexies, M3)
         this.questions.dit(wilson, this.convId);                                 // question de Claude posée à Timothée (7 septies, D)
@@ -1956,12 +1958,17 @@ Nous sommes ${fmtDate()}.${nv}`;
     }, 8000);
     return true;
   }
-  _aDireDit(wilson) {
+  // Journal du 19/11/26, 16h08:41 (téléphone, en voiture) : deux réponses arrivées ensemble ; Google a coupé la première
+  // après 1,2 s, sur « J'ai la réponse à ta question ». Cette seule annonce la marquait « dite » : la vraie réponse (les
+  // chiffres du client) a été prise pour un doublon de l'annonce, et Timothée ne l'a jamais entendue. Une réponse coupée
+  // par Google ne compte que si elle contient déjà le résultat (ses mots), pas pour sa seule annonce.
+  _aDireDit(wilson, coupee = false) {
     const P = this._aDire; if (!P || P.conv !== this.convId) return;
     const n = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     const w = n(wilson), mots = [...new Set(n(P.dire).split(/[^a-z0-9]+/).filter((m) => m.length >= 5 || /^\d+$/.test(m)))];
     const communs = mots.filter((m) => w.includes(m)).length;
-    if (/j'ai la reponse|reponse a ta question/.test(w) || (mots.length && communs >= Math.min(3, mots.length))) { this._aDire = null; this.log('Réponse attendue dite'); }
+    if ((!coupee && /j'ai la reponse|reponse a ta question/.test(w)) || (mots.length && communs >= Math.min(3, mots.length))) { this._aDire = null; this.log('Réponse attendue dite'); }
+    else if (coupee) this.log('Réponse attendue coupée par Google avant le résultat : pas encore dite');
   }
   // De retour au premier plan (après le GPS, l'écran éteint) avec une réponse qui attend : en voiture, il la dit.
   _aDireAuRetour() {
@@ -2274,9 +2281,10 @@ Nous sommes ${fmtDate()}.${nv}`;
     return u.trim().split(' ').length >= 2 && w.includes(u) && performance.now() - Math.max(D.t, this.playEndAt || 0) < 8000;
   }
   // Réponse en double : même début que sa réponse précédente (moins de 45 s), sans que personne ait parlé entre les deux.
+  // Une réponse précédente coupée par Google n'était pas finie : la reprendre n'est pas un doublon (19/11/26, 16h08:46).
   _estDoublon(t) {
     const D = this._derniereReponse;
-    if (!D || this._parleDepuis || String(this.brain.inText || '').trim() || performance.now() - D.at > 45000) return false;
+    if (!D || D.coupee || this._parleDepuis || String(this.brain.inText || '').trim() || performance.now() - D.at > 45000) return false;
     if (!memeDebut(cleanSpeech(t), D.texte)) return false;
     this.log(`Réponse en double évitée : il redisait « ${D.texte.slice(0, 80)} »`);
     return true;

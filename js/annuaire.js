@@ -43,6 +43,9 @@ export function motsNom(s) {
   return out.filter((m) => !VIDES.has(m));
 }
 // Clé phonétique française simplifiée (« Gaudin » = « Godin », « Yohan » = « Yoann »).
+// Journal du 19/11/26, 16h05-16h09 (téléphone en voiture ; noms changés ici) : « Emmène-moi chez Bonnet » → trois clients
+// dont un contact s'appelle « Bonnel », « Bonnard »…, jamais BONNAIS SARL : « bonnet » donnait « bOn » et « bonnais » « bOne »
+// (le « s » muet ôté, mais pas le « e » resté derrière). Le son final « é / è » s'écrit -et, -ais, -é, -er… : même clé partout.
 const PHON = new Map();
 export function phon(m) {
   const k = String(m || ''); let v = PHON.get(k);
@@ -60,7 +63,7 @@ function phon0(m) {
     .replace(/(ain|ein|in|un|im)(?=[^aeiouU]|$)/g, 'I')
     .replace(/(an|en)(?=[^aeiouU]|$)|(am|em)(?=[bp])/g, 'A')
     .replace(/on(?=[^aeiouU]|$)|om(?=[bp])/g, 'O')
-    .replace(/(.)\1+/g, '$1').replace(/([^A-Z])[estdxp]$/, '$1');
+    .replace(/(.)\1+/g, '$1').replace(/([^A-Z])[estdxp]$/, '$1').replace(/([^A-Z])e$/, '$1');
 }
 export function jw(a, b) {
   if (a === b) return 1;

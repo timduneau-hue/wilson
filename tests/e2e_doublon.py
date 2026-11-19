@@ -132,6 +132,32 @@ async def main():
         check('Suite différente après « Je regarde dans le CRM… » : jouée', await page.evaluate('wilson.audio.playing') and len([l for l in logs if 'Réponse en double' in l]) == k)
         await page.wait_for_function('!wilson.audio.playing', timeout=5000)
 
+        # Journal du 19/11/26, 16h08:41 : réponse attendue annoncée, coupée par Google après « J'ai la réponse à ta question »,
+        # puis reprise en entier sans que personne ait parlé → la reprise était prise pour un doublon, jamais entendue.
+        await page.evaluate("wilson._aDire = { question: 'entreprise Bonnais', dire: 'Bonnais a passé 4 commandes depuis fin octobre, la dernière le 6 novembre pour 700 euros.', at: Date.now(), conv: wilson.convId, s: 48, n: 1, envoyeAt: performance.now() }")
+        ch = audio_chunks(1.2)
+        for c in ch[:2]: send(conn, modelTurn={'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]})
+        send(conn, outputTranscription={'text': "J'ai la réponse à ta question"})
+        send(conn, interrupted=True); send(conn, turnComplete=True)
+        await page.wait_for_timeout(300)
+        check('Réponse attendue coupée par Google sur sa seule annonce : pas comptée comme dite',
+              await page.evaluate('!!wilson._aDire') and any('coupée par Google avant le résultat' in l for l in logs))
+        await page.wait_for_function('!wilson.audio.playing', timeout=5000)
+        k = len([l for l in logs if 'Réponse en double' in l]); n0 = await page.evaluate('wilson.audio.playedSec')
+        ch = audio_chunks(2.0)                                   # le texte arrive par morceaux, comme chez Google
+        for c in ch[:2]: send(conn, modelTurn={'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]})
+        send(conn, outputTranscription={'text': "J'ai la réponse à ta question"})
+        send(conn, outputTranscription={'text': " sur Bonnais : 4 commandes depuis fin octobre, la dernière le 6 novembre pour 700 euros."})
+        for c in ch[2:]: send(conn, modelTurn={'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': c}}]})
+        send(conn, turnComplete=True)
+        await page.wait_for_timeout(300)
+        check('… sa reprise, sans qu\'on lui parle, est jouée (pas un doublon) et la réponse est dite', await page.evaluate('wilson.audio.playing')
+              and len([l for l in logs if 'Réponse en double' in l]) == k and await page.evaluate('!wilson._aDire'), f'{len([l for l in logs if "Réponse en double" in l]) - k} doublon(s)')
+        await page.wait_for_function('!wilson.audio.playing', timeout=6000)
+        reponse(conn, "J'ai la réponse à ta question sur Bonnais : 4 commandes depuis fin octobre, la dernière le 6 novembre pour 700 euros.", sec=2.0)
+        await page.wait_for_timeout(500)
+        check('… redite une 3e fois entière : coupée comme un vrai doublon', any('Réponse en double coupée' in l for l in logs[-15:]) and not await page.evaluate('wilson.audio.playing'))
+
         # Outil sur 3.1 (memoriser) : la réponse vient après l'outil → pas de relance (sinon deux réponses).
         await page.evaluate("window.__parle(700)"); await page.wait_for_timeout(800)
         conn['ws'].send(json.dumps({'toolCall': {'functionCalls': [{'id': 't1', 'name': 'memoriser', 'args': {'fait': 'Timothée m\'entend bien dans la voiture.'}}]}}))
