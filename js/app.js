@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.12';
+const VERSION = '1.45.13';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -3014,7 +3014,7 @@ Nous sommes ${fmtDate()}.${nv}`;
     this._passe = prev.then(async () => {
       try {
         const ou = this.enVoiture ? 'en voiture, sur le téléphone de Timothée' : deviceName() === 'téléphone' ? 'sur le téléphone de Timothée' : 'sur la tablette du salon';
-        const r = await this.memoire.passe({ echanges, questions, ou });
+        const r = await this.memoire.passe({ echanges, questions, ou, depuis: t0 });
         if (r) for (const x of r.reponses) await this.questions.repondre(x.id, x.reponse, 'retrouvée en relisant la discussion');
       } catch (e) { this.log('Mémoire : relecture de la discussion impossible (' + (e.message || e) + ')'); }
     });

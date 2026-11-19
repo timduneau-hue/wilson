@@ -174,6 +174,27 @@ async def main():
         check('… et elle voit quels souvenirs sont « ancien »', ', ancien) Le parapluie rouge' in P['text'], P['text'][:600])
         reste = await page.evaluate("wilson.memoire.items.filter((x) => /parapluie|son est bon|thé vert/.test(x.texte)).length")
         check('… jamais en masse : 4 oublis proposés sans demande → 2 seulement', reste == 2 and has('oubli limité à 2 (4 proposés'), str(reste))
+        # Journal du 19/11/26 (09h15:45, 09h19:32) : ses remarques (délai avant la veille, dégivrage de la voiture) retenues
+        # comme souvenirs par la passe. Une remarque notée pendant la discussion n'en devient jamais un ; le reste, si.
+        R = "Quand je demande de démarrer la voiture pour la faire chauffer, il manque l'activation du chauffage et du dégivrage avant et arrière."
+        tr = int(time.time() * 1000) - 500
+        await page.evaluate("([t, r]) => localStorage.setItem('wilson.remarques', JSON.stringify([{ t: t - 3600000, texte: 'Ancienne remarque sur les dinosaures de Louis et ses livres préférés.' }, { t, texte: r }]))", [tr, R])
+        st['passe_out'] = {'ajouter': [{'texte': 'Timothée constate que le démarrage de la voiture par Wilson ne déclenche ni le chauffage ni le dégivrage avant et arrière.', 'categorie': 'habitudes', 'qui': 'Timothée'},
+                                       {'texte': 'Louis lit ses livres de dinosaures préférés le soir.', 'categorie': 'goûts', 'qui': 'Louis'}], 'oublier': []}
+        await page.evaluate("wilson.memory.addExchange('Quand je te demande de faire chauffer la voiture, il manque le dégivrage avant et arrière.', 'C\\'est noté, je lance la correction.', 'Timothée')")
+        await page.evaluate("wilson._passeMemoire(%d, Date.now(), [])" % (tr - 1000))
+        for _ in range(30):
+            await page.wait_for_timeout(250)
+            if has('Mémoire : pas retenu'): break
+        await page.wait_for_timeout(300)
+        P = st['passes'][-1]
+        items = await page.evaluate("wilson.memoire.items.map((x) => x.texte)")
+        check('Passe : sa remarque notée pendant la discussion n\'est pas retenue comme souvenir (journal du 19/11/26, 09h19)',
+              not any('dégivrage' in x for x in items) and has('pas retenu (c\'est sa remarque') , str(items))
+        check('… la passe voit la remarque de la discussion (pas l\'ancienne) avec « n\'en mets RIEN »',
+              'Remarques de Timothée sur le fonctionnement' in P['text'] and R in P['text'] and 'Ancienne remarque' not in P['text'] and 'ni le défaut qu\'elle décrit' in P['sys'], P['text'][:700])
+        check('… et le reste de la discussion est retenu comme avant', 'Louis lit ses livres de dinosaures préférés le soir.' in items, str(items))
+        await page.evaluate("localStorage.removeItem('wilson.remarques')")
         # « Retiens que… » / « oublie… » tout de suite
         await page.evaluate("wilson.startConversation('toucher')"); await page.wait_for_function('wilson.brain.open', timeout=8000); c = conns[-1]
         fns = {f['name']: f for t in c['setup'].get('tools', []) for f in t.get('functionDeclarations', [])}

@@ -35,6 +35,16 @@ const propre = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 300);
 const nouvelId = () => 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const pad = (n) => String(n).padStart(2, '0');
 const jour = (t) => { const d = new Date(t); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)}`; };
+// Journal du 19/11/26 (09h15:45 et 09h19:32) : deux remarques de Timothée sur le fonctionnement de Wilson (08h44, délai avant
+// la veille ; 08h55, dégivrage de la voiture) ont été retenues comme souvenirs par la passe, malgré la consigne : un constat de
+// bug qui restera vrai pour Gemini une fois corrigé. Une phrase proposée qui reprend une remarque notée pendant la discussion
+// (au moins 3 mots et 40 % des siens, comparés sur leurs 6 premières lettres, sans les prénoms Timothée et Wilson) n'est pas gardée.
+const radicaux = (s) => mots(s).filter((w) => w !== 'timothee' && w !== 'wilson').map((w) => w.slice(0, 6));
+export const repriseRemarque = (texte, remarque) => {
+  const a = [...new Set(radicaux(texte))], r = new Set(radicaux(remarque)); if (!a.length || !r.size) return false;
+  const n = a.filter((w) => r.has(w)).length;
+  return n >= 3 && n / a.length >= 0.4;
+};
 const PAS_PRENOM = new Set(['Wilson', 'Les', 'Le', 'La', 'Il', 'Elle', 'Ils', 'Elles', 'Leur', 'Leurs', 'Son', 'Sa', 'Ses', 'Un', 'Une', 'Des', 'Chez', 'Pour', 'Avec', 'Quand', 'Tous', 'Toute', 'Tout', 'Qui', 'Maison', 'Mamie', 'Papi']);
 
 // Ce que la passe de mémoire doit retenir… et surtout ne pas retenir.
@@ -52,7 +62,7 @@ export const CONSIGNE_PASSE = `Tu es la mémoire de Wilson, le compagnon de la f
 
 À NE PAS retenir :
 - les bavardages, les salutations, les demandes ponctuelles (météo, recherche, minuteur, lumière, musique, une photo), tout ce qui ne servira plus dans une semaine ;
-- ce qui est déjà rangé ailleurs : les rendez-vous (agenda), les messages laissés à quelqu'un, les clients, commandes et chiffres du CRM de Timothée, ses remarques sur le fonctionnement de Wilson (déjà notées pour ses mises à jour) ;
+- ce qui est déjà rangé ailleurs : les rendez-vous (agenda), les messages laissés à quelqu'un, les clients, commandes et chiffres du CRM de Timothée, ses remarques sur le fonctionnement de Wilson (déjà notées pour ses mises à jour : ni la remarque, ni le défaut qu'elle décrit, ni le comportement qu'elle demande, même reformulés) ;
 - ce que Wilson a dit, supposé ou deviné lui-même ; ce que dit la télé, la radio ou quelqu'un au téléphone ;
 - les codes, mots de passe, numéros de carte ou de compte, adresses e-mail ;
 - ce qu'on a demandé d'oublier.
@@ -204,7 +214,8 @@ export class Memoire {
   // ---------- la passe de mémoire, après une discussion ----------
   // echanges : [{ user, wilson, qui, t }] ; questions : celles de Claude posées à Timothée pendant la discussion ([{ id, question }]).
   // → { ajoutes, oublies, reponses } ou null (rien à relire).
-  async passe({ echanges = [], questions = [], ou = '', signal } = {}) {
+  // depuis : début de la discussion (ses remarques notées depuis ne deviennent pas des souvenirs).
+  async passe({ echanges = [], questions = [], ou = '', signal, depuis = 0 } = {}) {
     const key = this.app.settings && this.app.settings.apiKey, eco = this.app.eco;
     if (!key || !eco || !eco.texteJson) return null;
     const dit = echanges.map((e) => String(e.user || '').trim()).filter(Boolean).join(' ');
@@ -213,7 +224,9 @@ export class Memoire {
     if (texte.length > 9000) texte = '…\n' + texte.slice(-9000);
     const souv = this.items.length ? this.items.slice(-150).map((x) => `[${x.id}] (${x.cat}${x.qui ? ', ' + x.qui : ''}${x.origine === 'demandé' ? ', demandé' : x.origine === 'ancien' ? ', ancien' : ''}) ${x.texte}`).join('\n') : '(aucun)';
     const qs = questions.length ? `\n\nQuestions que Claude (celui qui prépare les mises à jour de Wilson) a fait poser à Timothée pendant cette discussion :\n${questions.map((q) => `[${q.id}] « ${q.question} »`).join('\n')}\nSi TIMOTHÉE (lui seulement, pas Camille ni quelqu'un d'autre) y a répondu, mets sa réponse dans "reponses" : {id, reponse = ce qu'il a répondu, mis au propre, sans rien inventer}. Ces réponses ne vont pas dans "ajouter". S'il n'a pas répondu ou a dit « plus tard », rien.` : '';
-    const msg = `Souvenirs actuels :\n${souv}${qs}\n\nLa discussion (${jour(Date.now())}${ou ? ', ' + ou : ''}) :\n${texte}`;
+    const remarques = depuis ? lire('wilson.remarques', []).filter((r) => r && r.texte && +r.t >= depuis - 60000).map((r) => String(r.texte).replace(/^\(notée par l'appli[^)]*\)\s*/, '')).filter(Boolean) : [];
+    const rq = remarques.length ? `\n\nRemarques de Timothée sur le fonctionnement de Wilson, notées pendant cette discussion et déjà envoyées pour ses mises à jour : n'en mets RIEN dans "ajouter", même reformulé :\n${remarques.map((r) => `- ${r}`).join('\n')}` : '';
+    const msg = `Souvenirs actuels :\n${souv}${qs}${rq}\n\nLa discussion (${jour(Date.now())}${ou ? ', ' + ou : ''}) :\n${texte}`;
     const { json, model } = await eco.texteJson({ key, system: CONSIGNE_PASSE, text: msg, schema: SCHEMA_PASSE, signal });
     this.passes++;
     // Journal du 05/11/26, 11h03:15 : ce que la famille avait demandé de retenir 2 min plus tôt a été « oublié » par la passe
@@ -233,6 +246,7 @@ export class Memoire {
     const oublies = this.oublierIds(idsOubli);
     const ajoutes = [];
     for (const a of (json.ajouter || []).slice(0, MAX_AJOUTS)) {
+      if (remarques.some((r) => repriseRemarque(a.texte, r))) { this.log(`Mémoire : pas retenu (c'est sa remarque, déjà envoyée pour ses mises à jour) « ${propre(a.texte)} »`, true); continue; }
       const it = this._ajouter(a.texte, { cat: a.categorie, qui: a.qui, origine: 'discussion' });
       if (it) ajoutes.push(it.texte);
     }
