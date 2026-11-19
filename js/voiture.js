@@ -69,6 +69,23 @@ export function clientRefuse(t, client) {
   const non = morceaux.filter((c) => (refusItineraire(c) || /\b(pas|plus)\b/.test(c)) && dans(c)), oui = morceaux.filter((c) => !(refusItineraire(c) || /\b(pas|plus)\b/.test(c)) && VOEU.test(c) && dans(c));
   return non.length > 0 && !oui.length;
 }
+// « Mon prochain rendez-vous », « mon prochain client », « le rendez-vous suivant » (sans dire chez qui). Journal du 19/11/26,
+// 11h17:14 : « tu m'amènes à mon prochain rendez-vous » → guidage vers le rendez-vous de 11h00, déjà fait ; il a dû corriger
+// (« Non Wilson, je sors de chez lui… l'autre d'après »). C'est l'appli qui choisit, d'après l'agenda du CRM et l'heure.
+export function prochainRdvDit(t) {
+  const x = plat(t);
+  return /\b(prochain|prochaine)s? (rendez-vous|rendez vous|rdv|clients?|cliente|visites?)\b/.test(x)
+    || /\b(rendez-vous|rendez vous|rdv|client|cliente|visite)s? (suivante?|d'apres)\b/.test(x);
+}
+// Le prochain rendez-vous du jour à l'heure qu'il est : le premier dont l'heure n'est pas passée de plus de `marge` minutes
+// (en retard de quelques minutes, c'est encore celui-là ; commencé depuis plus longtemps, il en sort). null s'il n'y en a plus.
+export function prochainRdv(rdv, maintenant = new Date(), marge = 15) {
+  const min = maintenant.getHours() * 60 + maintenant.getMinutes();
+  const l = (rdv || []).map((r) => { const m = /(\d{1,2})\s*h\s*(\d{2})?/.exec(String((r && r.heure) || '')); return m ? { r, m: +m[1] * 60 + +(m[2] || 0) } : null; })
+    .filter((x) => x && x.r.societe).sort((a, b) => a.m - b.m);
+  const p = l.find((x) => x.m >= min - marge);
+  return p ? p.r : null;
+}
 // Ce que Wilson vient de dire propose-t-il d'y aller ? (son « oui » vaut alors demande)
 export function proposeGuidage(t) { return /\b(guid\w*|itineraire|gps|y aller|emmen\w*|on y va|navigu\w*|aller chez|destination|te conduire)\b/.test(plat(t)) && /\?/.test(String(t || '')); }
 

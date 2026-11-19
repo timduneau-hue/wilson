@@ -164,5 +164,21 @@ for (const t of ["Parce qu'il est quelle heure là ?", 'Il est quelle heure ?', 
   "Oui, ça me va mais je voudrais que tu arrêtes aussi de me couper.", "Là, je reviens de l'entreprise Gallet. Et où j'ai vu Christophe, mais j'ai aussi vu les deux Sylvain."])
   check(`phrase finie (pas plus d'attente) : « ${t.slice(0, 50)} »`, !V.phraseEnCours(t));
 
+// « Mon prochain rendez-vous » (journal du 19/11/26, 11h17:14 : guidé vers le rendez-vous de 11h00, déjà fait)
+for (const t of ['Neve Wilson, tu m\'amènes à mon prochain rendez-vous.', 'Wilson, amène-moi chez mon prochain client maintenant.', 'Guide-moi vers le rendez-vous suivant', 'emmène-moi à mon prochain RDV', 'prochain rendez-vous'])
+  check(`prochain rendez-vous demandé : « ${t.slice(0, 50)} »`, V.prochainRdvDit(t));
+for (const t of ['Non Wilson, je sors de menuiserie de la le l\'autre d\'après.', 'Emmène-moi chez Gaudin', 'Guide-moi vers Menuiserie Gaudin', 'MENUISERIE GAUDIN'])
+  check(`pas « prochain rendez-vous » : « ${t.slice(0, 50)} »`, !V.prochainRdvDit(t));
+{
+  const rdv = [{ societe: 'MENUISERIE GAUDIN', heure: '14h00' }, { societe: 'A B M', heure: '11h00' }, { societe: 'TROISIEME', heure: '16h30' }, { societe: 'SANS HEURE', heure: '' }];
+  const a = (h, m) => new Date(2026, 10, 19, h, m);
+  check('11h17 : le rendez-vous de 11h00 est passé → MENUISERIE GAUDIN (14h00)', (V.prochainRdv(rdv, a(11, 17)) || {}).societe === 'MENUISERIE GAUDIN');
+  check('10h50 : A B M (11h00)', (V.prochainRdv(rdv, a(10, 50)) || {}).societe === 'A B M');
+  check('11h10 : en retard de 10 min, toujours A B M', (V.prochainRdv(rdv, a(11, 10)) || {}).societe === 'A B M');
+  check('15h00 : TROISIEME (16h30)', (V.prochainRdv(rdv, a(15, 0)) || {}).societe === 'TROISIEME');
+  check('18h00 : plus de rendez-vous', V.prochainRdv(rdv, a(18, 0)) === null);
+  check('aucun rendez-vous', V.prochainRdv([], a(9, 0)) === null);
+}
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);
