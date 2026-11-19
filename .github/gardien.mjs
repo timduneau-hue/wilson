@@ -1,14 +1,15 @@
-// Wilson — le gardien de la publication automatique (PLAN.md, section 11, S9 ; décision de Timothée du 15/11/26 :
-// « plus de clic mais un petit compte rendu de ce qui a été mis à jour »).
-// Une demande de modification (pull request) n'est fusionnée toute seule que si TOUT ce qui suit est vrai ; sinon elle
-// attend le Merge de Timothée, avec un commentaire qui dit pourquoi.
-//   - elle vient de ce dépôt (pas d'une copie), de son propriétaire, vers main, et n'est pas un brouillon ;
-//   - elle ne touche ni .github/ (ce gardien et les automatismes), ni pc/ (s'exécute sur le PC de la maison), ni apps-script/
-//     (script avec la clé, le CRM, la famille), ni android/, ni vendor/ ;
-//   - elle ne change pas la politique de sécurité de la page (ligne Content-Security-Policy : le verrou réseau) ;
-//   - les adresses Internet qu'elle ajoute dans l'appli sont toutes dans la liste ci-dessous ;
-//   - elle n'ajoute ni eval, ni new Function, ni document.write, ni script chargé depuis Internet ;
-//   - elle reste petite (2 000 lignes ajoutées au plus) et GitHub donne le détail de chaque fichier.
+// Wilson — le gardien de la publication automatique (PLAN.md, section 11, S9 ; décisions de Timothée du 15/11/26 :
+// « plus de clic mais un petit compte rendu de ce qui a été mis à jour », et du 19/11/26 : « je ne veux plus de merge du tout ;
+// si tu vois quelque chose de bizarre tu m'en parles et me fais confirmer »).
+// Depuis le 19/11/26, toute demande dont « Vérifier » est vert est fusionnée toute seule, à condition seulement :
+//   - qu'elle vienne de ce dépôt (pas d'une copie), de son propriétaire, vers main, qu'elle soit ouverte et pas un brouillon.
+// Ce qui demandait autrefois son Merge ne bloque plus, mais est signalé « à surveiller » (commentaire sur la demande, lu par
+// Claude à chaque passage, qui en parle à Timothée et lui fait confirmer) :
+//   - .github/ (ce gardien et les automatismes), pc/ (s'exécute sur le PC de la maison), apps-script/ (script avec la clé, le
+//     CRM, la famille), android/, vendor/, les workers ;
+//   - la politique de sécurité de la page (ligne Content-Security-Policy : le verrou réseau) ;
+//   - une adresse Internet hors de la liste ci-dessous ; eval, new Function, document.write, script chargé depuis Internet ;
+//   - plus de 2 000 lignes ajoutées, ou un fichier dont GitHub ne donne pas le détail.
 // Ce fichier est lu depuis main (déclencheur workflow_run) : une demande ne peut pas le modifier pour se fusionner elle-même.
 
 // Les « workers » (js/*-worker.js) et le service worker (sw.js) échappent au verrou réseau de la page : on les protège à part.
@@ -31,6 +32,7 @@ const DANGER = [[/\beval\s*\(/, 'eval('], [/new\s+Function\s*\(/, 'new Function(
 export const MAX_AJOUTS = 2000;
 
 // pr : réponse de GET /pulls/{n} ; fichiers : réponse de GET /pulls/{n}/files ; depot : « propriétaire/nom ».
+// Ce qui empêche la fusion automatique (seulement l'origine de la demande, 19/11/26).
 export function examiner(pr, fichiers, depot) {
   const refus = [];
   const proprio = depot.split('/')[0];
@@ -40,30 +42,36 @@ export function examiner(pr, fichiers, depot) {
   if (pr.draft) refus.push('la demande est un brouillon');
   if (pr.state !== 'open') refus.push('la demande est fermée');
   if (!fichiers.length) refus.push('aucun fichier modifié');
-  if (fichiers.length >= 300) refus.push('trop de fichiers pour être vérifiés');
+  return refus;
+}
+
+// Ce qui est publié quand même mais signalé « à surveiller » (autrefois : Merge de Timothée obligatoire).
+export function aSurveiller(fichiers) {
+  const alertes = [];
+  if (fichiers.length >= 300) alertes.push('beaucoup de fichiers (300 ou plus)');
   let ajouts = 0;
   for (const f of fichiers) {
     const noms = [f.filename, f.previous_filename].filter(Boolean);
-    for (const n of noms) if (INTERDITS.some((re) => re.test(n))) refus.push(`${n} : zone protégée (merge de Timothée obligatoire)`);
+    for (const n of noms) if (INTERDITS.some((re) => re.test(n))) alertes.push(`${n} : zone sensible`);
     ajouts += f.additions || 0;
     // Une nouvelle page n'aurait pas le verrou réseau d'index.html.
-    if (/\.html?$/.test(f.filename) && (f.status === 'added' || f.status === 'renamed' || f.status === 'copied')) refus.push(`${f.filename} : nouvelle page`);
+    if (/\.html?$/.test(f.filename) && (f.status === 'added' || f.status === 'renamed' || f.status === 'copied')) alertes.push(`${f.filename} : nouvelle page`);
     if (!noms.some(APPLI) && !/^tests\//.test(f.filename)) continue;
-    if (f.patch == null) { if (noms.some(APPLI)) refus.push(`${f.filename} : détail du changement indisponible`); continue; }
+    if (f.patch == null) { if (noms.some(APPLI)) alertes.push(`${f.filename} : détail du changement indisponible`); continue; }
     const lignes = f.patch.split('\n');
-    if (f.filename === 'sw.js' && lignes.some((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l) && !SW_PERMIS(l))) refus.push('sw.js : autre chose que la version ou la liste des fichiers');
-    if (lignes.some((l) => /^[+-]/.test(l) && /Content-Security-Policy/i.test(l))) refus.push(`${f.filename} : verrou réseau (Content-Security-Policy) modifié`);
+    if (f.filename === 'sw.js' && lignes.some((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l) && !SW_PERMIS(l))) alertes.push('sw.js : autre chose que la version ou la liste des fichiers');
+    if (lignes.some((l) => /^[+-]/.test(l) && /Content-Security-Policy/i.test(l))) alertes.push(`${f.filename} : verrou réseau (Content-Security-Policy) modifié`);
     if (!noms.some(APPLI)) continue;
     for (const l of lignes.filter((x) => x.startsWith('+') && !x.startsWith('+++'))) {
       for (const m of l.matchAll(/\b(?:https?|wss?):\/\/([a-z0-9.-]+)/gi)) {
         const h = m[1].toLowerCase().replace(/\.$/, '');
-        if (!hoteOk(h)) refus.push(`${f.filename} : nouvelle adresse Internet ${h}`);
+        if (!hoteOk(h)) alertes.push(`${f.filename} : nouvelle adresse Internet ${h}`);
       }
-      for (const [re, nom] of DANGER) if (re.test(l)) refus.push(`${f.filename} : ${nom} ajouté`);
+      for (const [re, nom] of DANGER) if (re.test(l)) alertes.push(`${f.filename} : ${nom} ajouté`);
     }
   }
-  if (ajouts > MAX_AJOUTS) refus.push(`${ajouts} lignes ajoutées (au plus ${MAX_AJOUTS} pour une publication automatique)`);
-  return [...new Set(refus)];
+  if (ajouts > MAX_AJOUTS) alertes.push(`${ajouts} lignes ajoutées (plus de ${MAX_AJOUTS})`);
+  return [...new Set(alertes)];
 }
 
 // Lancé par .github/workflows/publication.yml (variables : GH_TOKEN, DEPOT, SHA, BRANCHE). Écrit ok=1 et pr=… dans GITHUB_OUTPUT.
@@ -86,11 +94,19 @@ async function principal() {
   for (let page = 1; page <= 4; page++) { const p = await api(`/pulls/${pr.number}/files?per_page=100&page=${page}`); fichiers = fichiers.concat(p); if (p.length < 100) break; }
   const refus = pr.head.sha === SHA ? examiner(pr, fichiers, DEPOT) : ['la demande a changé depuis la vérification'];
   sortie('pr', String(pr.number));
-  if (!refus.length) { resume(`Demande n°${pr.number} : gardien d'accord, publication automatique.`); sortie('ok', '1'); return; }
-  const texte = `🛡️ **Pas de publication automatique** pour cette demande : elle attend ton « Merge ».\n\n${refus.map((x) => '- ' + x).join('\n')}`;
+  const commenter = async (texte) => {
+    const deja = await api(`/issues/${pr.number}/comments?per_page=100`).catch(() => []);
+    if (!deja.some((c) => c.body === texte)) await api(`/issues/${pr.number}/comments`, { method: 'POST', body: JSON.stringify({ body: texte }) }).catch(() => {});
+  };
+  if (!refus.length) {
+    const alertes = aSurveiller(fichiers);
+    resume(`Demande n°${pr.number} : publication automatique${alertes.length ? ' (à surveiller : ' + alertes.join(' ; ') + ')' : ''}.`); sortie('ok', '1');
+    if (alertes.length) await commenter(`⚠️ **À surveiller** (publiée automatiquement, plus de Merge depuis le 19/11/26 : Claude en parle à Timothée et lui fait confirmer) :\n\n${alertes.map((x) => '- ' + x).join('\n')}`);
+    return;
+  }
+  const texte = `🛡️ **Pas de publication automatique** pour cette demande :\n\n${refus.map((x) => '- ' + x).join('\n')}`;
   resume(texte); sortie('ok', '0');
-  const deja = await api(`/issues/${pr.number}/comments?per_page=100`).catch(() => []);
-  if (!deja.some((c) => c.body === texte)) await api(`/issues/${pr.number}/comments`, { method: 'POST', body: JSON.stringify({ body: texte }) }).catch(() => {});
+  await commenter(texte);
 }
 
 if (process.argv[1] && import.meta.url === new URL('file://' + process.argv[1]).href) principal().catch((e) => { console.error(e.message); process.exit(1); });

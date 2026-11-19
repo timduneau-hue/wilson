@@ -1,7 +1,8 @@
 # Publication automatique (PLAN.md, section 11, S9 ; décision de Timothée du 15/11/26 : « plus de clic mais un petit compte rendu
 # de ce qui a été mis à jour »). Quand « Vérifier » est vert sur une demande de modification, le gardien (.github/gardien.mjs,
-# lu depuis main) l'examine ; s'il est d'accord, la demande est fusionnée et GitHub Pages republie l'appli. Sinon, elle attend
-# le Merge de Timothée, avec un commentaire qui dit pourquoi.
+# lu depuis main) l'examine ; s'il est d'accord, la demande est fusionnée et GitHub Pages republie l'appli. Depuis le 19/11/26
+# (« je ne veux plus de merge du tout ») il ne bloque plus qu'une demande venue d'ailleurs ; le reste est publié, et ce qui est
+# sensible est signalé « à surveiller » par un commentaire (Claude en parle à Timothée et lui fait confirmer).
 # Sécurité : déclencheur workflow_run → ce fichier et le gardien sont toujours ceux de main (une demande ne peut pas les changer
 # pour se fusionner elle-même), et le code de la demande n'est jamais exécuté ici (seulement lu, par l'API).
 name: Publication automatique
