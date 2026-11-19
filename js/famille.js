@@ -24,6 +24,9 @@ const PROPRIO = 'Timothée';          // le téléphone est celui de Timothée
 // Le code de la garde reste en sommeil : famille.coupee = false le rallume (tests).
 export const GARDE_COUPEE = true;
 const TOUS = /^(tous|tout le monde|toute la famille|la famille|famille|everyone|nous|nous deux|nous tous|vous|vous deux|les deux|la maison)$/;
+// Nouvelle de la voiture déposée par Wilson pour Timothée (app.js, _garderNouvelleVoiture) : périmée au bout de 2 h.
+const NV_VALABLE_MS = 2 * 3600000;
+const nouvelleVoiture = (m) => norm(m && m.de) === 'wilson' && /^Nouvelles de la voiture/.test(String((m && m.texte) || ''));
 // Rappel « quand tu nous verras » (journal du 05/11/26, 11h01 : « dès que Wilson à la maison, sur la tablette, nous verra ce
 // soir… ») : un message que la personne se laisse à elle-même (et à la famille), dit à la maison seulement, pas avant une heure.
 // Le script déjà déployé ne garde que id, pour, de, texte, t, par : ces trois réglages voyagent aussi dans l'id
@@ -101,6 +104,9 @@ export class Famille {
       if (m.remis || m.annule || !(norm(m.pour) === n || m.pour === 'tous')) return false;
       const NV = this.app._nvEnvoi || this.app._nouvelleVoiture;   // nouvelle de la voiture : dite par l'appli elle-même ici
       if (NV && NV.msgId === m.id) return false;
+      // Journal du 19/11/26, 08h40:56 : « la voiture a refusé la commande » de la veille (18/11, 09h29) dit le lendemain matin,
+      // et Timothée : « Mais c'était hier que j'ai demandé à allumer la voiture. » Une nouvelle de la voiture ne vaut que 2 h.
+      if (nouvelleVoiture(m) && now - (+m.t || 0) > NV_VALABLE_MS) return false;
       const M = metaMessage(m);
       return (norm(m.de) !== n || M.soi) && !(M.apres && now < M.apres) && !(M.maison && this.telephone);
     });
