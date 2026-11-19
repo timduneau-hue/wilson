@@ -154,6 +154,37 @@ async def main():
         n1 = len(conns); await page.evaluate("wilson.famille._remiseAt = -1e9"); await page.wait_for_timeout(2000)
         check('Pas redit une deuxième fois', len(conns) == n1)
 
+        # ---- Journal du 18/11/26, 21h45:06 et 21h50:33 : discussion ouverte au regard, Timothée reconnu qui le regarde sans rien
+        # demander → le message qui l'attend est dit au calme (avant : seulement « promis » pour une réponse jamais venue) ----
+        st['msgs']['mt1'] = {'id': 'mt1', 'pour': 'Timothée', 'de': 'Marie', 'texte': 'le plombier passe demain à 9h00', 't': int(__import__('time').time() * 1000) - 60000}
+        await page.evaluate("__regarde(false); __qui(null); wilson.famille.synchroniser()"); await page.wait_for_timeout(600)
+        await page.evaluate("wilson.famille._remiseAt = performance.now(); __qui({ nom: 'Timothée', sur: true }); wilson.startConversation('regard')")
+        await page.wait_for_function('wilson.brain.open && wilson.state === "conversation"', timeout=8000); cm = conns[-1]
+        await page.wait_for_timeout(4000)
+        check('Discussion ouverte, Timothée reconnu mais ne regarde pas Wilson (R1) : message pas dit', not any('plombier' in t for t in cm['texts']), str(cm['texts']))
+        await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
+        await page.evaluate("wilson.famille._remiseAt = performance.now(); __regarde(true); __qui({ nom: 'Timothée', sur: true }); wilson.startConversation('regard')")
+        await page.wait_for_function('wilson.brain.open && wilson.state === "conversation"', timeout=8000); cm = conns[-1]
+        await page.wait_for_timeout(1200)
+        check('… il le regarde, sans rien dire : pas avant 3 s de calme', not any('plombier' in t for t in cm['texts']), str(cm['texts']))
+        await page.wait_for_timeout(2800)
+        dits = [t for t in cm['texts'] if 'plombier' in t]
+        check('… 3 s de calme en le regardant : l\'appli lui fait dire le message, une fois (journal du 18/11/26, 21h45)', len(dits) == 1 and 'Timothée te regarde' in dits[0] and 'Marie' in dits[0] and has('la discussion est calme, je les lui dis'), str(cm['texts']))
+        check('… la réponse est permise (regard sûr, R1)', await page.evaluate("wilson._reponsePermise()"))
+        send(cm, outputTranscription={'text': 'Timothée, un message de Marie : le plombier passe demain à 9h.'}); send(cm, turnComplete=True)
+        await page.wait_for_timeout(1500)
+        check('… dit → marqué remis à Timothée', st['msgs']['mt1'].get('remis', {}).get('a') == 'Timothée', str(st['msgs']['mt1']))
+        await page.wait_for_timeout(4000)
+        check('… pas redit dans la même discussion', len([t for t in cm['texts'] if 'plombier' in t]) == 1)
+        await page.evaluate("wilson.endConversation('test')"); await page.wait_for_timeout(300)
+        st['msgs']['mt2'] = {'id': 'mt2', 'pour': 'Timothée', 'de': 'Marie', 'texte': 'pense au pain', 't': int(__import__('time').time() * 1000) - 60000}
+        await page.evaluate("__regarde(false); __qui(null); wilson.famille.synchroniser()"); await page.wait_for_timeout(600)
+        await page.evaluate("wilson.famille._remiseAt = performance.now(); __regarde(true); __qui({ nom: 'Louis', sur: true }); wilson.startConversation('regard')")
+        await page.wait_for_function('wilson.brain.open && wilson.state === "conversation"', timeout=8000); cl = conns[-1]
+        await page.wait_for_timeout(4500)
+        check('… Louis le regarde au calme : le message de Timothée ne lui est pas dit', not any('pense au pain' in t for t in cl['texts']), str(cl['texts']))
+        await page.evaluate("wilson.endConversation('test'); __regarde(false); __qui(null); wilson.famille.msgs.forEach((m) => { if (m.id === 'mt2') m.annule = 1; })"); await page.wait_for_timeout(300)
+
         # ---- G : la garde ----
         await page.evaluate("wilson.famille.oreille.start = function () { this.worker = {}; }; wilson.famille.oreille.stop = function () { this.worker = null; }")
         # Garde COUPÉE (réponse de Timothée du 18/11/26, 16h27 : « simplement la garde de la maison, l'envoi des alertes ») :
