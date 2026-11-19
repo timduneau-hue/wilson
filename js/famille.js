@@ -194,6 +194,21 @@ export class Famille {
     A.startConversation('message');
     this.remise.conv = A.convId;
   }
+  // Journal du 18/11/26, 21h45:06 et 21h50:33 (1.45.9, tablette) : Timothée, reconnu, regardait Wilson ; la discussion s'était
+  // ouverte au regard (avec l'attente de son visage, 1.45.5), donc pas en veille, et _remettre ne pouvait plus rien faire ; le
+  // message n'était que « promis » pour la première réponse de Wilson, qui n'est jamais venue (il ne lui demandait rien) :
+  // « Message pas encore dit à Timothée : je réessaierai », deux fois, et il ne l'a pas eu de la soirée. Pendant une discussion,
+  // quand il regarde Wilson et que tout est calme, l'appli le lui fait dire (même texte que la remise en veille).
+  remettreEnDiscussion(nom, now = performance.now()) {
+    if (this.telephone || this.remise || !nom) return null;
+    const l = this.enAttente(nom);
+    if (!l.length) return null;
+    this._remiseAt = now;
+    this.remise = { ids: l.map((m) => m.id), nom, at: now, conv: this.app.convId };
+    const texte = l.map((m) => `${this._deQui(m)} : « ${m.texte} »`).join(' ; ');
+    this.log(`Message(s) pour ${nom} : il me regarde, la discussion est calme, je les lui dis (${l.length})`, true);
+    return `[${nom} te regarde (reconnu à son visage). Tu as ${l.length > 1 ? l.length + ' messages' : 'un message'} pour ${nom === 'tous' ? 'la famille' : 'lui ou elle'} : ${texte}. Dis-le-lui maintenant, simplement, comme un ami qui transmet (« ${nom}, un message de … : … »), sans rien ajouter, puis écoute s'il veut répondre : tu peux déposer sa réponse avec l'outil messages.]`;
+  }
   // Remis seulement quand Wilson l'a vraiment dit : sa réponse reprend des mots du message (dit), ou la voix de la tablette l'a lu.
   _suivreRemise(now) {
     for (const k of ['remise', 'promis']) {

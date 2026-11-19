@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.10';
+const VERSION = '1.45.11';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -63,6 +63,7 @@ const VOITURE = false;
 const NOM_DELAI_VOITURE_MS = 10000, NOM_DELAI_MAISON_MS = 8000;   // 04/11/26, 17h57 : 4 s était trop court en voiture (réveils sur des bruits)
 const NOM_RELAIS_MS = 3000;       // vérification de « Wilson » sans réponse après 3 s : un 2e modèle en même temps (05/11/26)
 const APRES_OUTIL_MS = 3000;      // muet après le résultat d'un outil : relance au bout de 3 s (5 s avant le 05/11/26)
+const MESSAGE_CALME_MS = 3000;    // message de la famille : dit pendant la discussion après 3 s de calme (journal du 18/11/26, 21h45)
 const QUESTION_CALME_MS = 5000;   // question de Claude : posée après 5 s de calme, sa demande réglée (journal du 18/11/26)
 const ATTENTE_GOOGLE_MS = 3000;   // voiture : phrase transcrite, plus un mot depuis 3 s et pas de réponse → fin de phrase forcée (« réponds » au bout de 5 s avant la 1.29.0)
 const ATTENTE_EXPLIQUE_MS = 6000; // … 6 s (9 s si le micro croit encore entendre une voix) quand il explique encore quelque chose (remarque du 18/11/26, 17h58)
@@ -1988,6 +1989,32 @@ Nous sommes ${fmtDate()}.${nv}`;
     this.log(`Question de Claude [${E.id}] : sa demande est réglée, ${QUESTION_CALME_MS / 1000} s de calme : je la lui pose`);
     this._vvDicte(`[Dis-lui exactement, sans rien ajouter avant : « Au fait, Claude m'a demandé de te poser une question pour ma prochaine mise à jour : ${E.question} » Puis tais-toi et écoute sa réponse.]`);
   }
+  // Journal du 18/11/26, 21h45:06 et 21h50:33 : Timothée reconnu regardait Wilson dans une discussion ouverte au regard, sans
+  // rien lui demander ; le message qui l'attendait n'était promis que pour la première réponse de Wilson, jamais venue, et il
+  // ne l'a pas eu. Tablette, direct : il est reconnu sûr, il le regarde (R1), rien n'est en cours (outil, réponse, voix), 3 s
+  // de calme (5 s si sa dernière phrase est restée sans réponse, ou si Wilson attend une réponse) → l'appli le lui fait dire,
+  // une fois par discussion. Pas dit (discussion finie avant) : « je réessaierai », comme avant.
+  _messageAuCalme(now, occupe) {
+    const F = this.famille, R = this._derniereReponse;
+    if (!F || F.telephone || F.remise || this._mCalme === this.convId || !this.qui) return;
+    if (this.state !== 'conversation' || this.mode !== 'live' || !this.brain.open || this.paused || this.netWait || this.phone) return;
+    if (occupe || this._apresOutil || this._liveTurn || this.audio.playing || this.voice.speaking || this._aDireEnCours(now)) return;
+    if (this.crm && this.crm.pending) return;
+    if (this._vv && this._vv.n === this._turnN && this._vv.hold) return;                 // une réponse est retenue (verrou)
+    if (this.audio.speaking || now - (this.audio.lastVoicedAt || 0) < 1500) return;      // quelqu'un parle
+    const sansReponse = (this._heardAt || 0) > (this._convAt0 || 0) && (!R || R.at < this._heardAt);
+    const attend = R && R.at >= (this._convAt0 || 0) && /\?\s*[»"]?\s*$/.test(R.texte);
+    const calme = now - Math.max(this.playEndAt || 0, R ? R.at : 0, this._heardAt || 0, this._convAt0 || 0);
+    if (calme < (sansReponse || attend ? QUESTION_CALME_MS : MESSAGE_CALME_MS)) return;
+    const P = this.qui.qui(now);
+    if (!P || !P.sur || !P.facing || now - P.at > 5000 || !(this.vision && this.vision.looking)) return;   // R1 : reconnu sûr, il le regarde (comme M3)
+    if (!F.enAttente(P.nom).length) return;
+    this._mCalme = this.convId;
+    const texte = F.remettreEnDiscussion(P.nom, now);
+    if (!texte) return;
+    this._permettre(30000, 'message');
+    this._vvDicte(texte);
+  }
   _aDireEnCours(now = performance.now()) { const P = this._aDire; return !!(P && P.conv === this.convId && now - (P.envoyeAt || 0) < 25000); }
   // Pour la consigne de chaque discussion : la précédente vient de finir, une recherche tourne encore, une réponse attend.
   _contexteSuite() {
@@ -3826,6 +3853,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       this.log(`Google attend encore la fin de ta phrase (${((now - this._heardAt) / 1000).toFixed(0)} s sans un mot, ${attente > ATTENTE_GOOGLE_MS ? 'il expliquait quelque chose : attendu plus longtemps' : 'bruit de la route ?'}) : fin de phrase forcée`);
       this._forcerFinPhrase();
     }
+    this._messageAuCalme(now, outilEnCours);               // message de la famille : dit au calme s'il le regarde (18/11/26, 21h45)
     this._questionAuCalme(now, outilEnCours);              // question de Claude : l'appli choisit le moment (18/11/26)
     // En voiture, personne ne regarde l'écran : caméra à 2 analyses/s et visage à 30 images/s pendant la discussion, pour que
     // le téléphone garde de la marge pour le son (grésillements, remarque du 04/11/26, 11h32).
