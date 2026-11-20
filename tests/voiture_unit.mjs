@@ -217,5 +217,14 @@ for (const t of ['Pas besoin de valider, note plutôt que les tee-shirts sont do
 check("« C'est noté que c'est déjà fait, je n'ajoute rien » n'annonce pas une écriture", !V.annonceEcritureFaite("Pardon, j'avais mal compris. C'est noté que c'est déjà fait, je n'ajoute rien."));
 for (const w of ["C'est prêt dans le CRM, dans tes tâches.", "J'ai ajouté la tâche.", "C'est enregistré."]) check(`écriture annoncée : « ${w} »`, V.annonceEcritureFaite(w));
 
+// Écriture présentée comme prête sans crm_noter (journal du 20/11/26, 12h00:02 à 12h00:59)
+for (const w of ["J'ai préparé la tâche suivante : « Envoyer une équerre pour le ferme-porte en TNT à son entreprise. ». Je l'enregistre ?",
+  "Pardon, il me semble qu'il y a eu un petit souci. Je redonne la phrase : « Envoyer une équerre ». Est-ce que c'est bon, j'essaie de l'enregistrer ?", "C'est prêt, je l'enregistre ?"])
+  check(`écriture présentée comme prête : « ${w.slice(0, 50)} »`, V.annonceBrouillon(w) && V.parleEcriture(w));
+for (const w of ['Tu veux que je le note ?', 'Pour quel client ?', "D'accord, je n'ajoute rien.", 'Pour quel jour ?'])
+  check(`pas une écriture présentée comme prête : « ${w} »`, !V.annonceBrouillon(w));
+check("« j'ai un problème pour l'enregistrer, je vais le noter comme tâche » parle d'écrire", V.parleEcriture("Pardon, j'ai un problème pour l'enregistrer. Je vais le noter comme tâche, on est d'accord ?"));
+check('« Je viens de te le dire. » seul n\'est pas une écriture (c\'est ce que Wilson disait qui compte)', !V.estEcriture('Je viens de te le dire.'));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

@@ -35,6 +35,13 @@ export function refusEcriture(t) {
   return !estEcriture(x.replace(REFUS_ECRITURE, ' '));
 }
 // Wilson dit qu'il a écrit (pas un simple « c'est noté » d'accord) : jamais vrai sans crm_confirmer.
+// Journal du 20/11/26, 12h00:02 à 12h00:43 (en voiture) : « J'ai préparé la tâche suivante : « … ». Je l'enregistre ? » sans
+// avoir appelé crm_noter (rien n'était préparé dans le CRM) ; il a dit « oui » deux fois, et deux fois « rien à enregistrer ».
+// Une phrase qui présente une écriture comme prête à enregistrer.
+export function annonceBrouillon(t) { return /\bj'ai (bien )?prepare\b|\bc'est pret\b|\bl'enregistrer?\b[^.!?]{0,40}\?/.test(plat(t)); }
+// Wilson parle d'écrire dans le CRM (« je vais le noter comme tâche », « j'ai un problème pour l'enregistrer ») : la suite
+// est une écriture, même si sa dernière phrase à lui (« Je viens de te le dire. ») n'en dit rien.
+export function parleEcriture(t) { return annonceBrouillon(t) || annonceEcritureFaite(t) || /\b(l'enregistrer|le noter|la noter|les noter)\b/.test(plat(t)); }
 export function annonceEcritureFaite(t) { return /\b(c'est (enregistre|ajoute|cree)|j'ai (ajoute|enregistre|cree|prepare)|c'est pret dans (le|ton) crm)\b/.test(plat(t)); }
 // Une écriture demandée (visite, compte rendu, tâche, rendez-vous) : jamais l'analyste (lecture seule) à sa place.
 export function estEcriture(t) {
