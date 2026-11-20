@@ -148,6 +148,10 @@ export function finDeTrop(t) {
   const x = String(t || '').trim(), m = /(?:^|[.!?…:;»"]\s*)([^.!?…]{0,70}\?)\s*$/.exec(x);
   if (!m) return '';
   const q = plat(m[1]);
+  // 20/11/26 (téléphone, en voiture) : « Tu veux quoi sur eux : les dernières commandes, les devis ou autre chose ? » — une
+  // VRAIE question (celle que Claude lui faisait poser), où « autre chose » n'est que le dernier choix d'une liste : elle a
+  // été coupée, il n'a entendu que la phrase d'avant (« tu m'entends ? »). Un choix proposé n'est jamais une fin de trop.
+  if (/(,|\b(le|la|les|l'|un|une|des|du|son|sa|ses|leurs?|ce|cette|ces)\b)[^?]*\bou (bien )?(autre chose|quelque chose d'autre)\s*\?$/.test(q)) return '';
   return /\b(autre chose|quelque chose d'autre|autres? questions?|autre demande|besoin d'autre|d'autres? (questions?|choses?)|que puis-je faire d'autre|je peux (faire|t'aider)[^?]{0,20}(d'autre|autre chose)|encore besoin de moi)\b/.test(q) ? m[1].trim() : '';
 }
 // Didascalie lue à voix haute (journal du 09/11/26, 17h52:33 et 17h59:07 : « (Wilson reste silencieux car la conversation
