@@ -128,6 +128,11 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
         super.onRequestPermissionsResult(code, perms, res);
+        if (code == 2) {                                                                // « passer des appels » (20/11/26) : l'appel attendait
+            String n = appelEnAttente; appelEnAttente = null;
+            if (n != null) composer(n, aLe(Manifest.permission.CALL_PHONE));
+            return;
+        }
         demarrerEcoute();
         vue.reload();                                                                   // la page redemande le micro, cette fois accordé
         ui.postDelayed(this::autorisationsAndroid, 1500);
@@ -180,6 +185,34 @@ public class MainActivity extends Activity {
     }
 
     boolean estDevant() { return devant; }
+
+    // ---------- appeler (remarque du 20/11/26, 11h57 : « comme pour le GPS ») ----------
+    // Appel direct puis retour devant ; sans l'autorisation : demandée une seule fois (l'appel part ensuite), sinon composeur.
+    private String appelEnAttente;
+
+    void appeler(String num, boolean direct) {
+        SharedPreferences p = getSharedPreferences("wilson", MODE_PRIVATE);
+        if (!direct && !p.getBoolean("appels_demandes", false)) {
+            p.edit().putBoolean("appels_demandes", true).apply();
+            appelEnAttente = num;
+            requestPermissions(new String[] { Manifest.permission.CALL_PHONE }, 2);
+            return;
+        }
+        composer(num, direct);
+    }
+
+    void composer(String num, boolean direct) {
+        try {
+            Intent i = new Intent(direct ? Intent.ACTION_CALL : Intent.ACTION_DIAL, Uri.parse("tel:" + num));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+            if (direct) revenirDans(1500);                                              // l'appel passe dans la voiture
+        } catch (SecurityException e) {
+            if (direct) composer(num, false); else journal("Appel impossible : " + e.getMessage());
+        } catch (Exception e) {
+            journal("Appel impossible : " + e.getMessage());
+        }
+    }
 
     // ---------- le son dans la voiture (appli 2) ----------
     // Journal du 05/11/26, 18h09 (« il y a encore un problème du son ») : dans Chrome, c'est Chrome qui demandait à Android

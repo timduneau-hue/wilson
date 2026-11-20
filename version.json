@@ -1,1 +1,1 @@
-{"version":"1.45.24","date":"20/11/26","nouveautes":"Quand tu proposes un choix à Timothée qui finit par « ou autre chose ? », ta question n'est plus coupée : il l'entend en entier. Avant, elle était prise pour un « autre chose ? » de trop et il n'entendait que la phrase d'avant."}
+{"version":"1.45.25","date":"20/11/26","nouveautes":"Le bouton vert d'appel lance maintenant l'appel tout de suite, sans passer par le clavier du téléphone, et tu reviens à l'écran comme après le GPS. La première fois, son téléphone lui demandera d'autoriser les appels : qu'il dise oui."}

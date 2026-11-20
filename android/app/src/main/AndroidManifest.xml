@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- A3 : revenir tout seul devant après avoir lancé le guidage -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 20/11/26 : le bouton vert de Wilson appelle tout de suite, puis Wilson revient devant (comme après le GPS) -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
     <!-- A2 : Samsung ferme les applis en arrière-plan -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- A13 : l'appli installe elle-même ses nouvelles versions -->
