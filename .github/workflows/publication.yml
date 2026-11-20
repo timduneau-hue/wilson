@@ -16,6 +16,7 @@ permissions:
   contents: write
   pull-requests: write
   pages: write
+  actions: write      # 20/11/26 : lancer la construction de l'appli Android après une fusion qui touche android/
 
 concurrency:
   group: publication
@@ -56,3 +57,10 @@ jobs:
           # Une fusion faite par cet automatisme ne relance pas les autres : on demande à GitHub Pages de republier.
           gh api -X POST "repos/$DEPOT/pages/builds" --jq .status || echo "Republication demandée sans réponse (GitHub Pages la fera au prochain passage)."
           echo "Demande n°$PR fusionnée automatiquement." >> "$GITHUB_STEP_SUMMARY"
+          # 20/11/26 (correction d'appel 1.45.25) : la fusion faite par cet automatisme ne lance pas non plus « Appli Android » ;
+          # la nouvelle appli n'était donc jamais construite. Si la demande touche android/, on la lance ici (sur main).
+          if gh api "repos/$DEPOT/pulls/$PR/files?per_page=100" --paginate --jq '.[].filename' | grep -q '^android/'; then
+            gh api -X POST "repos/$DEPOT/actions/workflows/android.yml/dispatches" -f ref=main \
+              && echo "Appli Android : construction lancée (la demande touche android/)." >> "$GITHUB_STEP_SUMMARY" \
+              || echo "::warning::Appli Android pas lancée : à lancer à la main (Actions → Appli Android → Run workflow)."
+          fi
