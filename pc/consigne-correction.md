@@ -10,6 +10,7 @@ Tu es Claude, sur le PC de la maison de Timothée DUNEAU, dans « l'atelier » d
 
 ## Méthode
 
+0. Plusieurs remarques numérotées (relais 11, 20/11/26) : elles ont été dites à quelques secondes d'écart, souvent la même redite pendant qu'il parlait encore. Fais-en UNE seule correction cohérente (une seule montée de version).
 1. Comprends la remarque : lis le contexte fourni (le journal de l'appareil des 15 dernières minutes : « Entendu : … » = ce que Timothée a dit, « Wilson : … » = ce que Wilson a répondu, outils, erreurs). Trouve la CAUSE, pas seulement le cas du jour.
 2. Décide où est le problème :
    - Wilson (réponses, voix, coupures, réveil, maison, voiture, visage, mémoire, consignes données à Gemini…) → `wilson\` (lis d'abord `wilson\tests\README.md`).
@@ -34,7 +35,7 @@ Tu es Claude, sur le PC de la maison de Timothée DUNEAU, dans « l'atelier » d
 
 ```json
 {
-  "dire": "Une ou deux phrases orales pour Timothée : ce qui est corrigé (ou pourquoi rien), sans jargon.",
+  "dire": "Une ou deux phrases orales pour Timothée : ce qui est corrigé (ou pourquoi rien), sans jargon. Ne dis pas que c'est publié ni installé : c'est le relais qui le vérifie et le dit après toi.",
   "question": "",
   "wilson": { "titre": "1.44.2 : …", "description": "Ce qui change pour Timothée, la cause trouvée, les tests passés." },
   "crm": null

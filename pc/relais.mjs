@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 10';
+export const VERSION = 'relais 11';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
 const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md', 'mail-mcp.mjs', 'garde-chrome.mjs', 'consigne-mail.md', 'consigne-correction.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
@@ -129,6 +129,16 @@ export const PROPRIETAIRE = 'timduneau-hue';
 export const DEPOTS_ATELIER = { wilson: 'wilson', crm: 'crm-boschat' };
 export const ATELIER_MAX_MS = 60 * 60000;           // une heure au plus
 const ATELIER_TOURS = 300;
+// Relais 11 (20/11/26) : sa remarque sur le bouton d'appel (11h57) est partie TROIS fois au PC en 9 s (Gemini a rappelé l'outil
+// pendant qu'il parlait encore) ; le PC en a fait deux corrections l'une après l'autre, la 2e préparée avant que la 1re soit
+// publiée : même numéro de version, conflit, jamais publiée, alors que son compte rendu disait « publiée ». Désormais :
+// 1. les remarques qui arrivent à moins d'une minute d'écart sont regroupées en UNE correction (on attend 1 min de calme) ;
+// 2. le relais attend que la demande soit vraiment publiée (fusionnée) avant de passer à la suivante et avant de dire
+//    « faite » ; conflit → refaite une fois depuis la version publiée ; autre blocage → Wilson le lui dit (question).
+export const REGROUPER_MS = 60000;                   // 1 min de calme après la dernière remarque avant de commencer
+export const REGROUPER_MAX = 8;
+export const PUBLICATION_MAX_MS = 15 * 60000;        // « Vérifier » puis « Publication automatique » : quelques minutes d'ordinaire
+const PUBLICATION_PAS_MS = 20000;
 // Claude lit, modifie et lance les tests (node, python) dans atelier\ ; il ne peut ni commiter, ni pousser, ni appeler gh,
 // ni aller sur Internet : la publication est faite par le relais lui-même, après lui.
 export const ATELIER_OUTILS = 'Read,Edit,Write,Glob,Grep,Bash(node:*),Bash(python:*),Bash(python3:*),Bash(py:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)';
@@ -140,12 +150,24 @@ export function argumentsAtelier({ consigne, modele = MODELE_DEFAUT, effort = 'h
 }
 const deux = (n) => String(n).padStart(2, '0');
 export const dateRemarque = (d) => `${deux(d.getDate())}/${deux(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)} ${deux(d.getHours())}h${deux(d.getMinutes())}:${deux(d.getSeconds())}`;
+// Plusieurs remarques des mêmes minutes (relais 11) → une seule demande de correction : toutes ses phrases, le journal le
+// plus récent de chaque appareil, l'heure de la dernière (repère « Remarques traitées jusqu'au »).
+export function fusionnerRemarques(lot) {
+  if (!lot || lot.length <= 1) return lot && lot[0];
+  const dernier = lot[lot.length - 1], vus = new Map();
+  for (const q of lot) if (q.contexte) vus.set(q.appareil || '?', q.contexte);      // le plus récent de chaque appareil
+  const contexte = [...vus.values()].join('\n\n').slice(-30000);
+  const question = `${lot.length} remarques faites à quelques secondes d'écart (souvent la même, redite pendant qu'il parlait encore) : traite-les ENSEMBLE, en une seule correction cohérente.\n`
+    + lot.map((q, i) => `${i + 1}. « ${q.question} »`).join('\n');
+  return { ...dernier, question, contexte, appareil: [...new Set(lot.map((q) => q.appareil).filter(Boolean))].join(', ') || dernier.appareil, t: Math.max(...lot.map((q) => q.t || 0)) || dernier.t, ids: lot.map((q) => q.id) };
+}
 export const nomBranche = (d = new Date()) => `remarque-${String(d.getFullYear()).slice(2)}${deux(d.getMonth() + 1)}${deux(d.getDate())}-${deux(d.getHours())}${deux(d.getMinutes())}`;
 export function demandeCorrection(q, maintenant = new Date()) {
   return [
     `Date et heure : ${jour(maintenant)} ${heure(maintenant)} (heure de Paris).`,
-    `Remarque de Timothée, dite à Wilson (${dateRemarque(new Date(q.t || maintenant))}, ${q.appareil || 'appareil inconnu'}) :`,
-    `« ${q.question} »`,
+    q.ids && q.ids.length > 1
+      ? `Remarques de Timothée, dites à Wilson (la dernière le ${dateRemarque(new Date(q.t || maintenant))}, ${q.appareil || 'appareil inconnu'}) :\n${q.question}`
+      : `Remarque de Timothée, dite à Wilson (${dateRemarque(new Date(q.t || maintenant))}, ${q.appareil || 'appareil inconnu'}) :\n« ${q.question} »`,
     q.contexte ? `\n${q.contexte}` : '',
     '\nLes dépôts sont clonés ici (branche main à jour) : wilson\\ et crm-boschat\\. Un serveur local sert déjà wilson sur http://127.0.0.1:8765.',
     'Termine OBLIGATOIREMENT en écrivant le fichier RESULTAT.json (dans ce dossier), au format décrit dans ta consigne.',
@@ -391,9 +413,52 @@ export class Relais {
   }
 
   // ---------- L'atelier (relais 10) ----------
+  // Relais 11 : chaque remarque reçue attend dans atelierAttente ; la suivante commence après 1 min de calme et prend avec
+  // elle toutes celles arrivées entre-temps (une seule correction pour une remarque dite plusieurs fois).
   corriger(q) {
-    this.atelierFile = (this.atelierFile || Promise.resolve()).then(() => this._corriger(q)).catch((e) => this.log('atelier : ' + e.message));
+    (this.atelierAttente = this.atelierAttente || []).push({ q, recu: Date.now() });
+    this.atelierFile = (this.atelierFile || Promise.resolve()).then(() => this._prochaineCorrection()).catch((e) => { this.atelier = false; this.log('atelier : ' + e.message); });
     return this.atelierFile;
+  }
+  async _prochaineCorrection() {
+    const att = this.atelierAttente || [];
+    if (!att.length) return;                                                // déjà prise avec une remarque d'avant
+    this.atelier = true;                                                    // pas de mise à jour du relais pendant l'attente
+    const calme = this.regrouperMs != null ? this.regrouperMs : REGROUPER_MS;
+    for (;;) {
+      const reste = calme - (Date.now() - att[att.length - 1].recu);
+      if (reste <= 0) break;
+      await pause(Math.min(reste, 5000));
+    }
+    const lot = att.splice(0, REGROUPER_MAX).map((x) => x.q);
+    if (lot.length > 1) this.journal(`atelier : ${lot.length} remarques reçues à moins d'une minute d'écart, regroupées en une seule correction`);
+    return this._corriger(lot);
+  }
+  // La demande est-elle vraiment publiée (fusionnée) ? Attend « Vérifier » et « Publication automatique ».
+  // → { publiee: true } ou { publiee: false, raison, conflit? }
+  async attendrePublication(l) {
+    const n = (/\/pull\/(\d+)/.exec(l.url || '') || [])[1];
+    if (!n) return { publiee: false, raison: 'lien de la demande illisible' };
+    const maxMs = this.publicationMaxMs != null ? this.publicationMaxMs : PUBLICATION_MAX_MS, pas = this.publicationPasMs != null ? this.publicationPasMs : PUBLICATION_PAS_MS;
+    const fin = Date.now() + maxMs, api = (chemin) => JSON.parse(this.cmd('gh', ['api', `repos/${PROPRIETAIRE}/${l.depot}/${chemin}`], this.dir, 60000));
+    let etat = 'pas encore publiée';
+    for (;;) {
+      let pr = null;
+      try { pr = api(`pulls/${n}`); } catch (e) { etat = 'GitHub injoignable'; }
+      if (pr) {
+        if (pr.merged_at || pr.merged === true) return { publiee: true };
+        if (pr.state === 'closed') return { publiee: false, raison: 'demande fermée sans être publiée' };
+        if (pr.mergeable === false || pr.mergeable_state === 'dirty') return { publiee: false, conflit: true, raison: 'elle entre en conflit avec une autre correction publiée entre-temps' };
+        try {
+          const cr = api(`commits/${pr.head && pr.head.sha}/check-runs`);
+          const rouge = (cr.check_runs || []).find((c) => c.status === 'completed' && /^(failure|timed_out)$/.test(c.conclusion || ''));
+          if (rouge) return { publiee: false, raison: `la vérification « ${rouge.name} » a échoué` };
+        } catch (_) {}
+        etat = 'pas encore publiée';
+      }
+      if (Date.now() >= fin) return { publiee: false, raison: `toujours ${etat} au bout de ${Math.round(maxMs / 60000)} min` };
+      await pause(pas);
+    }
   }
   outil(nom) {
     const pf = process.env.ProgramFiles || 'C:\\Program Files';
@@ -428,7 +493,7 @@ export class Relais {
     this.cmd('git', ['-c', 'user.name=Claude (PC de la maison)', '-c', 'user.email=noreply@anthropic.com', 'commit', '-q', '-m', msg], dir);
     this.cmd('git', ['push', '-q', '-u', 'origin', branche], dir, 300000);
     // dépôt public (wilson) : jamais la remarque mot pour mot (un nom de client pourrait s'y trouver)
-    const corps = `${info.description}\n\n${cle === 'crm' ? `Remarque de Timothée : « ${q.question} »\n\n` : ''}Demande ouverte par l'atelier du PC de la maison (relais 10), après une remarque faite à Wilson.\n\nRemarques traitées jusqu'au ${dateRemarque(new Date(q.t || Date.now()))}`;
+    const corps = `${info.description}\n\n${cle === 'crm' ? `Remarque de Timothée : « ${q.question} »\n\n` : ''}Demande ouverte par l'atelier du PC de la maison (relais 11), après une remarque faite à Wilson.\n\nRemarques traitées jusqu'au ${dateRemarque(new Date(q.t || Date.now()))}`;
     const url = this.cmd('gh', ['pr', 'create', '--repo', `${PROPRIETAIRE}/${depot}`, '--base', 'main', '--head', branche, '--title', info.titre, '--body', corps], dir, 120000);
     this.cmd('git', ['checkout', '-f', 'main'], dir);
     this.journal(`atelier : demande ouverte sur ${depot} : ${url.split(/\s+/).pop()}`);
@@ -438,11 +503,13 @@ export class Relais {
     try { return spawn(this.outil('python'), ['-m', 'http.server', '8765', '--bind', '127.0.0.1'], { cwd: dir, windowsHide: true, stdio: 'ignore', detached: process.platform !== 'win32' }); }
     catch (e) { this.journal('atelier : serveur de test impossible : ' + e.message); return null; }
   }
-  async _corriger(q) {
+  async _corriger(lot, reprise = false) {
+    lot = Array.isArray(lot) ? lot : [lot];
+    const q = fusionnerRemarques(lot);
     this.atelier = true;
     const t0 = Date.now(), quand = new Date();
-    this.journal(`correction reçue (${q.appareil || '?'}) : « ${String(q.question).slice(0, 160)} »`);
-    let rendu;
+    this.journal(`correction ${reprise ? 'refaite' : 'reçue'} (${q.appareil || '?'}) : « ${String(q.question).slice(0, 160)} »`);
+    let rendu, refaire = false;
     try {
       const lim = this.limiteActive();
       if (lim) throw new Error(`limite d'utilisation de Claude atteinte : ${lim.texte}`);
@@ -456,18 +523,50 @@ export class Relais {
       const res = lireResultat(fs.existsSync(fRes) ? fs.readFileSync(fRes, 'utf8') : '') || { dire: '', question: '', wilson: null, crm: null };
       const liens = [];
       for (const cle of Object.keys(DEPOTS_ATELIER)) { const l = this.publier(base, cle, res[cle], q, quand); if (l) liens.push(l); }
-      const s = Math.round((Date.now() - t0) / 1000);
-      const dire = res.dire || (liens.length ? 'Correction proposée.' : res.question ? '' : 'Rien à corriger dans le code pour cette remarque.');
-      rendu = { ok: true, dire, question: res.question || '', detail: liens.map((l) => `${l.depot === 'crm-boschat' ? 'CRM' : 'Wilson'} (publié seul si les vérifications passent) : ${l.url}`).join('\n'), duree: s, etapes: r.etapes || 0 };
-      this.journal(`correction finie en ${Math.round(s / 60)} min : ${dire}${res.question ? ' — question : ' + res.question : ''}`);
+      // Relais 11 : « faite » seulement quand c'est vraiment publié ; la correction suivante attend (pas de conflit).
+      const bloquees = [];
+      for (const l of liens) {
+        const e = await this.attendrePublication(l);
+        l.publiee = e.publiee;
+        if (e.publiee) this.journal(`atelier : ${l.depot} publié : ${l.url}`);
+        else { this.journal(`atelier : ${l.depot} PAS publié (${e.raison}) : ${l.url}`); bloquees.push({ ...l, ...e }); }
+      }
+      if (bloquees.length && !reprise && bloquees.every((b) => b.conflit)) {
+        // Conflit : rien n'est perdu, on la refait une fois depuis la version publiée (et on ferme l'ancienne demande).
+        for (const b of bloquees) {
+          const n = (/\/pull\/(\d+)/.exec(b.url) || [])[1];
+          try { if (n) this.cmd('gh', ['pr', 'close', n, '--repo', `${PROPRIETAIRE}/${b.depot}`, '--delete-branch'], base, 120000); } catch (e) { this.log('demande pas fermée : ' + e.message); }
+        }
+        this.journal('atelier : conflit avec une correction publiée entre-temps : je la refais depuis la version publiée');
+        refaire = true;
+      } else {
+        const s = Math.round((Date.now() - t0) / 1000);
+        const etiquette = (l) => `${l.depot === 'crm-boschat' ? 'CRM' : 'Wilson'} (${l.publiee ? 'publiée' : 'PAS publiée'}) : ${l.url}`;
+        let dire = res.dire || (liens.length ? 'Correction faite.' : res.question ? '' : 'Rien à corriger dans le code pour cette remarque.');
+        let question = res.question || '';
+        if (bloquees.length) {
+          const raison = bloquees.map((b) => b.raison).join(' ; ');
+          const sujet = String(lot[lot.length - 1].question).replace(/\s+/g, ' ').slice(0, 120);
+          dire = `Correction prête mais PAS publiée (${raison}) : rien n'a changé pour toi. ${dire}`.slice(0, 600);
+          question = question || `Ma correction pour ta remarque « ${sujet} » est prête, mais elle n'a pas pu être publiée : ${raison}. Tu veux que je la refasse ?`;
+        }
+        rendu = { ok: true, dire, question, detail: liens.map(etiquette).join('\n'), duree: s, etapes: r.etapes || 0 };
+        this.journal(`correction finie en ${Math.round(s / 60)} min : ${dire}${question ? ' — question : ' + question : ''}`);
+      }
     } catch (e) {
       rendu = { ok: false, erreur: String(e.message || e).slice(0, 400), duree: Math.round((Date.now() - t0) / 1000) };
       if (limiteAtteinte(rendu.erreur) && !this.limiteActive()) this.limite = { jusqua: repriseLimite(rendu.erreur), texte: rendu.erreur.slice(0, 200) };
       this.journal(`correction impossible après ${Math.round(rendu.duree / 60)} min : ${rendu.erreur}`);
     }
-    for (let n = 0; n < 4; n++) {
-      try { const r = await this.post({ action: 'claude_rendre', secret: this.cfg.secret, id: q.id, ...rendu }, 30000); if (r.ok) break; this.log('compte rendu refusé : ' + r.erreur); break; }
-      catch (e) { this.log('compte rendu pas rendu : ' + e.message); await pause(3000 * (n + 1)); }
+    if (refaire) return this._corriger(lot, true);
+    // Un compte rendu par remarque reçue : le premier porte tout ; les autres disent qu'elles ont été traitées avec lui
+    // (une seule question dans l'onglet « Questions »).
+    for (const [i, x] of lot.entries()) {
+      const r = i === 0 || !rendu.ok ? rendu : { ...rendu, question: '', dire: `Même correction que ta remarque d'avant (regroupées). ${rendu.dire}`.slice(0, 600) };
+      for (let n = 0; n < 4; n++) {
+        try { const rr = await this.post({ action: 'claude_rendre', secret: this.cfg.secret, id: x.id, ...r }, 30000); if (rr.ok) break; this.log('compte rendu refusé : ' + rr.erreur); break; }
+        catch (e) { this.log('compte rendu pas rendu : ' + e.message); await pause(3000 * (n + 1)); }
+      }
     }
     this.atelier = false;
     await this.viderJournal();

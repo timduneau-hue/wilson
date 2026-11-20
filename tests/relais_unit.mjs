@@ -3,10 +3,11 @@ import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decouper, demande, argumentsClaude, argumentsAtelier, lireResultat, nomBranche, demandeCorrection, ATELIER_INTERDITS, Relais, limiteAtteinte, repriseLimite, effortPour, modelePour, commandeArret, arreterArbre, GardeHA, HA_ACTION_MS } from '../pc/relais.mjs';
+import { decouper, demande, argumentsClaude, argumentsAtelier, lireResultat, nomBranche, demandeCorrection, fusionnerRemarques, ATELIER_INTERDITS, Relais, limiteAtteinte, repriseLimite, effortPour, modelePour, commandeArret, arreterArbre, GardeHA, HA_ACTION_MS } from '../pc/relais.mjs';
 import { OUTILS, appeler, serveur } from '../pc/crm-mcp.mjs';
 
 let ok = 0, ko = 0;
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 const check = (n, c, d = '') => { c ? ok++ : ko++; console.log(c ? '✅' : '❌', n, d); };
 
 // ---------- Découpage de la réponse ----------
@@ -53,7 +54,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 10 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 11 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -80,7 +81,7 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 10');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 11');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
 
 // ---------- Lot 4 : arrêt de tout l'arbre (W15), limite signalée au script (W16), effort réduit (W16) ----------
@@ -261,7 +262,10 @@ check('MCP : méthode inconnue → erreur propre', reps.find((x) => x.id === 4).
   fs.writeFileSync(path.join(dir, 'consigne-correction.md'), 'consigne');
   const RA = new Relais({ config: { script: 'S', secret: 'x'.repeat(40) }, dir, fetchImpl: fetch2, log: () => {} });
   const cmds = []; let modifie = false;
-  RA.cmd = (nom, args) => { cmds.push(nom + ' ' + args.join(' ')); if (args[0] === 'status' && args[1] === '--porcelain') return modifie && /wilson$/.test(path.basename(cmds.length ? dir + '/wilson' : '')) ? ' M js/app.js' : ''; if (args[0] === 'pr') return 'https://github.com/timduneau-hue/wilson/pull/42'; return ''; };
+  // Relais 11 : regroupement sans attendre 1 min, publication vérifiée par l'API de GitHub (ici : fusionnée tout de suite).
+  RA.regrouperMs = 0; RA.publicationMaxMs = 300; RA.publicationPasMs = 10;
+  let prEtat = () => ({ state: 'closed', merged: true, merged_at: '2026-11-20T12:00:00Z', head: { sha: 'abc' } }), checks = () => ({ check_runs: [] });
+  RA.cmd = (nom, args) => { cmds.push(nom + ' ' + args.join(' ')); if (args[0] === 'status' && args[1] === '--porcelain') return modifie && /wilson$/.test(path.basename(cmds.length ? dir + '/wilson' : '')) ? ' M js/app.js' : ''; if (args[0] === 'pr') return 'https://github.com/timduneau-hue/wilson/pull/42'; if (nom === 'gh' && args[0] === 'api') return JSON.stringify(/check-runs$/.test(args[1]) ? checks() : prEtat()); return ''; };
   RA.serveurTests = () => null;
   RA._claudeAtelier = async (q, base) => { fs.writeFileSync(path.join(base, 'RESULTAT.json'), JSON.stringify({ dire: 'Corrigé : tu finis tes phrases.', question: '', wilson: { titre: '1.44.2 : phrases finies', description: 'Cause : coupe trop tôt.' }, crm: null })); modifie = true; return { etapes: 40 }; };
   let enCoursPendant = null; const t = RA.traiter({ id: 'c1', type: 'correction', question: 'Tu coupes tes phrases, client Dupont', appareil: 'téléphone', t: Date.now() }); enCoursPendant = RA.enCours; await t; await RA.atelierFile;
@@ -272,6 +276,60 @@ check('MCP : méthode inconnue → erreur propre', reps.find((x) => x.id === 4).
   check('Atelier : dépôt public → jamais la remarque mot pour mot (nom de client), mais le repère « Remarques traitées jusqu\'au »', pr && !/Dupont/.test(pr) && /Remarques traitées jusqu'au \d{2}\/\d{2}\/\d{2} \d{2}h\d{2}:\d{2}/.test(pr), pr.slice(0, 300));
   const rc = env2.find((x) => x.action === 'claude_rendre');
   check('Atelier : compte rendu rendu au script (ce qu\'il faut dire + lien de la demande)', rc && rc.id === 'c1' && rc.ok === true && /tu finis tes phrases/.test(rc.dire) && /pull\/42/.test(rc.detail) && rc.question === '', JSON.stringify(rc));
+  check('Atelier (relais 11) : « publiée » seulement après avoir vu la demande fusionnée sur GitHub', /Wilson \(publiée\) : .*pull\/42/.test(rc.detail) && cmds.some((c) => c === 'gh api repos/timduneau-hue/wilson/pulls/42'), rc.detail);
+
+  // Relais 11, journal du 20/11/26 (11h57:35, 11h57:41, 11h57:44) : la même remarque dite 3 fois → UNE correction.
+  env2.length = 0; cmds.length = 0; modifie = false; let lances = [];
+  RA._claudeAtelier = async (q, base) => { lances.push(q); fs.writeFileSync(path.join(base, 'RESULTAT.json'), JSON.stringify({ dire: 'Corrigé : retour à l\'écran.', question: '', wilson: { titre: '1.45.22 : retour après l\'appel', description: 'Cause.' }, crm: null })); modifie = true; return { etapes: 9 }; };
+  RA.regrouperMs = 150;
+  const t3 = Date.now();
+  RA.traiter({ id: 'r1', type: 'correction', question: 'Revenir à ma tête après le bouton d\'appel', appareil: 'téléphone', contexte: 'journal A', t: t3 });
+  await pause(40); RA.traiter({ id: 'r2', type: 'correction', question: 'Que l\'écran revienne sur Wilson après le bouton d\'appel', appareil: 'téléphone', contexte: 'journal B', t: t3 + 6000 });
+  await pause(40); RA.traiter({ id: 'r3', type: 'correction', question: 'Comme pour le GPS, revenir à l\'affichage habituel', appareil: 'téléphone', contexte: 'journal C', t: t3 + 9000 });
+  check('Regroupement : pendant l\'attente de calme, le relais ne se met pas à jour (atelier occupé)', RA.atelier === true);
+  await RA.atelierFile;
+  const rr = env2.filter((x) => x.action === 'claude_rendre');
+  check('Regroupement : 3 remarques en quelques secondes → Claude lancé UNE fois, une seule demande', lances.length === 1 && cmds.filter((c) => /^gh pr create/.test(c)).length === 1, String(lances.length));
+  check('… avec les 3 phrases, le journal le plus récent, l\'heure de la dernière', lances[0] && /3 remarques/.test(lances[0].question) && /GPS/.test(lances[0].question) && lances[0].contexte === 'journal C' && lances[0].t === t3 + 9000, JSON.stringify(lances[0]).slice(0, 300));
+  check('… un compte rendu par remarque, les deux autres « regroupées »', rr.map((x) => x.id).join() === 'r1,r2,r3' && rr.every((x) => x.ok) && /regroupées/.test(rr[1].dire) && !/regroupées/.test(rr[0].dire), rr.map((x) => x.dire).join(' | '));
+  const dcm = demandeCorrection(lances[0]);
+  check('… la demande à Claude dit « Remarques de Timothée » et les liste toutes', /Remarques de Timothée/.test(dcm) && /1\. « Revenir/.test(dcm) && /3\. « Comme pour le GPS/.test(dcm), dcm.slice(0, 400));
+  check('fusionnerRemarques : une seule remarque → inchangée', fusionnerRemarques([{ id: 'x', question: 'q' }]).question === 'q');
+  RA.regrouperMs = 0;
+  // Remarque arrivée PENDANT une correction : faite ensuite, à part (pas perdue).
+  env2.length = 0; lances = []; modifie = false;
+  const lente = RA._claudeAtelier; RA._claudeAtelier = async (q, base) => { await pause(60); return lente(q, base); };
+  RA.traiter({ id: 's1', type: 'correction', question: 'Première', t: Date.now() }); await pause(20);
+  RA.traiter({ id: 's2', type: 'correction', question: 'Deuxième, pendant la première', t: Date.now() });
+  await RA.atelierFile; await RA.atelierFile;
+  check('Remarque arrivée pendant une correction : traitée ensuite, à part', lances.length === 2 && lances[1].question === 'Deuxième, pendant la première' && env2.filter((x) => x.action === 'claude_rendre').length === 2);
+  RA._claudeAtelier = lente;
+
+  // Relais 11 : conflit (une autre correction publiée entre-temps) → demande fermée, correction refaite une fois.
+  env2.length = 0; cmds.length = 0; lances = []; modifie = false; let vues = 0;
+  prEtat = () => (++vues <= 1 ? { state: 'open', mergeable: false, mergeable_state: 'dirty', head: { sha: 'abc' } } : { state: 'closed', merged: true, merged_at: 'x', head: { sha: 'def' } });
+  await RA.traiter({ id: 'k1', type: 'correction', question: 'Bouton d\'appel', t: Date.now() }); await RA.atelierFile;
+  const rk = env2.filter((x) => x.action === 'claude_rendre');
+  check('Conflit : demande fermée, correction refaite depuis la version publiée, puis publiée', lances.length === 2 && cmds.some((c) => /^gh pr close 42 --repo timduneau-hue\/wilson --delete-branch/.test(c)) && rk.length === 1 && /\(publiée\)/.test(rk[0].detail) && !rk[0].question, cmds.filter((c) => /pr /.test(c)).join(' | ') + ' ' + JSON.stringify(rk));
+  // Toujours en conflit après l'avoir refaite : pas de boucle ; Wilson le lui dit (question), le journal dit « PAS publiée ».
+  env2.length = 0; lances = []; modifie = false;
+  prEtat = () => ({ state: 'open', mergeable: false, mergeable_state: 'dirty', head: { sha: 'abc' } });
+  await RA.traiter({ id: 'k2', type: 'correction', question: 'Encore le bouton', t: Date.now() }); await RA.atelierFile;
+  const rk2 = env2.find((x) => x.action === 'claude_rendre');
+  check('Conflit encore après l\'avoir refaite : pas de boucle (2 essais), « PAS publiée » et question pour Wilson', lances.length === 2 && rk2 && /PAS publiée/.test(rk2.dire) && /PAS publiée/.test(rk2.detail) && /n'a pas pu être publiée.*refasse/.test(rk2.question), JSON.stringify(rk2));
+  // Vérification rouge : pas refaite toute seule ; dit à Timothée par Wilson.
+  env2.length = 0; lances = []; modifie = false;
+  prEtat = () => ({ state: 'open', mergeable: true, mergeable_state: 'unstable', head: { sha: 'abc' } }); checks = () => ({ check_runs: [{ name: 'verifier', status: 'completed', conclusion: 'failure' }] });
+  await RA.traiter({ id: 'k3', type: 'correction', question: 'Autre chose', t: Date.now() }); await RA.atelierFile;
+  const rk3 = env2.find((x) => x.action === 'claude_rendre');
+  check('Vérification rouge : pas publiée, raison dite, question à Wilson, pas refaite', lances.length === 1 && rk3 && /« verifier » a échoué/.test(rk3.dire) && /refasse/.test(rk3.question), JSON.stringify(rk3));
+  // Jamais fusionnée dans le délai : « PAS publiée » (jamais « faite » à tort).
+  env2.length = 0; lances = []; modifie = false; checks = () => ({ check_runs: [] });
+  prEtat = () => ({ state: 'open', mergeable: null, head: { sha: 'abc' } });
+  await RA.traiter({ id: 'k4', type: 'correction', question: 'Lente', t: Date.now() }); await RA.atelierFile;
+  const rk4 = env2.find((x) => x.action === 'claude_rendre');
+  check('Pas publiée dans le délai : dit tel quel, jamais « publiée »', rk4 && /pas encore publiée au bout de/.test(rk4.dire) && !/\(publiée\)/.test(rk4.detail), JSON.stringify(rk4));
+  prEtat = () => ({ state: 'closed', merged: true, merged_at: 'x', head: { sha: 'abc' } });
   // Une question plutôt qu'une correction : rien de publié, la question est rendue.
   env2.length = 0; cmds.length = 0; modifie = false;
   RA._claudeAtelier = async (q, base) => { fs.writeFileSync(path.join(base, 'RESULTAT.json'), JSON.stringify({ dire: '', question: 'Tu parles du téléphone ou de la tablette ?', wilson: null, crm: null })); return { etapes: 5 }; };
