@@ -345,6 +345,56 @@ async def main():
         await page.wait_for_timeout(600)
         await finir('test')
 
+        # ---------- 4 ter. Remarque : attendre la fin de sa phrase (remarque du 20/11/26, 11h58:15) ----------
+        # 11h57:34-11h57:47 : remarque appelée au milieu de sa phrase, annulée par Google 1 s après (il parlait encore), mais
+        # déjà partie au PC : trois corrections pour une phrase pas finie.
+        c = await toucher()
+        parle(c, 'Oui ?', sec=0.5)
+        await page.wait_for_timeout(1200)
+        nr = count('REMARQUE DE TIMOTHÉE')
+        send(c, inputTranscription={'text': "Ce que j'aimerais pour la prochaine mise à jour, quand tu me passes un appel,"})
+        outil(c, 'remarque', {'texte': "Quand j'affiche le bouton d'appel, revenir à ma tête."}, 'q1')
+        await page.wait_for_timeout(400)
+        check('Remarque appelée au milieu de sa phrase (11h57:34) : pas lancée tout de suite', count('REMARQUE DE TIMOTHÉE') == nr and resp(c, 'q1') is None and has("remarque : Timothée parle encore, j'attends la fin de sa phrase"))
+        c['ws'].send(json.dumps({'toolCallCancellation': {'ids': ['q1']}}))
+        for mot in [' comme pour le GPS,', " tu reviens à ta tête normale à l'écran.", " Je sais pas si c'est possible."]:
+            await page.wait_for_timeout(700); send(c, inputTranscription={'text': mot})
+        outil(c, 'remarque', {'texte': "Après le bouton d'appel, revenir à ma tête normale à l'écran, comme pour le GPS."}, 'q2')
+        t0 = time.monotonic()
+        ok = await attendre(lambda: resp(c, 'q2') is not None, 6)
+        dt = time.monotonic() - t0
+        check('… annulée par Google puis redemandée en entier : une seule remarque part, la complète', ok and count('REMARQUE DE TIMOTHÉE') == nr + 1
+              and has("REMARQUE DE TIMOTHÉE : Après le bouton d'appel") and not has("REMARQUE DE TIMOTHÉE : Quand j'affiche le bouton") and resp(c, 'q1') is None,
+              str([l for l in logs if 'REMARQUE' in l][-3:]))
+        check('… partie 1,2 s après ses derniers mots, pas avant', ok and 1.0 <= dt < 3.5, f'{dt:.1f} s')
+        check('… journal : la première annulée « pas lancé », remplacée par la suivante', has('remarque annulé par Google (Timothée parlait encore) : pas lancé') and has('remarque pas lancé : redemandé'))
+        parle(c, "C'est noté, je lance la correction.")
+        await page.wait_for_timeout(1500)
+        # pas annulée mais il continue : elle part à la fin de sa phrase, avec la suite
+        nr = count('REMARQUE DE TIMOTHÉE')
+        send(c, inputTranscription={'text': 'Pour la prochaine mise à jour, le son est trop fort'})
+        outil(c, 'remarque', {'texte': 'Le son est trop fort.'}, 'q3')
+        await page.wait_for_timeout(600)
+        send(c, inputTranscription={'text': ' quand je suis en voiture.'})
+        ok = await attendre(lambda: resp(c, 'q3') is not None, 6)
+        check('Il continue sa phrase sans annulation : la remarque part à la fin, avec la suite de sa phrase', ok and count('REMARQUE DE TIMOTHÉE') == nr + 1
+              and has('REMARQUE DE TIMOTHÉE : Le son est trop fort. (suite de sa phrase : « quand je suis en voiture. »)'), str([l for l in logs if 'REMARQUE' in l][-2:]))
+        parle(c, "C'est noté.")
+        await page.wait_for_timeout(1500)
+        # annulée et jamais redemandée : elle part quand même, résultat en message (pas de réponse à un outil annulé)
+        n0 = len(c['texts']); nr = count('REMARQUE DE TIMOTHÉE')
+        send(c, inputTranscription={'text': "Remarque : l'écran est trop sombre"})
+        outil(c, 'remarque', {'texte': "L'écran est trop sombre."}, 'q4')
+        await page.wait_for_timeout(200)
+        c['ws'].send(json.dumps({'toolCallCancellation': {'ids': ['q4']}}))
+        await page.wait_for_timeout(2500)
+        check('Annulée par Google : 4 s de calme pour que Gemini la redemande', count('REMARQUE DE TIMOTHÉE') == nr)
+        ok = await attendre(lambda: any('[Résultat de remarque' in t for t in c['texts'][n0:]), 5)
+        check('… jamais redemandée : elle part quand même, résultat donné en message', ok and count('REMARQUE DE TIMOTHÉE') == nr + 1 and resp(c, 'q4') is None, str(c['texts'][n0:])[:200])
+        parle(c, "C'est noté.")
+        await page.wait_for_timeout(600)
+        await finir('test')
+
         # ---------- 5. L'analyste se souvient d'un modèle lent, même après un redémarrage ----------
         J = await page.evaluate("""(() => { const A = wilson.crm.analyste; A.lent['gemini-3.8-flash'] = Date.now() + 7200000; A.modelUsed = 'gemini-3.5-flash-lite'; A._saveLent();
           const B = new A.constructor({ ask: async () => ({}), log: () => {} });

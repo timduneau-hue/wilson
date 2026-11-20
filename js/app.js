@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.22';
+const VERSION = '1.45.23';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -69,6 +69,11 @@ const MESSAGE_CALME_MS = 3000;    // message de la famille : dit pendant la disc
 const QUESTION_CALME_MS = 5000;   // question de Claude : posée après 5 s de calme, sa demande réglée (journal du 18/11/26)
 const ATTENTE_GOOGLE_MS = 3000;   // voiture : phrase transcrite, plus un mot depuis 3 s et pas de réponse → fin de phrase forcée (« réponds » au bout de 5 s avant la 1.29.0)
 const ATTENTE_EXPLIQUE_MS = 6000; // … 6 s (9 s si le micro croit encore entendre une voix) quand il explique encore quelque chose (remarque du 18/11/26, 17h58)
+// Remarque de Timothée du 20/11/26, 11h58 (voiture) : remarque et crm_noter attendent la fin de sa phrase avant de partir.
+const FIN_PHRASE_MS = 1200;         // plus un mot transcrit depuis 1,2 s (et le micro n'entend plus sa voix)
+const FIN_PHRASE_SUITE_MS = 3500;   // … 3,5 s si la phrase s'arrête sur « euh », « et », une virgule, ou annonce une suite
+const FIN_PHRASE_REPRISE_MS = 4000; // … annulé par Google (il parlait encore) : 4 s de calme, le temps que Gemini le redemande en entier
+const FIN_PHRASE_MAX_MS = 15000;    // filet : 15 s au plus
 const MICRO_RETENU_MS = 1500;     // après une fin de phrase forcée : micro retenu, pour que Google ne reparte pas sur le bruit
 const REPONDS_APRES_MS = 2500;    // … et toujours rien : « réponds-lui maintenant »
 const NOM_SON_MAX_MS = 12000;     // son envoyé pour la vérification : tout ce qui a été dit depuis la précédente, 12 s au plus
@@ -1743,6 +1748,8 @@ Nous sommes ${fmtDate()}.${nv}`;
     b.on('toolcall', (calls) => this._tools(calls));
     b.on('toolcancel', (ids) => {        // la personne a coupé Wilson pendant une recherche : on l'abandonne
       for (const id of ids) {
+        const E = this._ecrituresEnAttente && this._ecrituresEnAttente.get(id);   // remarque / crm_noter qui attend la fin de sa phrase (20/11/26)
+        if (E) { E.annule = true; E.annuleAt = performance.now(); this.log(`Outil ${E.name} annulé par Google (Timothée parlait encore) : pas lancé, j'attends la fin de sa phrase`); continue; }
         const A = this._analyses && this._analyses.get(id);
         if (A) { A.cancelled = true; this.log('Question au CRM : Gemini n\'attend plus, la réponse viendra quand même'); continue; }   // C11 bis
         const c = this._searches && this._searches.get(id);
@@ -2350,6 +2357,7 @@ Nous sommes ${fmtDate()}.${nv}`;
         const refus = this._remarqueRefus();
         if (refus) { res.push({ id: c.id, name: c.name, response: { result: `REFUSÉ : seul Timothée peut faire corriger ton programme (sa règle du 16/11/26). Ne note rien, ne dis pas « c'est noté ». Dis seulement : « ${refus} »` } }); continue; }
       }
+      if ((c.name === 'remarque' || c.name === 'crm_noter') && !c.apresPhrase) { this._apresSaPhrase(c); continue; }   // fin de sa phrase d'abord (20/11/26)
       if (c.name === 'question_difficile') { this._analyse(c, 'claude'); continue; }   // Claude sur le PC (PLAN 10), en arrière-plan
       if (c.name === 'mails') { this._analyse(c, 'mail'); continue; }                  // ses e-mails, lus par Claude sur le PC (11/11/26)
       if (CRM_TOOL_NAMES.includes(c.name)) { this._crmTool(c); continue; }     // réponse envoyée quand le CRM a répondu
@@ -2984,6 +2992,50 @@ Nous sommes ${fmtDate()}.${nv}`;
       : "Il n'y a que Timothée qui peut me faire corriger, et je ne te reconnais pas là : regarde-moi bien et redis ta remarque.";
   }
 
+  // Remarque de Timothée du 20/11/26, 11h58:15 (voiture) : « attendre que j'aie complètement fini ma phrase avant d'appeler
+  // l'outil de remarque ou de noter ». À 11h57:34, 11h57:41 et 11h57:43, Gemini a appelé remarque au milieu de sa phrase :
+  // Google annulait l'outil 1 s après (il parlait encore), mais la correction était déjà partie, trois fois, sur une phrase
+  // pas finie ; à 11h50:40 et 11h51:03, une note préparée et relue pendant qu'il dictait encore. Ces deux outils attendent
+  // maintenant la fin de sa phrase (plus un mot depuis 1,2 s, 3,5 s sur « euh », « et »…, et le micro sans voix). Annulés
+  // par Google entre-temps : ils attendent que Gemini les redemande avec toute la phrase (sinon ils partent quand même, comme
+  // depuis le 04/11/26). Ce qu'il a dit après la demande est joint à la remarque, et signalé à Gemini avec la note.
+  async _apresSaPhrase(c) {
+    const conv = this.convId, t0 = performance.now(), tour = this._turnN, avant = String(this.brain.inText || '');
+    const A = this._ecrituresEnAttente || (this._ecrituresEnAttente = new Map());
+    for (const [id, Q] of A) if (Q.name === c.name) { Q.remplace = true; A.delete(id); }   // la même demande, redemandée
+    const P = { name: c.name, annule: false, annuleAt: 0, remplace: false }; A.set(c.id, P);
+    this._outilsEnCours = (this._outilsEnCours || 0) + 1;      // ni fin de phrase forcée ni mise à jour pendant l'attente
+    let attente = false;
+    try {
+      for (;;) {
+        if (conv !== this.convId || P.remplace) break;
+        const now = performance.now(), calme = now - Math.max(this._heardAt || 0, P.annuleAt);
+        const besoin = P.annule ? FIN_PHRASE_REPRISE_MS : VP.phraseEnCours(this.brain.inText) ? FIN_PHRASE_SUITE_MS : FIN_PHRASE_MS;
+        const voix = this.audio.speaking && calme < besoin + 1500;            // bruit de la route : 1,5 s de plus au plus
+        if ((calme >= besoin && !voix) || now - t0 > FIN_PHRASE_MAX_MS) break;
+        if (!attente) { attente = true; this.log(`Outil ${c.name} : Timothée parle encore, j'attends la fin de sa phrase`); }
+        await sleep(150);
+      }
+    } finally { this._outilsEnCours--; A.delete(c.id); }
+    const s = ((performance.now() - t0) / 1000).toFixed(1);
+    if (P.remplace) {
+      this.log(`Outil ${c.name} pas lancé : redemandé avec la suite de sa phrase (${s} s)`, true);
+      if (!P.annule && conv === this.convId && this.brain.open) this.brain.respond([{ id: c.id, name: c.name, response: { result: 'Remplacé par ta demande suivante : rien à dire pour celle-ci.' } }]);
+      return;
+    }
+    if (conv !== this.convId) {                                               // discussion finie pendant l'attente (appel…)
+      if (c.name === 'remarque') { this._remarqueAt = performance.now(); this.outils.run('remarque', c.args || {}).catch(() => {}); }   // sa remarque part quand même
+      return;                                                                 // une note : rien n'était écrit, rien n'est préparé
+    }
+    const suite = (this._heard || []).filter((h) => h.n >= tour)
+      .map((h) => (h.n === tour ? (h.text.startsWith(avant) ? h.text.slice(avant.length) : '') : h.text)).join(' ').replace(/\s+/g, ' ').trim();
+    if (attente) this.log(`Outil ${c.name} lancé après la fin de sa phrase (${s} s${P.annule ? ', annulé par Google et pas redemandé' : ''})${suite ? ` ; dit après la demande : « ${suite.slice(0, 160)} »` : ''}`, true);
+    const a = { ...(c.args || {}) };
+    if (suite && c.name === 'remarque') a.texte = `${a.texte || ''} (suite de sa phrase : « ${suite.slice(0, 400)} »)`;
+    const d = { ...c, args: a, apresPhrase: true, annule: P.annule, suite: c.name === 'crm_noter' ? suite : '' };
+    if (c.name === 'remarque') this._outil(d); else this._crmTool(d);
+  }
+
   // Plus d'outils (PLAN 7 quater).
   async _outil(call) {
     const conv = this.convId, t0 = performance.now(), lent = call.name === 'meteo' || (call.name === 'afficher' && (call.args || {}).image) || call.name === 'courses';
@@ -2996,6 +3048,10 @@ Nous sommes ${fmtDate()}.${nv}`;
     if (pid) this.pillEnd(pid, ok, call.name === 'remarque' ? 'Correction lancée' : '');
     if (conv !== this.convId) return;
     this._noteToolMs(performance.now() - t0);
+    if (call.annule) {                       // annulé par Google pendant qu'il parlait (20/11/26) : pas de réponse à un outil annulé
+      if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(`[Résultat de ${call.name} (demandé pendant qu'il parlait encore) : ${info}]`);
+      return;
+    }
     this.brain.respond([{ id: call.id, name: call.name, response: { result: info } }]);
   }
 
@@ -3283,6 +3339,7 @@ Nous sommes ${fmtDate()}.${nv}`;
   async _crmTool0(call, entree, run = call.name) {
     const conv = this.convId, ctl = new AbortController(), t0 = performance.now();
     ctl.crm = call.name;                    // outil du CRM : jamais abandonné en route (voir 'toolcancel')
+    if (call.annule) ctl.annule = true;     // annulé par Google pendant qu'il finissait sa phrase (_apresSaPhrase, 20/11/26)
     this._searches = this._searches || new Map(); this._searches.set(call.id, ctl);
     const lecture = ['crm_client', 'crm_contacts', 'crm_agenda', 'crm_bilan', 'crm_produit', 'crm_actifs'].includes(run);
     if (lecture) this.face.setEmotion('reflexion', CRM_MAX_MS + 2000, 0.6);
@@ -3309,6 +3366,8 @@ Nous sommes ${fmtDate()}.${nv}`;
     }
     this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
     this.face.clearEmotion(); if (pid) this.pillEnd(pid, true, '');
+    // Il a continué de dicter après la demande (20/11/26, 11h50:40 : « … le reste de la commande qui était », puis les crémones)
+    if (call.suite && res.info) res.info = `Attention, il a continué de parler après ta demande (« ${call.suite.slice(0, 300)} ») : si cela complète ou corrige sa note, rappelle crm_noter avec le texte complet au lieu de relire celle-ci. Sinon : ${res.info}`;
     if (ctl.annule) {
       // Journal du 04/11/26, 11h45:53 : crm_noter (tâche Karine Viola) annulé par Google parce qu'il parlait encore → rien
       // de préparé, puis Wilson a dit « c'est bon » sans rien enregistrer. Désormais l'outil va au bout et Gemini reçoit le
