@@ -10,12 +10,27 @@ SHIM = r"""
   if (!/^(127\.0\.0\.1|localhost)$/.test(location.hostname) || !window.AudioWorklet || window.__shimWorklet) return;
   window.__shimWorklet = true;
   AudioWorklet.prototype.addModule = function () { return Promise.resolve(); };
+  // 20/11/26 : un ScriptProcessor reçoit des zéros même sans micro branché ; capture.js, lui, n'envoie alors rien. Sans ce
+  // compte des sources branchées, Wilson croyait le micro pris par un appel (« silence numérique ») et e2e_android bloquait.
+  const c0 = AudioNode.prototype.connect, d0 = AudioNode.prototype.disconnect;
+  AudioNode.prototype.connect = function (dest, ...r) {
+    if (dest && dest.__shim) { dest.__ins = (dest.__ins || 0) + 1; (this.__to = this.__to || []).push(dest); }
+    return c0.call(this, dest, ...r);
+  };
+  AudioNode.prototype.disconnect = function (...a) {
+    const t = this.__to || [], d = a[0], un = a.length && d && typeof d === 'object';
+    for (const x of (un ? t.filter((y) => y === d) : t)) x.__ins = Math.max(0, (x.__ins || 0) - 1);
+    this.__to = un ? t.filter((y) => y !== d) : [];
+    return d0.apply(this, a);
+  };
   window.AudioWorkletNode = function (ctx, name) {
     const sp = ctx.createScriptProcessor(1024, 1, 1);
+    sp.__shim = true;
     const size = Math.round(ctx.sampleRate * 0.02);
     let buf = new Float32Array(size), n = 0;
     const port = { onmessage: null, postMessage() {}, start() {}, close() {} };
     sp.onaudioprocess = (e) => {
+      if (!sp.__ins) return;                                 // micro débranché : rien, comme capture.js
       const ch = e.inputBuffer.getChannelData(0);
       for (let i = 0; i < ch.length; i++) {
         buf[n++] = ch[i];

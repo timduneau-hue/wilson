@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.21';
+const VERSION = '1.45.22';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -3578,7 +3578,14 @@ Nous sommes ${fmtDate()}.${nv}`;
     el.innerHTML = `<div class="card call" data-kind="call"><div class="card-t">Appeler</div><div class="card-n">${esc(t.nom)}</div><div class="card-s">${esc(t.societe)} · ${esc(t.aff)}</div>`
       + `<div class="card-b"><a class="card-go" href="tel:${esc(t.tel)}">Appeler</a><button class="card-x" type="button">Fermer</button></div></div>`;
     el.hidden = false;
-    el.querySelector('.card-go').addEventListener('click', () => this._calling(t));
+    // Remarque du 20/11/26, 11h57 (« que l'écran revienne sur Wilson après le bouton d'appel, comme pour le GPS ») : le lien
+    // tel: ouvrait le composeur du téléphone, avec un 2e bouton « Appeler » qui restait à l'écran. Dans l'appli, c'est le
+    // pont qui appelle (tout de suite, l'appel passe dans la voiture) puis ramène Wilson devant ; sans pont : le lien, comme avant.
+    el.querySelector('.card-go').addEventListener('click', (ev) => {
+      const A = appli();
+      if (A && typeof A.appeler === 'function') { ev.preventDefault(); this.log(`Appel (appli) vers ${t.nom} : ${pont('appeler', t.tel || '', t.nom || '')}`, true); }
+      this._calling(t);
+    });
     el.querySelector('.card-x').addEventListener('click', () => this.hideCard());
     clearTimeout(this._cardT); this._cardT = setTimeout(() => this.hideCard('call'), 120000);
     this._ecran = { kind: 'call', societe: t.societe, cle: t.cle || '', nom: t.nom, at: Date.now() }; this._appelTurn = this._turnN;

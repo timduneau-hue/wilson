@@ -5,6 +5,7 @@
     toucher, la discussion continue, Wilson dit « C'est parti… » ; même demande redite : pas relancé.
  4. Consigne de la voiture : « Le guidage part directement dans la voiture ».
  5. Bouton « Y aller » (s'il s'affiche) : guidage par le pont, la discussion n'est pas fermée.
+ 6. Bouton d'appel (20/11/26) : appel par le pont (appel direct puis retour à Wilson), plus par le lien tel: (composeur).
 """
 import asyncio, re, json, os, base64, time
 import numpy as np
@@ -17,8 +18,8 @@ def check(name, ok, detail=''):
 
 STUB = """(() => {
   window.__bt = false;
-  window.__nav = [];
-  window.WilsonAndroid = { version: () => '1', naviguer: (a, n) => { window.__nav.push([a, n]); return 'ok : Google Maps'; }, peutRevenir: () => true, demanderRetour: () => {}, revenir: () => {}, premierPlan: () => true, bluetoothVoiture: () => true, sonVoiture: (on) => { (window.__son = window.__son || []).push(on); return 'mode normal, sorties : Bluetooth musique;, silence'; }, etatSon: () => 'mode normal' };
+  window.__nav = []; window.__tel = [];
+  window.WilsonAndroid = { version: () => '1', naviguer: (a, n) => { window.__nav.push([a, n]); return 'ok : Google Maps'; }, appeler: (t, n) => { window.__tel.push([t, n]); return 'ok : appel direct, retour à Wilson'; }, peutRevenir: () => true, demanderRetour: () => {}, revenir: () => {}, premierPlan: () => true, bluetoothVoiture: () => true, sonVoiture: (on) => { (window.__son = window.__son || []).push(on); return 'mode normal, sorties : Bluetooth musique;, silence'; }, etatSon: () => 'mode normal' };
   const md = navigator.mediaDevices, gum0 = md.getUserMedia.bind(md);
   md.enumerateDevices = async () => [
     { deviceId: 'id-speaker', kind: 'audioinput', label: 'Speakerphone', groupId: 'g1' },
@@ -159,6 +160,19 @@ async def main():
         ok = await attendre(lambda: False, 1.5)
         son = await page.evaluate('window.__son || []')
         check('… et le rend après la discussion', son[-1:] == [False], str(son))
+        # Remarque du 20/11/26, 11h57 (« comme pour le GPS ») : le bouton vert appelle par le pont (appel direct, retour à
+        # Wilson), plus par le lien tel: qui laissait le composeur et son bouton « Appeler » à l'écran.
+        await page.evaluate("wilson.startConversation('toucher')")
+        await page.wait_for_function("wilson.state === 'conversation'", timeout=10000)
+        url0 = page.url
+        await page.evaluate("wilson.showCall({ nom: 'M LEROY Paul', societe: 'MIROITERIE 35', tel: '06 11 22 33 44', aff: '06 11 22 33 44' })")
+        await page.click('#cards .card-go')
+        await attendre(lambda: has('Appel lancé vers M LEROY Paul'), 4)
+        tel = await page.evaluate('window.__tel')
+        check('Bouton d\'appel dans l\'appli : appel par le pont (pas le composeur du lien tel:)', tel == [['06 11 22 33 44', 'M LEROY Paul']] and page.url == url0, str(tel) + ' ' + page.url)
+        check('… noté au journal avec la réponse de l\'appli, bouton effacé', has('Appel (appli) vers M LEROY Paul : ok : appel direct, retour à Wilson') and await page.evaluate("document.getElementById('cards').hidden"))
+        await attendre(lambda: has('Fin de conversation (appel)'), 3)
+        check('… Wilson se tait pendant l\'appel (fin de discussion « appel »), retour d\'appel attendu', await page.evaluate("wilson.state") == 'veille' and await page.evaluate("!!wilson._callAfter"))
         check('Caméra jamais allumée en voiture (pas de « Caméra prête »)', not has('Caméra prête'))
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, str(errs)[:400])

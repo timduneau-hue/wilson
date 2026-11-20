@@ -68,6 +68,19 @@ public class Pont {
         return res[0] + (a.peutRevenir() ? "" : " (retour automatique impossible : autorisation « par-dessus les autres applis » manquante)");
     }
 
+    /** Remarque du 20/11/26, 11h57 (« comme pour le GPS ») : le bouton vert de Wilson lance l'appel tout de suite (il passe
+     *  dans la voiture) et Wilson revient devant, au lieu du composeur du téléphone dont le bouton « Appeler » restait à
+     *  l'écran. Sans l'autorisation « passer des appels » (demandée une fois) : le composeur, comme avant. */
+    @JavascriptInterface
+    public String appeler(String tel, String nom) {
+        final String num = tel == null ? "" : tel.replaceAll("[^0-9+]", "");
+        if (num.isEmpty()) return "erreur : pas de numéro";
+        final boolean direct = a.aLe(android.Manifest.permission.CALL_PHONE);
+        ui.post(() -> a.appeler(num, direct));
+        if (!direct) return "composeur du téléphone (autorisation « passer des appels » pas encore accordée)";
+        return "ok : appel direct" + (a.peutRevenir() ? ", retour à Wilson" : " (retour automatique impossible : autorisation « par-dessus les autres applis » manquante)");
+    }
+
     /** Le son de Wilson dans la voiture : demandé à Android pendant une discussion (true), rendu après (false). */
     @JavascriptInterface
     public String sonVoiture(boolean actif) {
