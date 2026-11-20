@@ -10,12 +10,24 @@ SHIM = r"""
   if (!/^(127\.0\.0\.1|localhost)$/.test(location.hostname) || !window.AudioWorklet || window.__shimWorklet) return;
   window.__shimWorklet = true;
   AudioWorklet.prototype.addModule = function () { return Promise.resolve(); };
+  // 20/11/26 : sans source branchée (micro fermé en voiture), le vrai module n'envoie rien, alors qu'un ScriptProcessor
+  // envoie des zéros, que Wilson prenait pour « micro pris par un appel ». On compte les sources branchées.
+  const shims = new Set(), co0 = AudioNode.prototype.connect, de0 = AudioNode.prototype.disconnect;
+  AudioNode.prototype.connect = function (d, ...r) {
+    if (shims.has(d)) { (this.__vers = this.__vers || new Set()).add(d); d.__in = (d.__in || new Set()); d.__in.add(this); }
+    return co0.call(this, d, ...r);
+  };
+  AudioNode.prototype.disconnect = function (...r) {
+    if (this.__vers) { for (const d of this.__vers) if (!r.length || r[0] === d) { d.__in.delete(this); this.__vers.delete(d); } }
+    return de0.apply(this, r);
+  };
   window.AudioWorkletNode = function (ctx, name) {
-    const sp = ctx.createScriptProcessor(1024, 1, 1);
+    const sp = ctx.createScriptProcessor(1024, 1, 1); shims.add(sp);
     const size = Math.round(ctx.sampleRate * 0.02);
     let buf = new Float32Array(size), n = 0;
     const port = { onmessage: null, postMessage() {}, start() {}, close() {} };
     sp.onaudioprocess = (e) => {
+      if (!sp.__in || !sp.__in.size) return;
       const ch = e.inputBuffer.getChannelData(0);
       for (let i = 0; i < ch.length; i++) {
         buf[n++] = ch[i];
