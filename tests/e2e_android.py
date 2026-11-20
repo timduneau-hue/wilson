@@ -18,7 +18,7 @@ def check(name, ok, detail=''):
 STUB = """(() => {
   window.__bt = false;
   window.__nav = [];
-  window.WilsonAndroid = { version: () => '1', naviguer: (a, n) => { window.__nav.push([a, n]); return 'ok : Google Maps'; }, peutRevenir: () => true, demanderRetour: () => {}, revenir: () => {}, premierPlan: () => true, bluetoothVoiture: () => true, sonVoiture: (on) => { (window.__son = window.__son || []).push(on); return 'mode normal, sorties : Bluetooth musique;, silence'; }, etatSon: () => 'mode normal' };
+  window.WilsonAndroid = { version: () => '1', naviguer: (a, n) => { window.__nav.push([a, n]); return 'ok : Google Maps'; }, peutRevenir: () => true, demanderRetour: () => {}, revenir: () => { (window.__rev = window.__rev || []).push(Date.now()); }, premierPlan: () => true, bluetoothVoiture: () => true, sonVoiture: (on) => { (window.__son = window.__son || []).push(on); return 'mode normal, sorties : Bluetooth musique;, silence'; }, etatSon: () => window.__etat || 'mode normal, sorties : Bluetooth musique;, communication sur écouteur, canal appel fermé, silence' };
   const md = navigator.mediaDevices, gum0 = md.getUserMedia.bind(md);
   md.enumerateDevices = async () => [
     { deviceId: 'id-speaker', kind: 'audioinput', label: 'Speakerphone', groupId: 'g1' },
@@ -160,6 +160,21 @@ async def main():
         son = await page.evaluate('window.__son || []')
         check('… et le rend après la discussion', son[-1:] == [False], str(son))
         check('Caméra jamais allumée en voiture (pas de « Caméra prête »)', not has('Caméra prête'))
+
+        # Remarque du 20/11/26 : bouton d'appel touché → comme après le GPS, Wilson revient tout seul à l'écran dès que
+        # l'appel est parti (mode « appel » d'Android), et propose le compte rendu quand il est fini.
+        await page.evaluate("wilson.showCall({ nom: 'M LEROY Paul', societe: 'MIROITERIE 35', tel: '0611223344', aff: '06 11 22 33 44' })")
+        await page.evaluate("wilson._calling({ nom: 'M LEROY Paul', societe: 'MIROITERIE 35', tel: '0611223344', aff: '06 11 22 33 44' })")
+        await page.wait_for_timeout(2500)
+        check('Appel : bouton retiré, et pas de retour tant que l\'appel n\'est pas parti (numéro à composer)', await page.evaluate("document.getElementById('cards').hidden") and not await page.evaluate('window.__rev || []'))
+        await page.evaluate("window.__etat = 'mode appel, sorties : Bluetooth appel;, canal appel Bluetooth OUVERT, lecture APPEL, silence'")
+        await attendre(lambda: has('Appel parti'), 4); await page.wait_for_timeout(1800)
+        check('Appel parti : Wilson revient tout seul à l\'écran (comme après le GPS)', len(await page.evaluate('window.__rev || []')) == 1 and has('Appel parti : je reviens à l\'écran'), str(await page.evaluate('window.__rev || []')))
+        await page.evaluate("wilson._callAfter.at = Date.now() - 60000; window.__etat = ''")
+        await attendre(lambda: has('Retour d\'appel après'), 4)
+        check('Appel fini : Wilson le voit et propose le compte rendu', has('Appel fini après') and has('Retour d\'appel après') and len(await page.evaluate('window.__rev || []')) == 1)
+        await page.wait_for_timeout(2500)
+        check('… le suivi de l\'appel s\'arrête', await page.evaluate("!wilson._appelSuivi") and len(await page.evaluate('window.__rev || []')) == 1)
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, str(errs)[:400])
         await b.close()

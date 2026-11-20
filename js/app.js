@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.21';
+const VERSION = '1.45.22';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -3619,6 +3619,32 @@ Nous sommes ${fmtDate()}.${nv}`;
     this._callAfter = { ...t, at: Date.now() };
     this.hideCard('call');
     setTimeout(() => { if (this.state === 'conversation' || this.state === 'eveil') this.endConversation('appel'); }, 400);
+    this._suivreAppel();
+  }
+  // Remarque du 20/11/26 (voiture) : après le bouton d'appel, le téléphone restait sur l'écran d'appel au lieu de revenir au
+  // visage, comme après le GPS. Dans l'appli Android, la page n'est jamais mise en pause : elle ne voyait ni le départ ni la
+  // fin de l'appel. Elle suit maintenant le mode du son d'Android : appel parti → Wilson revient devant (l'appel continue
+  // dans la voiture) ; appel fini → il propose le compte rendu (_backFromCall).
+  _suivreAppel() {
+    clearInterval(this._appelSuivi); this._appelSuivi = 0;
+    if (!appli() || typeof appli().revenir !== 'function' || typeof appli().etatSon !== 'function') return;
+    const t0 = Date.now(); let parti = 0;
+    const enAppel = () => /mode (appel|communication)|lecture APPEL/.test(String(pont('etatSon') || ''));
+    const fin = () => { clearInterval(this._appelSuivi); this._appelSuivi = 0; };
+    this._appelSuivi = setInterval(() => {
+      const ec = enAppel(), dt = Date.now() - t0;
+      if (!parti && ec) {
+        parti = Date.now();
+        this.log('Appel parti : je reviens à l\'écran (l\'appel continue dans la voiture)', true);
+        setTimeout(() => pont('revenir'), 1500);
+      } else if (parti && !ec) {
+        fin(); this.log(`Appel fini après ${Math.round((Date.now() - parti) / 1000)} s`, true);
+        if (pont('premierPlan') === false) pont('revenir');
+        this._backFromCall();
+      } else if ((!parti && dt > 90000) || dt > 2 * 3600000) {
+        fin(); if (!parti) this.log('Appel pas parti en 90 s : je ne reviens pas tout seul à l\'écran');
+      }
+    }, 1000);
   }
   // « Wilson » dit plusieurs fois en voiture, aucune réaction (04/11/26, 17h40 : « même s'il y a un problème réseau ou
   // autre chose, il faut que je sois au courant ») : le journal s'arrête à 17h22:57, plus rien du téléphone ensuite. Une page
