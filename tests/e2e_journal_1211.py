@@ -286,6 +286,17 @@ async def main():
         r = resp(c, 'n1') or ''
         check('Compte rendu dicté pour « Yohan Moreau » : préparé pour A B M (M MOREAU Yoann), pas le premier contact de la fiche (09h53)', ok and 'A B M (M MOREAU Yoann)' in r and 'ANJUBAULT' not in r, r[:260])
         check('… et la fenêtre à l\'écran porte le bon nom', 'M MOREAU Yoann' in (await cartes()) and 'ANJUBAULT' not in (await cartes()), await cartes())
+        # 1.45.23 (remarque du 20/11/26, 11h58:15 : « attendre que j'aie fini ma phrase avant de noter ») : il dicte encore après
+        # la demande → la note attend la fin de sa phrase, et Gemini sait ce qu'il a ajouté (11h50:40 : relue par-dessus lui)
+        send(c, inputTranscription={'text': ' Et il veut aussi des paumelles,'})
+        outil(c, 'crm_noter', {'type': 'compte_rendu', 'client': 'Yohan Moreau', 'texte': 'Visite. Le client cherche des vis de rechange et des paumelles.'}, 'n1b')
+        await page.wait_for_timeout(500)
+        send(c, inputTranscription={'text': ' et des crémones.'})
+        await page.wait_for_timeout(600)
+        check('Note demandée pendant qu\'il dicte encore : rien de préparé avant la fin de sa phrase', resp(c, 'n1b') is None and has('crm_noter : Timothée parle encore'))
+        ok = await attendre(lambda: resp(c, 'n1b') is not None, 6)
+        r = resp(c, 'n1b') or ''
+        check('… préparée après, et Gemini sait ce qu\'il a ajouté (« et des crémones »)', ok and 'il a continué de parler' in r and 'et des crémones.' in r and 'A B M (M MOREAU Yoann)' in r, r[:300])
         outil(c, 'crm_noter', {'type': 'compte_rendu', 'client': 'ABM', 'texte': 'Visite. Le client cherche des vis de rechange.'}, 'n2')
         ok = await attendre(lambda: resp(c, 'n2') is not None, 6)
         r = resp(c, 'n2') or ''
