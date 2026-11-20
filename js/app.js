@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.25';
+const VERSION = '1.45.26';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -76,6 +76,7 @@ const FIN_PHRASE_REPRISE_MS = 4000; // … annulé par Google (il parlait encore
 const FIN_PHRASE_MAX_MS = 15000;    // filet : 15 s au plus
 const MICRO_RETENU_MS = 1500;     // après une fin de phrase forcée : micro retenu, pour que Google ne reparte pas sur le bruit
 const REPONDS_APRES_MS = 2500;    // … et toujours rien : « réponds-lui maintenant »
+const LENT_APRES_FORCE_MS = 3500; // … et toujours rien 3,5 s après la fin forcée : « le réseau est lent » dit tout de suite (20/11/26)
 const NOM_SON_MAX_MS = 12000;     // son envoyé pour la vérification : tout ce qui a été dit depuis la précédente, 12 s au plus
 const huitK = (p) => { const n = Math.floor(p.length / 2), o = new Int16Array(n); for (let i = 0; i < n; i++) o[i] = (p[2 * i] + p[2 * i + 1]) >> 1; return o; };   // 16 kHz → 8 kHz
 const PREVENIR_MS = 5 * 60000;                                    // « je n'arrive pas à vérifier » : une fois toutes les 5 min au plus   // vérification de « Wilson » par Gemini : délai maximal (journal du 04/11/26)
@@ -575,6 +576,7 @@ class App {
   _forcerFinPhrase() {
     if (!this.brain.open) return;
     const conv = this.convId, turn = this._turnN, t0 = performance.now();
+    this._forceAt = { at: t0, tour: turn, conv };          // réponse en retard après cette fin forcée → prévenu (20/11/26)
     this.outBuf = []; this.outLen = 0;
     this.brain.audioStreamEnd();
     this._micRetenuJusqua = t0 + MICRO_RETENU_MS;
@@ -1575,7 +1577,9 @@ Nous sommes ${fmtDate()}.${nv}`;
         // Si Wilson enchaîne (suite de sa réponse, après une recherche…), ce n'est pas une nouvelle attente : pas de délai.
         const now = performance.now(), e = this._speechEndAt || 0, h = this._heardAt || 0, after = Math.max(this.playEndAt || 0, this._lastTurnAt || 0);
         // Fin de phrase détectée sur la tablette ; à défaut (bruit continu, dehors…), dernier mot transcrit par Google.
-        const end = e > after && !this.audio.speaking ? e : h > after ? h : 0;
+        // (20/11/26 : « le réseau est lent » dit par le téléphone pendant l'attente ne remet pas le délai à « ? »)
+        const L = this._lent, hl = L && L.conv === this.convId && L.tour === this._turnN && L.heardAt > (this._lastTurnAt || 0) ? L.heardAt : 0;
+        const end = e > after && !this.audio.speaking ? e : h > after ? h : hl;
         // (plus de 60 s : ce n'était pas une attente, mais une phrase bien plus ancienne — « 90,7 s » après un essai de voix, 04/11/26)
         const dl = end && end > (this._convAt || 0) - 15000 ? Math.round((now - end) / 100) / 10 : null;   // « 34,1 s » après un toucher (04/11/26, 11h37)
         this._liveTurn = { t: now, sec: 0, delay: dl != null && dl <= 60 ? dl : null, search: this._searchMs || 0 };
@@ -4036,6 +4040,27 @@ Nous sommes ${fmtDate()}.${nv}`;
       this.log(`Google attend encore la fin de ta phrase (${((now - this._heardAt) / 1000).toFixed(0)} s sans un mot, ${attente > ATTENTE_GOOGLE_MS ? 'il expliquait quelque chose : attendu plus longtemps' : 'bruit de la route ?'}) : fin de phrase forcée`);
       this._forcerFinPhrase();
     }
+    // Remarque du 20/11/26, 17h16 (« Wilson met trop de temps à répondre ») et sa réponse de 18h13 : quand le réseau est
+    // mauvais, la réponse peut mettre 15 à 20 s, sans rien entendre ; « il faudrait un message instantané pour prévenir ».
+    // En voiture : fin de phrase forcée et, 3,5 s plus tard, toujours rien de Google (ni voix, ni outil) → la voix du
+    // téléphone le dit tout de suite (une fois par tour, une fois par minute au plus avec « plus de réseau »), puis le petit
+    // son de réflexion jusqu'à la réponse. La réponse qui arrive coupe cette voix (une seule voix à la fois).
+    const FF = this._forceAt;
+    if (vb && FF && FF.conv === this.convId && FF.tour === this._turnN && this._lentTour !== this._turnN && now - FF.at > LENT_APRES_FORCE_MS
+      && this.state === 'conversation' && this.mode === 'live' && this.brain.open && !this.paused && !this.netWait
+      && !this._liveTurn && !this.audio.playing && !this.voice.speaking && !this.audio.micTaken && !outilEnCours && !this._apresOutil
+      && (this._heardAt || 0) < FF.at && (this._toolAt || 0) < FF.at && !(this._vv && this._vv.n === this._turnN && this._vv.held.length)) {
+      this._lentTour = this._turnN;
+      const d = Date.now(), attendu = ((now - (this._heardAt || FF.at)) / 1000).toFixed(1);
+      if (d - Math.max(this._lentDitAt || 0, this._netToldAt || 0) > 60000) {
+        this._lentDitAt = d; this._lent = { conv: this.convId, tour: this._turnN, heardAt: this._heardAt || 0 };
+        this.log(`Réponse en retard : rien de Google ${attendu} s après ta phrase (réseau lent ?) : je le dis tout de suite`);
+        this._say('Le réseau est lent, je te réponds dès que ça passe.');
+      } else {
+        this._lent = { conv: this.convId, tour: this._turnN, heardAt: this._heardAt || 0 };
+        this.log(`Réponse en retard : rien de Google ${attendu} s après ta phrase (déjà dit il y a moins d'une minute : petit son seulement)`);
+      }
+    }
     this._messageAuCalme(now, outilEnCours);               // message de la famille : dit au calme s'il le regarde (18/11/26, 21h45)
     this._questionAuCalme(now, outilEnCours);              // question de Claude : l'appli choisit le moment (18/11/26)
     // En voiture, personne ne regarde l'écran : caméra à 2 analyses/s et visage à 30 images/s pendant la discussion, pour que
@@ -4050,7 +4075,8 @@ Nous sommes ${fmtDate()}.${nv}`;
     // route ne le fait plus taire (avant : rien tant que le micro croyait entendre une voix).
     const vvAttend = this._protocole && this._vv && this._vv.n === this._turnN && this._vv.hold && !this._vv.outil;
     const cherche = this.state === 'conversation' && ((this._searches && this._searches.size) || (this._analyses && [...this._analyses.values()].some((A) => !A.cancelled || A.fond))
-      || this._outilsEnCours > 0 || !!this._apresOutil || vvAttend);
+      || this._outilsEnCours > 0 || !!this._apresOutil || vvAttend
+      || !!(this._lent && this._lent.conv === this.convId && this._lent.tour === this._turnN && !this._liveTurn));   // réponse en retard (20/11/26)
     // (journal du 05/11/26, 11h03:19-11h04:20 : « Je cherche : petit son… » écrit 20 fois : le compteur repartait de zéro
     // chaque fois que le bruit de la route passait pour de la voix ; il n'est remis à zéro que quand il ne cherche plus)
     // Question de Timothée du 06/11/26, 00h11 (« pourquoi je n'ai pas le bip-bip pendant qu'il recherche, comme sur le
