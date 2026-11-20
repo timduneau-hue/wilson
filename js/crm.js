@@ -194,8 +194,10 @@ export const CRM_TOOLS = [
     description: "Toute autre question sur ses données, même inhabituelle : chiffre d'un mois ou d'une année passée, devis à relancer, clients qui ont (ou n'ont pas) commandé, quand un client a acheté un article, détail d'une commande, comparaisons, listes, totaux… Un analyste cherche dans tout le CRM et répond, même si ça prend une minute ou plus. Avant de l'appeler, dis « Je cherche l'information… », puis attends le résultat sans relancer.",
     parameters: { type: 'OBJECT', properties: { question: { type: 'STRING', description: 'la question complète, avec le nom du client et la période s\'il les a dits (ou le client dont vous parlez)' } }, required: ['question'] } },
   { name: 'itineraire', behavior: 'BLOCKING',
-    description: "Aller chez un client : affiche un grand bouton qui ouvre le GPS (Google Maps ou Waze) avec l'adresse de sa fiche ; Timothée appuie dessus. SEULEMENT quand il demande d'y aller (« emmène-moi », « guide-moi », « lance le GPS », « l'itinéraire ») : jamais parce qu'il cite un client. Marche aussi pour ses lieux à lui, sans le CRM : « la maison », « l'agence de Nantes » (ou Cholet, Rennes), « la plateforme d'Arnage ».",
-    parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: "la société ou le contact ; ou « maison », « agence Nantes », « agence Cholet », « agence Rennes », « plateforme Arnage »" } }, required: ['client'] } },
+    description: "Aller chez un client : affiche un grand bouton qui ouvre le GPS (Google Maps ou Waze) avec l'adresse de sa fiche ; Timothée appuie dessus. SEULEMENT quand il demande d'y aller (« emmène-moi », « guide-moi », « lance le GPS », « l'itinéraire ») : jamais parce qu'il cite un client. Marche aussi pour ses lieux à lui, sans le CRM : « la maison », « l'agence de Nantes » (ou Cholet, Rennes), « la plateforme d'Arnage ». Et pour un endroit qui n'est PAS un client (magasin, centre commercial, gare, restaurant, ville, adresse) : lieu = le nom de l'endroit et sa ville s'il l'a dite, client vide ; Google Maps le cherche (décision de Timothée du 20/11/26).",
+    parameters: { type: 'OBJECT', properties: {
+      client: { type: 'STRING', description: "la société ou le contact ; ou « maison », « agence Nantes », « agence Cholet », « agence Rennes », « plateforme Arnage »" },
+      lieu: { type: 'STRING', description: "seulement pour un endroit qui n'est pas un client (« centre commercial Atlantis Saint-Herblain », « Leroy Merlin Rezé », « gare de Nantes ») : son nom et sa ville, tels qu'il les a dits ; client vide" } } } },
   { name: 'appeler', behavior: 'BLOCKING',
     description: "Appeler un client : affiche sur l'écran un grand bouton vert avec son numéro ; Timothée appuie dessus pour lancer l'appel.",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou le contact' }, contact: { type: 'STRING', description: 'la personne à appeler, si elle est précisée' } }, required: ['client'] } },
@@ -693,8 +695,8 @@ export class Crm {
     return null;
   }
 
-  async routeTarget({ client = '' } = {}, signal, { confirme = false } = {}) {
-    const L = this.lieuConnu(client);
+  async routeTarget({ client = '', lieu = '' } = {}, signal, { confirme = false } = {}) {
+    const L = this.lieuConnu(client || lieu);
     if (L) {
       if (L.manque) return { ok: false, dire: "Je ne connais pas encore l'adresse de la maison : demande-la-lui et retiens-la (memoriser « La famille habite au … »)." };
       const q = encodeURIComponent(L.adresse);
@@ -703,8 +705,19 @@ export class Crm {
         maps: `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`, waze: `https://waze.com/ul?q=${q}&navigate=yes` };
       return { ok: true, target, dire: `Le bouton pour aller à ${L.societe} est affiché : dis-lui en une phrase d'appuyer sur « Y aller » ; le guidage s'ouvre sur le téléphone et sur l'écran de la voiture, et pour te reparler il reviendra sur Wilson.` };
     }
+    // Réponse de Timothée du 20/11/26, 11h44 (« Oui, tu peux faire ça ») : un endroit qui n'est pas un client (magasin,
+    // centre commercial…) est cherché par Google Maps et le guidage est lancé, comme pour un client (journal du 19/11/26,
+    // 16h22 : un centre commercial confondu avec deux clients au nom proche, puis « je ne peux pas le mettre dans le GPS »).
+    const libre = String(lieu || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (libre && !String(client || '').trim()) {
+      const q = encodeURIComponent(libre);
+      this.log(`itinéraire : endroit hors CRM « ${libre} » (cherché par Google Maps)`);
+      const target = { societe: libre, cle: '', contact: '', adresse: libre, douteux: false, lieu: true, libre: true,
+        maps: `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`, waze: `https://waze.com/ul?q=${q}&navigate=yes` };
+      return { ok: true, target, dire: `Le bouton pour aller à « ${libre} » est affiché (c'est Google Maps qui cherche l'endroit) : dis-lui en une phrase d'appuyer sur « Y aller » et de vérifier la destination proposée ; le guidage s'ouvre sur le téléphone et sur l'écran de la voiture, et pour te reparler il reviendra sur Wilson.` };
+    }
     const Q = await this._qui(client, signal);
-    if (Q.dire) return { ok: false, dire: Q.dire };
+    if (Q.dire) return { ok: false, dire: `${Q.dire} (Si ce n'est pas un de ses clients mais un endroit, comme un magasin, un centre commercial ou une gare, et qu'il l'a dit : rappelle itineraire avec lieu = le nom de l'endroit et sa ville, client vide.)` };
     const S = Q.soc, ou = `${S.societe}${S.ville && !plat(S.ville).includes(plat(S.societe)) ? ' à ' + S.ville : ''}`;
     // P8, journal du 12/11/26, 08h42 : nom entendu approximatif → le guidage ne part pas ; il demande d'abord (un « oui » suffit).
     const AC = this.aConfirmer, attendu = !!(AC && Date.now() - AC.at < 120000 && AC.societe === S.societe);

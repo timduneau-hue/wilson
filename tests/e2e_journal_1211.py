@@ -397,6 +397,58 @@ async def main():
         ok = await attendre(lambda: any("je n'ajoute rien" in t and 'aucun outil' in t for t in c['texts'][nt:]), 4)
         check('… il refuse mais Wilson dit avoir écrit (« C\'est prêt dans le CRM ») : pas dit, et pas de crm_noter exigé', ok and joue < 0.9 and not any('crm_noter' in t for t in c['texts'][nt:]), f'{joue:.1f} s {c["texts"][nt:]}')
         parle(c, "D'accord, je n'ajoute rien.", sec=0.8); await page.wait_for_timeout(900)
+        # 12 ter. Journal du 20/11/26, 12h00:02 : « J'ai préparé la tâche suivante : « … ». Je l'enregistre ? » sans crm_noter,
+        # laissé passer (« réponse qui n'affirme rien ») ; ses deux « oui » → « rien à enregistrer » ; puis « Je viens de te le
+        # dire. » envoyé à l'analyste comme une question (12h00:59).
+        await page.wait_for_timeout(1500)
+        ln = len(logs); nt = len(c['texts']); joue0 = await page.evaluate("wilson.audio.playedSec")
+        await page.evaluate("wilson._sansOutil = null; wilson.crm.pending = null")
+        await demande(c, "Il faut noter qu'on va lui envoyer une équerre pour le ferme-porte, à son entreprise, en TNT.")
+        parle(c, "J'ai préparé la tâche suivante : « Envoyer une équerre pour le ferme-porte en TNT à son entreprise. ». Je l'enregistre ?", sec=2.5); await page.wait_for_timeout(1200)
+        joue = (await page.evaluate("wilson.audio.playedSec")) - joue0
+        ok = await attendre(lambda: any("n'a PAS été dite" in t and 'crm_noter' in t for t in c['texts'][nt:]), 4)
+        check('« J\'ai préparé la tâche … Je l\'enregistre ? » sans crm_noter (rien de préparé) : pas dit, crm_noter exigé (20/11/26, 12h00:02)',
+              ok and any('JAMAIS DITE' in l for l in logs[ln:]) and any('présentée comme prête' in l for l in logs[ln:]) and not any("n'affirme rien" in l for l in logs[ln:]) and joue < 0.9,
+              f'{joue:.1f} s {[l for l in logs[ln:] if "Verrou" in l]} {c["texts"][nt:]}')
+        await page.wait_for_timeout(1500)
+        ln = len(logs); nt = len(c['texts'])
+        await page.evaluate("wilson._sansOutil = null; wilson.crm.pending = null")
+        await demande(c, 'Je viens de te le dire, envoie-lui une équerre en TNT.')
+        parle(c, "Pardon, j'ai un problème pour l'enregistrer. Je vais le noter comme tâche, on est d'accord ? « Envoyer une équerre pour le ferme-porte en TNT à son entreprise, pour la porte livrée où il ne peut pas poser son ferme-porte. »", sec=2.5); await page.wait_for_timeout(1200)
+        ok = await attendre(lambda: any("n'a PAS été dite" in t for t in c['texts'][nt:]), 4)
+        tx = [t for t in c['texts'][nt:] if "n'a PAS été dite" in t]
+        check('… « Je viens de te le dire » pendant une écriture : crm_noter exigé, pas une question à l\'analyste (12h00:59)',
+              ok and 'crm_noter' in tx[-1] and 'crm_question' not in tx[-1] and not any("posée par l'appli" in l for l in logs[ln:]), f'{tx} {[l for l in logs[ln:] if "Verrou" in l or "analyste" in l]}')
+        parle(c, 'Pour quel jour ?', sec=0.5); await page.wait_for_timeout(700)
+        await page.evaluate("wilson.crm.pending = null; wilson.crm.dernierEnregistre = null")
+        await demande(c, 'Oui.')
+        outil(c, 'crm_confirmer', {}, 'cf0')
+        ok = await attendre(lambda: resp(c, 'cf0') is not None, 6)
+        r = resp(c, 'cf0') or ''
+        check('crm_confirmer sans rien de préparé : « appelle crm_noter MAINTENANT », sans reposer la question (12h00:13)', ok and 'NON ENREGISTRÉ' in r and 'crm_noter MAINTENANT' in r and 'Ne lui repose PAS' in r, r[:200])
+        parle(c, 'Pour quel client ?', sec=0.5); await page.wait_for_timeout(700)
+        # 12 quater. Réponse de Timothée du 20/11/26, 11h44 (« Oui, tu peux faire ça ») : un endroit qui n'est pas un client
+        # (centre commercial…) est cherché par Google Maps et le guidage est lancé (journal du 19/11/26, 16h22).
+        check('Outil itineraire : paramètre « lieu » (endroit hors CRM), client plus obligatoire',
+              any(f['name'] == 'itineraire' and 'lieu' in f['parameters']['properties'] and 'client' not in (f['parameters'].get('required') or []) for t in c['setup']['tools'] for f in t.get('functionDeclarations', [])))
+        check('… et la consigne le dit', 'lieu = le nom de l\'endroit et sa ville' in sysp(c))
+        await page.wait_for_timeout(1500)
+        await page.evaluate("wilson._crmRecents && wilson._crmRecents.clear()")
+        n = len(await nav())
+        await demande(c, 'Emmène-moi au centre commercial Atlantis à Saint-Herblain.')
+        outil(c, 'itineraire', {'lieu': 'centre commercial Atlantis Saint-Herblain'}, 'l1')
+        ok = await attendre(lambda: resp(c, 'l1') is not None, 8)
+        N = await nav(); r = resp(c, 'l1') or ''
+        check('« Emmène-moi au centre commercial Atlantis » : guidage lancé vers l\'endroit (Google Maps le cherche), sans le CRM',
+              ok and len(N) == n + 1 and N[-1][0] == 'centre commercial Atlantis Saint-Herblain' and 'est lancé' in r and 'vérifie la destination' in r, f'{N[-1:]} {r[:200]}')
+        parle(c, "C'est parti, je te guide vers le centre commercial Atlantis, vérifie la destination sur l'écran.", sec=1.0); await page.wait_for_timeout(1000)
+        await page.evaluate("wilson._crmRecents && wilson._crmRecents.clear()")
+        n = len(await nav())
+        await demande(c, 'Tiens, le centre commercial Atlantis, il ferme à quelle heure ?')
+        outil(c, 'itineraire', {'lieu': 'centre commercial Atlantis'}, 'l2')
+        ok = await attendre(lambda: resp(c, 'l2') is not None, 8)
+        check('… mais il cite seulement l\'endroit, sans demander d\'y aller : rien n\'est lancé', ok and 'REFUSÉ' in (resp(c, 'l2') or '') and len(await nav()) == n, resp(c, 'l2'))
+        parle(c, 'Pardon, je ne lance rien.', sec=0.5); await page.wait_for_timeout(700)
 
         # ---------- 13. Ma journée : CRM et agendas Google ----------
         await demande(c, "Qu'est-ce que j'ai aujourd'hui ?")
