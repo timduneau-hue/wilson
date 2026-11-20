@@ -1,1 +1,1 @@
-{"version":"1.45.23","date":"20/11/26","nouveautes":"Quand Timothée te fait une remarque ou te dicte une note, tu attends maintenant qu'il ait fini sa phrase avant de la noter : plus de remarque envoyée à moitié, et s'il continue après ta demande, la suite est prise en compte."}
+{"version":"1.45.24","date":"20/11/26","nouveautes":"Quand tu proposes un choix à Timothée qui finit par « ou autre chose ? », ta question n'est plus coupée : il l'entend en entier. Avant, elle était prise pour un « autre chose ? » de trop et il n'entendait que la phrase d'avant."}

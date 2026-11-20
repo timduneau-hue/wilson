@@ -151,6 +151,10 @@ for (const u of ["C'est noté. Je comprends. Excuse-moi. Tu as besoin de quelque
 check('… et c\'est seulement la question finale', V.finDeTrop("C'est noté. Tu as besoin d'autre chose ?") === "Tu as besoin d'autre chose ?");
 for (const u of ['Pour quel client ?', "Je l'enregistre ?", 'Je te guide vers ABM à La Roche, c\'est bien ça ?', 'Avec qui, chez ABM ?', "Tu as trois non lus, et aucun n'est important.", 'Tu veux noter autre chose. Je le relis.', "Qu'est-ce que tu veux changer dans ce compte rendu ?"])
   check(`pas une fin de trop : « ${u} »`, !V.finDeTrop(u), V.finDeTrop(u));
+// 20/11/26 : « autre chose » comme dernier choix d'une vraie question (posée pour Claude) — coupée, il n'a pas entendu la question
+for (const u of ["Je n'ai pas la trace de ce qui était en cours. Tu veux quoi sur eux : les dernières commandes, les devis ou autre chose ?",
+  'Tu veux les dernières commandes, les devis ou autre chose ?', 'Je te lis ses coordonnées ou quelque chose d\'autre ?'])
+  check(`choix proposé, pas une fin de trop : « …${u.slice(-50)} »`, !V.finDeTrop(u), V.finDeTrop(u));
 
 // Remarque inventée (journal du 16/11/26, tablette, 19h23:24)
 check('remarque inventée : « visage trop statique » sur « j\'ai une nouvelle remarque »', V.remarqueInventee('visage de Wilson trop statique, manque de vie dans les expressions.', "Petite remarque Wilson. Oui, c'est ça. Non mais j'ai une nouvelle remarque."));
