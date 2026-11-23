@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.27';
+const VERSION = '1.45.28';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -2885,7 +2885,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       case 'itineraire': {                                                            // C12
         const PR = await this._prochainRdvDemande(a, signal, heard);
         if (PR && PR.dire) return { info: PR.info, dire: PR.dire };
-        if (PR) a = { ...a, client: PR.client };
+        if (PR) a = { ...a, client: PR.client, cle: PR.cle };
         const r = await C.routeTarget(a, signal, { confirme: !!this._itiOui });
         // Appli Android (PLAN 9, A3) : le guidage part tout de suite, dans la voiture, et Wilson revient devant tout seul.
         if (r.ok && appli()) {
@@ -3222,7 +3222,8 @@ Nous sommes ${fmtDate()}.${nv}`;
     const n = (x) => VP.plat(x).replace(/[^a-z0-9]+/g, ' ').trim();
     if (!parClient && client && (n(client).includes(n(p.societe)) || n(p.societe).includes(n(client)))) return null;   // déjà le bon
     this.log(`Itinéraire : « ${(phrase || client).slice(0, 80)} » → son prochain rendez-vous, ${p.heure} ${p.societe}${client && !parClient ? ` (pas « ${client} »)` : ''}${quitte ? ` ; il sort de celui de ${quitte.heure} (${quitte.societe}) : relié à la voiture après son début` : ''}`, true);
-    return { client: p.societe };
+    // + la personne du rendez-vous (remarque du 23/11/26) : le guidage va à SON adresse (une agence), pas au siège de la société
+    return { client: p.societe, cle: p.cle || '' };
   }
 
   // Journal du 06/11/26, 08h43:18 et 08h45:13 : guidage vers Lebre lancé deux fois sans qu'il le demande (il avait seulement
@@ -3312,7 +3313,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       // redemandé avec le même nom rendrait le guidage d'avant)
       const PR = await this._prochainRdvDemande(call.args || {}, null);
       if (PR && PR.dire) { if (this.brain.open) this.brain.respond([{ id: call.id, name: call.name, response: { result: PR.info } }]); return; }
-      if (PR) call = { ...call, args: { ...(call.args || {}), client: PR.client } };
+      if (PR) call = { ...call, args: { ...(call.args || {}), client: PR.client, cle: PR.cle } };
     }
     if (call.name === 'crm_question') {
       const qa = String((call.args || {}).question || (call.args || {}).demande || '');

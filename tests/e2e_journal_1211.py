@@ -20,6 +20,7 @@ envoyé en « question » à Claude (lecture seule) ; « Tu as besoin d'autre ch
 13 bis. « Mon prochain rendez-vous » (19/11/26, 11h17) : le prochain d'après l'heure, pas celui déjà commencé.
 13 ter. Relié à la voiture après le début d'un rendez-vous (19/11/26, 14h07) : il en sort, c'est le suivant.
 13 quater. « C'est parti, je te guide vers … » sans l'outil (19/11/26, 14h08-14h09) : pas dit, itineraire demandé.
+13 quinquies. Rendez-vous avec la personne d'une agence (23/11/26) : guidé à l'adresse de cette personne, pas au siège.
  9 bis. Deux sociétés au nom proche : la personne citée (crm_noter, contact) choisit celle où elle travaille (19/11/26, 17h11).
 14. CRM pas encore à jour (pas d'annuaire) : le CRM rend la mauvaise société → rien n'est lancé, il fait confirmer.
 """
@@ -49,7 +50,7 @@ H = {'access-control-allow-origin': '*'}
 ANNUAIRE = [
     ['A B M', 'M ANJUBAULT Mathieu', 'BE', 'C2000001', 'A B M LA ROCHE', 'A B M LA ROCHE', '02 40 00 00 01', '', ''],
     ['A B M', 'M MOREAU Yoann', 'Responsable magasin', 'C2000001', 'A B M LA ROCHE', 'A B M LA ROCHE', '02 40 00 00 01', '', ''],
-    ['A B M', 'M LEMERCIER Valentin', 'Resp. commercial', 'C2000001', 'A B M LA ROCHE', 'A B M LA ROCHE', '06 00 00 00 02', '', ''],
+    ['A B M', 'M LEMERCIER Valentin', 'Resp. commercial', 'C2000001', 'Nantes', '5 rue de l\'Agence 44000 Nantes', '06 00 00 00 02', '', ''],   # à l'agence (13 quinquies)
     ['GRANDBAT E ET S AB FRANCE 548X', 'M DURAND Paul', 'Acheteur', 'C1000001', 'Verrières-en-Anjou', 'FGV6+P8 Verrières-en-Anjou', '02 41 00 00 04', '', ''],
     ['GALLOIS SARL', 'M MOREAU Christophe', 'Gérant', 'C1000002', 'Chavagne', '3 rue des Lilas 35310 Chavagne', '02 99 00 00 05', '', ''],
     ['LEBRE', 'M LEBRE Jean', '', 'C1000005', 'Vigneux-de-Bretagne', '44360 Vigneux-de-Bretagne', '06 11 22 33 44', '', ''],
@@ -535,6 +536,26 @@ async def main():
                       ok and any('JAMAIS DITE' in l for l in logs[ln:]) and not any("n'affirme rien" in l for l in logs[ln:]) and joue < 0.9 and len(await nav()) == n,
                       f'{joue:.1f} s {[l for l in logs[ln:] if "Verrou" in l]} {c["texts"][nt:]}')
                 parle(c, 'Pour quel client ?', sec=0.5); await page.wait_for_timeout(700)
+            # 13 quinquies. Remarque du 23/11/26 : « mon prochain rendez-vous » → guidé au siège de la société, pas à
+            # l'agence où travaille la personne du rendez-vous.
+            AG = "5 rue de l'Agence 44000 Nantes"
+            st['rdv'] = [{'cle': json.dumps(['M LEMERCIER Valentin', 'A B M'], ensure_ascii=False), 'contact': 'M LEMERCIER Valentin', 'societe': 'A B M', 'heure': hm(mn + 40)}]
+            await page.evaluate("wilson.crm.journee = null; wilson._crmRecents && wilson._crmRecents.clear(); wilson._voitureBtDepuis = Date.now() - 30 * 60000")
+            await page.wait_for_timeout(1500)
+            n = len(await nav())
+            await demande(c, 'Emmène-moi à mon prochain rendez-vous.')
+            outil(c, 'itineraire', {'client': 'prochain rendez-vous'}, 'p8')
+            ok = await attendre(lambda: resp(c, 'p8') is not None, 8)
+            N = await nav()
+            check('« Mon prochain rendez-vous » avec la personne de l\'agence : guidé à SON adresse, pas au siège (remarque du 23/11/26)',
+                  ok and len(N) == n + 1 and N[-1][0] == AG and N[-1][1] == 'A B M' and AG in (resp(c, 'p8') or ''), f'{N[-1:]} {resp(c, "p8")}')
+            parle(c, "C'est parti, je te guide vers ABM.", sec=0.6); await page.wait_for_timeout(1500)
+            await page.evaluate("wilson._crmRecents && wilson._crmRecents.clear()")
+            await demande(c, 'Wilson, emmène-moi chez ABM.')
+            outil(c, 'itineraire', {'client': 'ABM'}, 'p9')
+            ok = await attendre(lambda: resp(c, 'p9') is not None, 8)
+            check('… « emmène-moi chez ABM » le jour de ce rendez-vous : à l\'agence aussi', ok and (await nav())[-1][0] == AG, f'{(await nav())[-1:]} {resp(c, "p9")}')
+            parle(c, "C'est parti, je te guide vers ABM.", sec=0.6); await page.wait_for_timeout(700)
             st['rdv'] = None; await page.evaluate("wilson.crm.journee = null")
         else: print('(13 bis non lancé : entre 21h00 et 1h00, les heures du test passeraient minuit)')
         check('Aucune erreur de page (avec annuaire)', not any('PAGEERROR' in l or l.startswith('Erreur :') for l in logs), str([l for l in logs if 'PAGEERROR' in l or l.startswith('Erreur :')][:3]))

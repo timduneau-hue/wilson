@@ -695,7 +695,16 @@ export class Crm {
     return null;
   }
 
-  async routeTarget({ client = '', lieu = '' } = {}, signal, { confirme = false } = {}) {
+  // Remarque du 23/11/26 (« mon prochain rendez-vous » → guidé au siège de la société, à une heure de l'agence où était le
+  // rendez-vous) : la personne du rendez-vous du jour (cle, donnée par l'agenda) est retenue, et c'est SON adresse qui part au GPS.
+  _cleDuRdv(societe) {
+    const J = this.journee, k = motsNom(societe).join('');
+    if (!k || !J || J.jourDe !== frDate(new Date())) return '';
+    const L = [...new Set((J.rdv || []).filter((r) => r && r.cle && motsNom(r.societe).join('') === k).map((r) => r.cle))];
+    return L.length === 1 ? L[0] : '';                          // deux personnes de la même société aujourd'hui : on ne choisit pas
+  }
+
+  async routeTarget({ client = '', lieu = '', cle = '' } = {}, signal, { confirme = false } = {}) {
     const L = this.lieuConnu(client || lieu);
     if (L) {
       if (L.manque) return { ok: false, dire: "Je ne connais pas encore l'adresse de la maison : demande-la-lui et retiens-la (memoriser « La famille habite au … »)." };
@@ -716,7 +725,10 @@ export class Crm {
         maps: `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`, waze: `https://waze.com/ul?q=${q}&navigate=yes` };
       return { ok: true, target, dire: `Le bouton pour aller à « ${libre} » est affiché (c'est Google Maps qui cherche l'endroit) : dis-lui en une phrase d'appuyer sur « Y aller » et de vérifier la destination proposée ; le guidage s'ouvre sur le téléphone et sur l'écran de la voiture, et pour te reparler il reviendra sur Wilson.` };
     }
-    const Q = await this._qui(client, signal);
+    const net = (k) => { if (!k) return ''; try { return JSON.stringify(JSON.parse(k)); } catch (_) { return String(k); } };   // même clé, espaces ou pas
+    const kR = cle ? net(cle) : '', PR = kR && this.annuaire.pret ? this.annuaire.parCle(kR) : null;
+    // le contact du rendez-vous est dans l'annuaire : c'est lui (sa société peut avoir une agence ailleurs, du même nom)
+    const Q = PR ? this._retenir({ soc: this._socDeGroupe(PR.g), contact: this._contactDe(PR), sur: true }) : await this._qui(client, signal);
     if (Q.dire) return { ok: false, dire: `${Q.dire} (Si ce n'est pas un de ses clients mais un endroit, comme un magasin, un centre commercial ou une gare, et qu'il l'a dit : rappelle itineraire avec lieu = le nom de l'endroit et sa ville, client vide.)` };
     const S = Q.soc, ou = `${S.societe}${S.ville && !plat(S.ville).includes(plat(S.societe)) ? ' à ' + S.ville : ''}`;
     // P8, journal du 12/11/26, 08h42 : nom entendu approximatif → le guidage ne part pas ; il demande d'abord (un « oui » suffit).
@@ -727,10 +739,17 @@ export class Crm {
       this.log(`itinéraire : « ${client} » ressemble à ${ou}, pas assez pour lancer le guidage — je fais confirmer`);
       return { ok: false, aConfirmer: true, dire: `RIEN N'EST LANCÉ. Ce que tu as entendu (« ${client} ») ressemble à ${ou}, sans certitude. Demande-lui seulement : « Je te guide vers ${ou}, c'est bien ça ? ». S'il dit oui : rappelle itineraire avec client = « ${S.societe}${S.ville ? ' ' + S.ville : ''} ». Sinon, redemande-lui le nom du client.` };
     }
-    let e = { societe: S.societe, cle: (Q.contact || S.principal || {}).cle || '', contact: (Q.contact || S.principal || {}).nom || '', adresse: (Q.contact && Q.contact.adresse) || S.adresse || '' };
+    // sans personne citée : celle de son rendez-vous du jour chez ce client (donnée par l'outil, sinon retrouvée dans la journée)
+    const kRdv = kR || (Q.contact ? '' : net(this._cleDuRdv(S.societe)));
+    const socDe = (k) => { try { return motsNom(JSON.parse(k)[1]).join(''); } catch (_) { return ''; } };   // clé = [contact, société]
+    const R = kRdv && socDe(kRdv) && socDe(kRdv) === motsNom(S.societe).join('') ? (S.contacts.find((c) => net(c.cle) === kRdv) || { cle: kRdv, nom: '' }) : null;
+    let e = R ? { societe: S.societe, cle: R.cle, contact: R.nom || '', adresse: R.adresse || '' }
+      : { societe: S.societe, cle: (Q.contact || S.principal || {}).cle || '', contact: (Q.contact || S.principal || {}).nom || '', adresse: (Q.contact && Q.contact.adresse) || S.adresse || '' };
+    if (R) this.log(`itinéraire : adresse de la personne de son rendez-vous${R.nom ? ` (${R.nom})` : ''}${R.adresse ? ` : ${R.adresse}` : ' : à lire dans le CRM'}`);
     if (!e.adresse) {                                         // pas d'adresse dans l'annuaire (ou fiche ancienne) : la fiche du CRM
       const c = await this.ask({ action: 'crm_client', cle: e.cle }, signal).catch(() => null);
       if (c && c.ok && c.cle) e = this._keep(c);
+      if (!e.adresse && R && S.adresse) e = { ...e, adresse: S.adresse };   // la personne du rendez-vous n'a pas d'adresse : la société
     } else if (!this._ficheDeSociete(S.societe) && e.cle) {
       // Il y va : sa fiche est lue d'avance, en arrière-plan, pour que la question suivante n'attende pas le CRM.
       this.ask({ action: 'crm_client', cle: e.cle }).then((c) => { if (c && c.ok && c.cle) { const D = this.dernier; this._keep(c); if (D && D.soc.societe === c.societe) this.dernier = { ...D, e: this.last, at: Date.now() }; this.log(`fiche lue d'avance : ${c.societe}`); } }).catch(() => {});
