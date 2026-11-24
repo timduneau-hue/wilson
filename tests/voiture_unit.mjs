@@ -58,6 +58,9 @@ for (const p of ["On dirait que ce n'est pas pour moi. Préviens-moi si tu as be
 check('Vraies réponses gardées (« pas pour moi »)', !V.ditPasPourMoi("C'est fait, la lumière jaune est allumée.") && !V.ditPasPourMoi("Pas de problème, je reste là si tu as besoin.")
   && !V.ditPasPourMoi("Ah, ça te plairait ? Qu'est-ce que tu imagines comme truc trop bien ?") && !V.ditPasPourMoi("Je ne comprends pas cette phrase. Tu peux me la redire en français, s'il te plaît ?")
   && !V.ditPasPourMoi("Pour ce mois-ci, tu as 37 clients actifs.") && !V.ditPasPourMoi("Tu parles de la réunion de lundi ? Elle est à 9h00."));
+// Journal du 24/11/26, 14h00:11 : un bout de la consigne lu à voix haute après un mot isolé (« curso ») → coupé.
+check('« Pardon. ou écoute ce qu\'il veut. » : consigne lue à voix haute, coupée', V.estDidascalie("Pardon. ou écoute ce qu'il veut.") && V.estDidascalie("Pardon, puis écoute ce qu'il dit."));
+check('… « dis-moi ce que tu veux » gardé', !V.estDidascalie("Pardon, dis-moi ce que tu veux.") && !V.estDidascalie("Je t'écoute, qu'est-ce que tu veux ?"));
 check('Une vraie réponse n\'est pas une didascalie', !V.estDidascalie('Tu as 23 clients actifs ce mois-ci.') && !V.estDidascalie('Je te guide (enfin, Maps te guide).'));
 // Reprise d'un résultat déjà reçu (06/11, 08h46:06)
 const res0611 = "[La recherche dans le CRM que tu avais lancée pour la question « OBJECTIF CLIENTS ACTIFS Combien de clients actifs ce mois-ci ? » est terminée (84 s). Résultat : Réponse de Claude : « Tu as 23 clients actifs sur 49, donc il t'en manque 26. C'est le chiffre de novembre de l'an dernier qui fixe l'objectif, puisque tu n'en as pas donné. » Dis-la-lui.]";

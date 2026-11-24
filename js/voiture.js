@@ -163,9 +163,11 @@ export function finDeTrop(t) {
 }
 // Didascalie lue à voix haute (journal du 09/11/26, 17h52:33 et 17h59:07 : « (Wilson reste silencieux car la conversation
 // ne semble pas s'adresser à lui.) ») : pour se taire, Gemini ne doit rien dire du tout ; l'appli coupe ce qui ressemble à ça.
+// Journal du 24/11/26, 14h00:11 (voiture) : sur un mot isolé mal entendu (« curso »), Wilson a dit « Pardon. ou écoute ce qu'il
+// veut. » : un bout de sa consigne lu à voix haute. Comme une didascalie, c'est coupé.
 export function estDidascalie(t) {
   const x = plat(t);
-  return /^\s*[([*]/.test(x) || /\b(je reste|il reste|wilson reste|reste|rester|demeure) (silencieux|muet)\b|ne (me )?semble pas s'adresser a (lui|moi)|[([*]\s*(silence|pause|wilson|il se tait|se tait|attend|ne dit rien|ne repond pas)\b/.test(x);
+  return /^\s*[([*]/.test(x) || /\becoute ce qu'il (veut|dit|demande)\b/.test(x) || /\b(je reste|il reste|wilson reste|reste|rester|demeure) (silencieux|muet)\b|ne (me )?semble pas s'adresser a (lui|moi)|[([*]\s*(silence|pause|wilson|il se tait|se tait|attend|ne dit rien|ne repond pas)\b/.test(x);
 }
 
 // Il annonce à voix haute que ce n'était pas pour lui (« On dirait que vous papotez entre vous, je ne m'immisce pas »,
