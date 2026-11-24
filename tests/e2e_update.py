@@ -35,7 +35,7 @@ async def main():
             await pg.evaluate("wilson.phone = false"); await pg.wait_for_timeout(8500)
             check('… mise à jour dès la fin de l\'appel', len(loads) == 3, f'{len(loads)} chargements')
             await pg.wait_for_function('window.wilson && wilson.state==="veille"', timeout=20000)
-            src = await pg.evaluate("fetch('./js/app.js').then((r) => r.text())")
+            src = await pg.evaluate("fetch('./js/app.js').then((r) => r.text()).then((t) => Promise.all([t, ...[...t.matchAll(/from '\\.\\/(app\\/[^']+)'/g)].map((m) => fetch('./js/' + m[1]).then((r) => r.text()))])).then((l) => l.join('\\n'))")
             check('Vérifie toutes les 5 minutes, à toute heure (plus seulement la nuit)', 'const MAJ_VERIF_MS = 5 * 60000' in src and 'setInterval(() => this._checkUpdate(), MAJ_VERIF_MS)' in src and 'MAJ_HEURE' not in src)
         finally:
             open(VJ,'w').write(ORIG)

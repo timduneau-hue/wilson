@@ -70,7 +70,7 @@ async def main():
         # ---------- 1. « Ce n'est pas pour moi » : coupé ----------
         sysi = json.dumps(conn['setup'] or {}, ensure_ascii=False)
         check('Consigne : jamais « on dirait que ce n\'est pas pour moi » ; se taire, c\'est tout', "jamais « on dirait que ce n'est pas pour moi »" in sysi)
-        src = await page.evaluate("fetch('./js/app.js').then((r) => r.text())")
+        src = await page.evaluate("fetch('./js/app.js').then((r) => r.text()).then((t) => Promise.all([t, ...[...t.matchAll(/from '\\.\\/(app\\/[^']+)'/g)].map((m) => fetch('./js/' + m[1]).then((r) => r.text()))])).then((l) => l.join('\\n'))")
         check('Consigne de la maison : appareil « injoignable » → appeler quand même maison_commande (15h02:25, 20h05:35)', 'appelle quand même maison_commande, qui sait le réveiller' in src)
         for i, (u, w) in enumerate([("Ouais, il faut les arranger les chaussures.", "Je vous laisse régler ça entre vous ! Prévenez-moi si vous avez besoin d'aide pour autre chose."),
                                      ("¿Qué ni la? Cool.", "On dirait que vous papotez entre vous, je ne m'immisce pas. Faites-moi signe si vous avez besoin de moi !"),

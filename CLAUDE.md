@@ -10,7 +10,8 @@ le titre ou la description d'une demande. Les règles et l'état du projet sont 
 | Chemin | Rôle |
 |---|---|
 | `index.html`, `css/`, `manifest.webmanifest`, `sw.js` | la page, son style, l'appli installable, le cache hors ligne |
-| `js/app.js` | chef d'orchestre (≈4 200 lignes) : **ne pas le lire en entier**, chercher avec `grep -n` puis lire autour |
+| `js/app.js` | chef d'orchestre (≈1 450 lignes) : démarrage, états, regard, conversation, branchement de Gemini et du micro, `_tick` |
+| `js/app/*.js` | le reste des méthodes de la classe `App`, rangées par domaine (24/11/26) et ajoutées à `App.prototype` par `app.js` : `mode-eco`, `consignes` (consignes données à Gemini), `reseau`, `reponses` (verrou de vérité, réponses à dire plus tard), `outils-gemini`, `en-voiture`, `crm-et-outils`, `ecran` (cartes, appels) ; constantes et petites fonctions communes dans `commun.js`. Une méthode se trouve par `grep -n 'nomDeLaMethode(' js/app.js js/app/*.js` |
 | `js/brain.js` / `js/eco.js` | Gemini Live (mode direct) / mode économique |
 | `js/vision.js` + `vision-worker.js`, `js/qui.js` + `qui-worker.js`, `js/face.js` + `js/faces/` | regard, visages reconnus, dessin du visage (Miel) |
 | `js/audio.js`, `js/worklets/`, `js/voice.js`, `js/oreille.js` | micro, voix de la tablette, « Wilson » reconnu en voiture |

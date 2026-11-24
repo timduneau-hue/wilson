@@ -128,7 +128,7 @@ async def main():
 
         # ---------- 5. Décisions de Timothée du 16/11/26 (12h45) : le doute, Claude pour l'information fiable ----------
         check('Consigne : au moindre doute, UNE question courte avant de répondre ; jamais pour une demande claire', 'Le doute (décision de Timothée du 16/11/26' in sysi and 'UNE seule question courte' in sysi)
-        src = await page.evaluate("Promise.all([fetch('./js/app.js').then((r) => r.text()), fetch('./js/claude.js').then((r) => r.text())])")
+        src = await page.evaluate("Promise.all([fetch('./js/app.js').then((r) => r.text()).then((t) => Promise.all([t, ...[...t.matchAll(/from '\\.\\/(app\\/[^']+)'/g)].map((m) => fetch('./js/' + m[1]).then((r) => r.text()))])).then((l) => l.join('\\n')), fetch('./js/claude.js').then((r) => r.text())])")
         check('Claude (question_difficile) pour toute information fiable, même si Gemini croit savoir', 'Toute question qui demande une information FIABLE' in src[1] and 'ne réponds pas de mémoire' in src[0])
         r = await page.evaluate("""() => ({ q: wilson._aDireTexte({ question: 'charge d\\'une paumelle Tectus', dire: 'Question : tu parles de la TE 340 ou de la TE 540 ?', s: 40 }),
           n: wilson._aDireTexte({ question: 'charge Tectus TE 340', dire: 'D\\'après la fiche Simonswerk, 80 kilos.', s: 40 }) })""")
@@ -201,7 +201,7 @@ async def main():
         check('Consigne : « pour la prochaine mise à jour », « remarque à prendre en compte » → remarque ; seul Timothée', 'seul Timothée peut faire corriger ton programme' in sysi2 and 'remarque à prendre en compte' in sysi2 and 'pour la prochaine mise à jour' in sysi2)
         check('Fiche du client : comptes rendus et historique comptent autant que les chiffres, points « À SIGNALER » dits même sans demande', 'comptent autant que les chiffres' in r['g'] and '« À SIGNALER »' in r['g'] and 'même s\'il ne l\'a pas demandé' in r['g'], r['g'][-400:])
         check('… mais rien de tout ça pour un résultat sans fiche (bilan)', 'SIGNALER' not in r['g2'] and 'comptent autant' not in r['g2'], r['g2'])
-        src2 = await page.evaluate("fetch('./js/app.js').then((r) => r.text())")   # partie « travail » de la consigne : seulement avec le CRM relié
+        src2 = await page.evaluate("fetch('./js/app.js').then((r) => r.text()).then((t) => Promise.all([t, ...[...t.matchAll(/from '\\.\\/(app\\/[^']+)'/g)].map((m) => fetch('./js/' + m[1]).then((r) => r.text()))])).then((l) => l.join('\\n'))")   # partie « travail » de la consigne : seulement avec le CRM relié
         check('Consigne : « qu\'est-ce qu\'on s\'est dit avec X », « où j\'en suis avec X » → crm_client ; briefing avec comptes rendus et tâches', "on s'est dit la dernière fois" in src2 and 'comptes rendus et derniers échanges, tâches, sujets à voir au rendez-vous' in src2)
         regles = await page.evaluate("import('./js/analyste.js').then(({ reglesCRM }) => reglesCRM({}))")
         check('Analyste et Claude du PC : toute question sur un client regarde aussi comptes rendus, tâches et sujets à voir au RDV', 'Toute question sur un client, pas seulement un briefing' in regles and 'à voir au prochain rendez-vous' in regles)
