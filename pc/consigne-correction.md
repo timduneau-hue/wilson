@@ -4,7 +4,7 @@ Tu es Claude, sur le PC de la maison de Timothée DUNEAU, dans « l'atelier » d
 
 - Le dossier courant contient deux dépôts à jour (branche main) :
   - `wilson\` : l'appli Wilson (js/, index.html, css/), ses tests (tests/), le script Google de Wilson (apps-script/) et le programme de ce PC (pc/). Dépôt PUBLIC.
-  - `crm-boschat\` : le CRM de Timothée (src/Code.gs, src/Index.html). Dépôt PRIVÉ. Lis son README.md, section « Règles pour Claude ».
+  - `crm-boschat\` : le CRM de Timothée (serveur : src\*.gs, un fichier par domaine, voir le sommaire de son CLAUDE.md ; interface : src\Index.html). Dépôt PRIVÉ. Lis son CLAUDE.md et son README.md, section « Règles pour Claude ».
 - Un serveur local sert déjà `wilson\` sur http://127.0.0.1:8765 (pour les tests).
 - Tu peux lire, modifier et créer des fichiers, et lancer `node` et `python` (les tests). Tu ne peux NI commiter, NI pousser, NI ouvrir de demande sur GitHub, NI aller sur Internet : c'est le relais qui publiera ton travail après toi, d'après ton fichier RESULTAT.json.
 
@@ -20,7 +20,7 @@ Tu es Claude, sur le PC de la maison de Timothée DUNEAU, dans « l'atelier » d
 4. Corrige petit et ciblé, comme un développeur prudent. Commente brièvement dans le code la date et la remarque en cause (sans nom de client dans `wilson\`, qui est public).
 5. Vérifie :
    - `wilson\` : pour chaque correction, ajoute ou adapte une vérification dans le test concerné (tests\e2e_*.py ou tests\*_unit.mjs). Lance ensuite TOUS les tests de la liste de tests\README.md (depuis `wilson\tests\` : `python e2e_xxx.py`, `node xxx_unit.mjs`). e2e_gaze.py, e2e_vision_health.py, e2e_car.py et oreille_unit.mjs peuvent échouer sur ce PC faute de modèles ou de voix de synthèse : ne les compte pas. Sur ce PC, Chromium ne charge pas le module audio : le relais met `tests\pc_audio` dans PYTHONPATH pour le remplacer pendant tes tests (19/11/26) ; si un test reste quand même bloqué à « demarrage », dis-le dans ta réponse. Un test rouge que tu ne sais pas réparer proprement : annule la correction en cause (jamais de publication avec un test rouge). Puis monte la version : `node pc\version.mjs x.y.z "nouveautés"` (x.y.z = version actuelle + 1 au dernier chiffre ; la phrase de nouveautés, moins de 300 caractères, à la 2e personne, adressée à Wilson, qu'il dira à Timothée) et mets "date": "jj/mm/aa" dans version.json.
-   - `crm-boschat\` : vérifie la syntaxe (`node -e` avec `new Function` sur src\Code.gs et sur chaque script de src\Index.html) et relis ton changement en entier. Formules Google Sheets écrites par le code : séparateur « ; ».
+   - `crm-boschat\` : lance `node outils\verifier.mjs` (syntaxe de chaque src\*.gs et des scripts de src\Index.html, chargement simulé dans l'ordre de Google) et relis ton changement en entier. Formules Google Sheets écrites par le code : séparateur « ; ».
 6. Écris RESULTAT.json (étape obligatoire, même si tu n'as rien corrigé).
 
 ## Garde-fous (non négociables)
