@@ -3,6 +3,8 @@
 Tests de bout en bout dans Chromium (Playwright), avec faux micro, fausse caméra et Gemini simulé
 (aucune clé ni requête réelle : la clé utilisée est un exemple factice).
 
+Raccourci : `tests/tout.sh` lance tout (ou `tests/tout.sh e2e_crm.py qui_unit.mjs` pour quelques-uns), avec un résumé à la fin.
+
 ```sh
 pip install playwright && playwright install chromium   # une fois
 ./make_fixtures.sh                                       # fausses vidéos de caméra (.y4m) à partir des photos
