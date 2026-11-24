@@ -39,7 +39,7 @@ const VOITURE_QUITTE_MS = 20000;
 // Consignes qui portent un résultat (ou une phrase dictée par l'appli) : ce que Wilson dit ensuite a une source.
 const RE_CONSIGNE_FONDEE = /^\[(Nouvelles de la voiture|Dis-lui seulement|Dis-lui exactement|Dis seulement|Point d'avancement|Tu as le résultat|Résultat de|La recherche|ATTENTION|Donne-lui maintenant|Donne maintenant|Le réseau est revenu)|Résultat :|[Rr]éponse de l'analyste|enregistré dans le CRM/;  // Bluetooth perdu moins de 20 s (reconnexion d'Android Auto) : toujours en voiture
 
-const VERSION = '1.45.28';
+const VERSION = '1.45.29';
 // Mises à jour : TOUT DE SUITE (décision de Timothée du 16/11/26, 12h45, qui remplace la règle du 04/11/26 « une fois par
 // jour, la nuit, 4h00-5h00 ») : « on le fait tout de suite et on dit que Wilson n'est pas disponible ; il pourrait changer un peu
 // de tête, le temps que la mise à jour se règle ». Wilson regarde s'il y a une nouvelle version toutes les 5 minutes ; il finit
@@ -855,9 +855,10 @@ class App {
       this.brain.sendText(`[Nouvelles de la voiture, arrivées il y a ${min} min, pendant que personne ne te regardait : ${nouvelleVoiture.phrase} Dis-le-lui d'abord, en une phrase, sans rien ajouter.]`);
       this.log('Voiture : nouvelle gardée, donnée au début de la discussion', true);
     }
-    if (reason === 'toucher' && !this._aDire && !nouvelleVoiture) this.brain.sendText(this.enVoiture ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
-    if (reason === 'apres_appel') this.brain.sendText(this._apresAppelTexte());
-    if (reason === 'apres_appel_entrant') this.brain.sendText(this._apresAppelEntrantTexte());
+    const PA = reason === 'toucher' && this.enVoiture && !this._aDire && !nouvelleVoiture ? this._propAppelGardee() : null;
+    if (reason === 'toucher' && !this._aDire && !nouvelleVoiture) this.brain.sendText(PA ? this._propAppelTexte(PA) : this.enVoiture ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
+    if (reason === 'apres_appel') { this.brain.sendText(this._apresAppelTexte()); this._propAppelNote(reason); }
+    if (reason === 'apres_appel_entrant') { this.brain.sendText(this._apresAppelEntrantTexte()); this._propAppelNote(reason); }
     if (reason === 'reponse_tardive' && !this._aDireEnvoyer() && this._lateText) this.brain.sendText(this._lateText);
     if (reason === 'message' && this._messageText) { this.brain.sendText(this._messageText); this._messageText = null; }
     if (reason === 'prenom' && this._wakeText) {
@@ -1256,6 +1257,8 @@ class App {
     }
     this.log(`Fin de conversation (${why}) — dernière parole de Wilson il y a ${depuis(this.playEndAt)}, de Timothée il y a ${depuis(this._heardAt)}${this._voitureBt ? ', en voiture' : ''}`); this._byName = false; this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false; this._searchMs = 0; this._vv = null; this._vvHerite = null;
     this._nvSuivi('');   // 1.43.0 : nouvelle de la voiture pas encore dite → gardée pour la suivante
+    { const PA = this._propAppel;                                       // 24/11/26 : proposition d'après l'appel pas encore dite → gardée
+      if (PA && PA.conv === this.convId - 1) { PA.conv = null; PA.at = Date.now(); this.log(`Proposition d'après l'appel${PA.call && PA.call.nom ? ' (' + PA.call.nom + ')' : ''} pas encore dite : gardée pour la discussion suivante`); } }
     // Une réponse du CRM envoyée mais pas encore dite (journal du 05/11/26, 11h04:22) : elle reste à dire ; en voiture, il
     // se réveille pour la dire (C11 bis), sauf si on l'a fait taire au volant (elle passera à la prochaine discussion).
     const P = this._aDire;
@@ -1301,7 +1304,7 @@ ${crm ? `   - Qui est qui chez un client (« qui est le magasinier chez X ? », 
 7. Le reste : l'heure et la date, SEULEMENT s'il les demande (jamais de toi-même, jamais pour meubler) : date_et_heure ; la météo : meteo ; une petite information simple sur Internet (un horaire, un résultat sportif) : chercher ; tout ce qui demande une information fiable (produit, technique, explication, conseil, règle, calcul, actualité à recouper) : question_difficile, même si tu crois savoir (16/11/26 : il préfère attendre une réponse fiable) ; sa batterie : batterie ; un rappel à une heure précise : rappel (quand au format 2026-10-30T18:00) ; un minuteur : minuteur ; « rappelle-nous ce soir à la maison », « dis à Camille que… » : messages (deposer ; pour un rappel à la maison : pour = « tous » ou son prénom, aussi_pour_moi = true, a_la_maison = true, apres = l'heure) ; l'agenda Famille (Google Agenda partagé avec Camille) : agenda ; « note cette idée » : idees ; sa bourse, son PEA, ses actions, son LDD : bourse ; « retiens que… » : memoriser.
 8. Une remarque sur ta façon de fonctionner (« pour la prochaine mise à jour… », « remarque à prendre en compte », « c'est un bug », « à corriger », « tu devrais… ») : remarque avec sa remarque mise au propre (un bug du CRM aussi), puis dis seulement le résultat de l'outil (« C'est noté, je lance la correction : compte une heure environ. »). Ne dis jamais « c'est noté » sans avoir appelé remarque. N'invente jamais d'explication sur ton propre fonctionnement et ne promets rien d'autre.
 9. « Répète », « tu peux répéter ? » : redis simplement ta dernière phrase (aucun outil, surtout pas reafficher).
-10. Une simple réaction (« voilà », « c'est pas trop tôt », un soupir, un mot isolé, une transcription qui ne veut rien dire) n'est pas une demande : n'appelle aucun outil, ne dis rien, ou seulement « Oui ? » s'il semble attendre. S'il se plaint (« tu bugues », « c'est pas ça ») : « Pardon. », puis écoute ce qu'il veut. S'il parle au téléphone avec quelqu'un d'autre, ou si tu n'entends que la radio, tais-toi. Au revoir, « c'est bon », « merci, c'est tout » : réponds en deux mots puis appelle terminer_conversation (jamais sur un reproche : reste et écoute).
+10. Une simple réaction (« voilà », « c'est pas trop tôt », un soupir, un mot isolé, une transcription qui ne veut rien dire) n'est pas une demande : n'appelle aucun outil, ne dis rien, ou seulement « Oui ? » s'il semble attendre. S'il se plaint (« tu bugues », « c'est pas ça ») : excuse-toi d'un seul mot (« Pardon. ») et laisse-le expliquer. S'il parle au téléphone avec quelqu'un d'autre, ou si tu n'entends que la radio, tais-toi. Au revoir, « c'est bon », « merci, c'est tout » : réponds en deux mots puis appelle terminer_conversation (jamais sur un reproche : reste et écoute).
 
 Langue : parle toujours en français. La transcription de ce qu'il dit sort parfois en anglais, en espagnol ou en portugais par erreur : c'est du français mal compris ; réponds en français, et si tu n'as pas compris, demande de répéter. Tu es Wilson : ne te présente jamais comme un modèle d'IA.
 ${qst ? '\n' + qst + '\n' : ''}
@@ -1679,6 +1682,7 @@ Nous sommes ${fmtDate()}.${nv}`;
       if (wilson) {
         this._demandeTexte = null;
         this._derniereReponse = { texte: wilson, at: performance.now(), coupee }; this._parleDepuis = false;
+        if (this._propAppel && this._propAppel.conv === this.convId) this._propAppel = null;   // proposition d'après l'appel dite
         this.log('Wilson : ' + wilson.slice(0, 1500), true); /* 19/11/26 : réponse entière (avant : 120 caractères) */ this._remarqueOubliee(wilson); this._enregistreFaux(wilson); this._afficheSansOutil(wilson);
         this.famille.dit(wilson);                                                // message de la famille bien transmis (7 sexies, M3)
         this.questions.dit(wilson, this.convId);                                 // question de Claude posée à Timothée (7 septies, D)
@@ -3712,17 +3716,22 @@ Nous sommes ${fmtDate()}.${nv}`;
   _suivreAppel() {
     clearInterval(this._appelSuivi); this._appelSuivi = 0;
     if (!appli() || typeof appli().revenir !== 'function' || typeof appli().etatSon !== 'function') return;
-    const t0 = Date.now(); let parti = 0;
+    // Journal du 24/11/26, 17h38:19 (voiture) : un seul relevé hors appel a suffi à dire « Appel fini après 75 s », alors que
+    // l'appel continuait (17h38:21 : « mode appel, canal appel Bluetooth OUVERT », micro repris 58 s par le téléphone). La
+    // proposition du compte rendu est partie en plein appel et s'est perdue. La fin n'est retenue qu'après 3 relevés de suite.
+    const t0 = Date.now(); let parti = 0, hors = 0;
     const enAppel = () => /mode (appel|communication)|lecture APPEL/.test(String(pont('etatSon') || ''));
     const fin = () => { clearInterval(this._appelSuivi); this._appelSuivi = 0; };
     this._appelSuivi = setInterval(() => {
       const ec = enAppel(), dt = Date.now() - t0;
+      hors = ec ? 0 : hors + 1;
+      if (parti && !ec && hors < 3) return;                     // peut-être un instant hors appel : on revérifie
       if (!parti && ec) {
         parti = Date.now();
         this.log('Appel parti : je reviens à l\'écran (l\'appel continue dans la voiture)', true);
         setTimeout(() => pont('revenir'), 1500);
       } else if (parti && !ec) {
-        fin(); this.log(`Appel fini après ${Math.round((Date.now() - parti) / 1000)} s`, true);
+        fin(); this.log(`Appel fini après ${Math.round((Date.now() - parti) / 1000) - 2} s`, true);
         if (pont('premierPlan') === false) pont('revenir');
         this._backFromCall();
       } else if ((!parti && dt > 90000) || dt > 2 * 3600000) {
@@ -3800,6 +3809,22 @@ Nous sommes ${fmtDate()}.${nv}`;
     this.log(`Retour d'appel après ${Math.round(dt / 1000)} s : je propose le compte rendu`);
     setTimeout(() => { if (this.state === 'veille' || this.state === 'dodo') this.startConversation('apres_appel'); }, 1200);
   }
+  // Journal du 24/11/26, 17h39:22-17h39:38 (voiture) : Wilson s'est réveillé pour proposer le compte rendu de l'appel ; Timothée a
+  // touché l'écran 2 s après, avant qu'il ait parlé : discussion finie, et au toucher suivant (« Oui, tu allais dire quelque
+  // chose ? ») Wilson a répondu « Non, je t'écoute ». Ce qu'il allait proposer est gardé 3 min et donné au toucher suivant.
+  _propAppelNote(reason) { this._propAppel = { reason, call: reason === 'apres_appel' ? (this._lastCall || null) : null, conv: this.convId, at: Date.now() }; }
+  _propAppelGardee() {
+    const PA = this._propAppel; if (!PA || PA.conv != null) return null;
+    this._propAppel = null;
+    return Date.now() - PA.at < 3 * 60000 ? PA : null;
+  }
+  _propAppelTexte(PA) {
+    const nom = PA.call && PA.call.nom ? ` avec ${PA.call.nom}${PA.call.societe ? ' (' + PA.call.societe + ')' : ''}` : '';
+    const quoi = PA.reason === 'apres_appel' ? `lui demander s'il veut te dicter le compte rendu de son appel${nom}`
+      : `lui proposer de reprendre là où vous en étiez, après la coupure du téléphone${this.crm.on ? ' (et de noter un compte rendu si c\'était l\'appel d\'un client)' : ''}`;
+    this.log('Toucher : ce que j\'allais lui proposer après l\'appel est donné à Gemini');
+    return `[Timothée vient de toucher l'écran pour te parler. Juste avant, tu allais ${quoi}, mais il a touché l'écran avant que tu aies parlé. Dis seulement « Oui ? » et écoute. S'il te demande ce que tu allais dire, ou s'il n'a rien de précis à te demander, propose-le-lui en une phrase.]`;
+  }
   _apresAppelTexte() {
     const c = this._lastCall || {};
     return `[Timothée vient de raccrocher avec ${c.nom || 'un client'}${c.societe ? ' (' + c.societe + ')' : ''}. Demande-lui en une phrase s'il veut te dicter le compte rendu de l'appel ; s'il le fait, prépare-le comme compte rendu d'appel.]`;
@@ -3828,6 +3853,14 @@ Nous sommes ${fmtDate()}.${nv}`;
     // une écriture en attente doit être relue de nouveau : aucun « oui » d'avant (ou de pendant) l'appel ne compte
     if (p && p.call) { p.call = false; p.at = performance.now(); p.atMs = Date.now(); p.turn = this._turnN; }
     if (this._callAfter) { this._backFromCall(); return; }            // appel lancé par Wilson : il propose le compte rendu
+    // Journal du 24/11/26, 17h38:22-17h39:22 : la proposition du compte rendu (appel lancé par Wilson) a été coupée par le
+    // téléphone avant d'être dite ; au retour, elle était devenue « on reprend où on en était ? », sans le nom du client.
+    const PA = this._propAppel;
+    if (PA && PA.conv == null && PA.reason === 'apres_appel' && s >= 8 && s <= 2 * 3600) {
+      this._propAppel = null; if (PA.call) this._lastCall = PA.call;
+      this.log('Fin de l\'appel : je repropose le compte rendu');
+      this.startConversation('apres_appel'); return;
+    }
     if (!P.conv || s > 2 * 3600) return;
     this._afterCall = { s, pending: !!p };
     this.startConversation(s >= 8 ? 'apres_appel_entrant' : 'reprise', { handle: P.handle });
