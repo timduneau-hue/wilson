@@ -203,6 +203,19 @@ export function annonceGuidage(t) {
   });
 }
 
+// Journal du 25/11/26, 20h39:50 (tablette) : « Allume la grande lumière. » → « C'est allumé. » sans aucun appel à
+// maison_commande (sa réponse de 17h12 recopiée) : rien n'avait été allumé. Une demande pour la maison, et une action dite faite.
+export function demandeMaison(t) {
+  const x = plat(t);
+  return /\b(allume|allumer|eteins|eteint|eteindre|ferme|fermer|ouvre|ouvrir|monte|monter|baisse|baisser|coupe|couper|mets|mettre|lance|lancer|arrete|arreter)\b/.test(x)
+    && /\b(lumieres?|lampes?|lumiere|salon|cuisine|chambre|tele|television|radio|volets?|stores?|chauffage|clim|musique|enceintes?|prises?|netflix|youtube|(le|du) son|volume)\b/.test(x);
+}
+export function annonceMaisonFaite(t) {
+  const x = plat(t);
+  if (/\?\s*$/.test(String(t || '').trim())) return false;
+  return /\b(c'est (bien |deja )?(allume|allumee|allumees|eteint|eteinte|eteintes|ferme|fermes|fermee|ouvert|ouverts|ouverte|lance|lancee|baisse|monte|coupe|fait)|j'ai (bien )?(allume|eteint|ferme|ouvert|lance|baisse|monte|coupe|mis)|(lumiere|lampe|tele|radio)s? (est|sont) (allumee?s?|eteinte?s?))\b/.test(x);
+}
+
 // Ce qui, dans sa bouche, affirme un fait du CRM (même sans nom propre ni chiffre).
 export function affirmeFait(t) {
   return /\b(je vois|j'ai trouve|il y a|tu as (un|une|des|deux|trois|\d)|j'ai (ajoute|note|enregistre|mis|indique|marque|cree)|c'est (note|fait|enregistre|ajoute)|derniere (visite|commande)|dernier (devis|rendez-vous)|son (numero|telephone|adresse)|leur (numero|adresse)|ses contacts?|le contact|la visite (de|du|d')|a commande|ont commande|a achete|ont achete)\b/.test(plat(t));
@@ -212,6 +225,8 @@ export function affirmeFait(t) {
 const COMMUNS = new Set(['je', 'tu', 'il', 'elle', 'on', 'nous', 'vous', 'ils', 'elles', 'oui', 'non', 'ok', 'okay', 'd\'accord', 'bon', 'bien', 'alors', 'pour', 'par', 'avec', 'dans', 'sur', 'et', 'ou', 'mais', 'donc', 'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'au', 'aux', 'ce', 'cette', 'ces', 'c\'est', 'il y a', 'merci', 'pardon', 'désolé', 'desole', 'attends', 'voilà', 'voila',
   'crm', 'gps', 'sms', 'wilson', 'timothée', 'timothee', 'camille', 'louis', 'boschat', 'laveix', 'negos', 'google', 'maps', 'waze', 'android', 'auto', 'gemini', 'claude', 'internet', 'bluetooth',
   'monsieur', 'madame', 'mme', 'mr', 'm', 'mlle', 'sarl', 'sas', 'eurl', 'sa', 'ets', 'sci', 'ttc', 'ht', 'eur', 'euros', 'france',
+  // journal du 25/11/26, 10h07:33 : « … à Saint Jean des Bois » (le CRM écrit « ST JEAN DES BOIS ») coupé pour « Saint » inventé
+  'saint', 'sainte', 'st', 'ste',
   'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche', 'janvier', 'février', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'aout', 'septembre', 'octobre', 'novembre', 'décembre', 'decembre']);
 
 // Les noms propres d'une phrase de Wilson (transcription de sa voix) : mots à majuscule au milieu d'une phrase, ou en capitales.
