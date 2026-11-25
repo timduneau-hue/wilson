@@ -280,6 +280,33 @@ async def main():
         check('… et la même question passée par crm_question : annuaire aussi, sans IA', ok and 'M MOREAU Yoann (Responsable magasin)' in r and len(st['claude']) == ncl and 'arrière-plan' not in r, r[:200])
         parle(c, "Le responsable magasin est Yoann Moreau.", sec=0.6); await page.wait_for_timeout(700)
 
+        # ---------- 8 bis. Sa propre société et ses collègues (remarques du 25/11/26, en voiture) ----------
+        # « Boschat Laveix » cherché parmi les clients : deux clients au nom proche proposés, l'adresse de l'ADV jamais trouvée.
+        # Le CRM envoie maintenant ses collègues et lui-même (10e colonne « interne »). Noms et adresses inventés.
+        NOUS = [['BROSSARD', 'M BROSSARD Aurélien', 'Gérant', 'C4000001', 'Clisson', '44190 Clisson', '02 40 00 00 07', '', ''],
+                ['Boschat Laveix', 'Prénom NOM-DE-TIMOTHEE', 'Commercial itinérant, Timothée lui-même', '', '', '', '', 'courriel-pro-de-timothee', '', 'interne'],
+                ['Boschat Laveix', 'MARTEAU Aurélien', 'ADV Cholet', '', '', '', '', 'courriel-adv-1', '', 'interne']]
+        await page.evaluate("(l) => { window.__d = [wilson.crm.dernier, wilson.crm.last, wilson.crm.dernierChoix]; wilson.crm.annuaire.charger({ ok: true, contacts: l, le: '25/11/2026 09h40' }); }", ANNUAIRE + NOUS)
+        n0 = len(st['calls'])
+        await demande(c, "Est-ce que tu peux l'envoyer directement à Aurélien, l'ADV qui travaille chez Boschat Laveix ?")
+        outil(c, 'crm_contacts', {'client': 'Boschat Laveix'}, 'bl1')
+        ok = await attendre(lambda: resp(c, 'bl1') is not None, 5)
+        r = resp(c, 'bl1') or ''
+        check('crm_contacts « Boschat Laveix » : sa société (pas deux clients au nom proche), collègues avec leur e-mail et son adresse pro (25/11/26)',
+              ok and 'PAS un client' in r and 'courriel-adv-1' in r and 'courriel-pro-de-timothee' in r and 'Plusieurs clients' not in r and 'BROSSARD' not in r, r[:400])
+        check('… l\'outil le dit à Gemini (e-mails, collègues, adresse pro)', any(f['name'] == 'crm_contacts' and 'Boschat Laveix' in f['description'] and 'adresse e-mail professionnelle' in f['description'] for t in c['setup']['tools'] for f in t.get('functionDeclarations', [])))
+        outil(c, 'crm_client', {'client': 'Boschat Laveix'}, 'bl2')
+        ok = await attendre(lambda: resp(c, 'bl2') is not None, 5)
+        r = resp(c, 'bl2') or ''
+        check('crm_client « Boschat Laveix » : la liste des collègues, sans demander une fiche client au CRM', ok and 'PAS un client' in r and 'courriel-adv-1' in r
+              and not any(x.get('action') == 'crm_client' for x in st['calls'][n0:]), f'{r[:300]} {[x.get("action") for x in st["calls"][n0:]]}')
+        outil(c, 'crm_noter', {'type': 'compte_rendu', 'client': 'Boschat Laveix', 'contact': 'Aurélien', 'texte': 'Appel.'}, 'bl3')
+        ok = await attendre(lambda: resp(c, 'bl3') is not None, 5)
+        r = resp(c, 'bl3') or ''
+        check('… et rien ne se prépare dans le CRM pour un collègue (pas de fiche client)', ok and "c'est sa société" in r and 'Aurélien Marteau est un collègue' in r and 'Je l\'enregistre' not in r, r[:300])
+        await page.evaluate("(l) => { wilson.crm.annuaire.charger({ ok: true, contacts: l, le: '12/11/2026 08h40' }); [wilson.crm.dernier, wilson.crm.last, wilson.crm.dernierChoix] = window.__d; wilson.crm.pending = null; }", ANNUAIRE)
+        parle(c, "Aurélien Marteau, l'ADV de Cholet, a une adresse dans le CRM.", sec=0.6); await page.wait_for_timeout(700)
+
         # ---------- 9. Le compte rendu, au nom de la bonne personne ----------
         await demande(c, 'Je viens de rencontrer Yohan Moreau. Tu peux noter que le client cherche des vis de rechange.')
         outil(c, 'crm_noter', {'type': 'compte_rendu', 'client': 'Yohan Moreau', 'texte': 'Visite. Le client cherche des vis de rechange.'}, 'n1')

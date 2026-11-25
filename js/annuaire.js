@@ -130,11 +130,12 @@ export class Annuaire {
   constructor({ stockage = null, log = () => {} } = {}) {
     this.log = log; this.groupes = []; this.n = 0; this.at = 0; this.le = '';
     this.stockage = stockage || { lire: (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } }, ecrire: (k, v) => ecrireLocal(k, v) };
-    try { const o = JSON.parse(this.stockage.lire(CLE_ANNUAIRE) || 'null'); if (o && Array.isArray(o.contacts)) this._construire(o.contacts, o.at || 0, o.le || ''); } catch (_) {}
+    // ancien : gardé avant la 1.45.31 (sans ses collègues) → relu une fois tout de suite, sans attendre 6 h
+    try { const o = JSON.parse(this.stockage.lire(CLE_ANNUAIRE) || 'null'); if (o && Array.isArray(o.contacts)) { this._construire(o.contacts, o.at || 0, o.le || ''); this.ancien = !(o.v >= 2); } } catch (_) {}
   }
   get pret() { return this.groupes.length > 0; }
   age(maintenant = Date.now()) { return this.at ? maintenant - this.at : Infinity; }
-  aRelire(maintenant = Date.now()) { return this.age(maintenant) > ANNUAIRE_MAX_MS; }
+  aRelire(maintenant = Date.now()) { return !!this.ancien || this.age(maintenant) > ANNUAIRE_MAX_MS; }
   // « (annuaire du CRM de 8h40) », dit seulement quand il est vieux.
   date() { const d = new Date(this.at); return this.at ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} à ${d.getHours()}h${String(d.getMinutes()).padStart(2, '0')}` : ''; }
 
@@ -143,19 +144,20 @@ export class Annuaire {
     if (!r || !r.ok || !Array.isArray(r.contacts)) return false;
     const lignes = r.contacts.filter((l) => Array.isArray(l) && String(l[1] || '').trim());
     if (!lignes.length) return false;
-    this._construire(lignes, maintenant, String(r.le || ''));
-    const texte = JSON.stringify({ v: 1, at: this.at, le: this.le, contacts: lignes });
+    this._construire(lignes, maintenant, String(r.le || '')); this.ancien = false;
+    const texte = JSON.stringify({ v: 2, at: this.at, le: this.le, contacts: lignes });
     if (texte.length < 3000000) this.stockage.ecrire(CLE_ANNUAIRE, JSON.parse(texte)); else this.log(`Annuaire trop gros pour être gardé sur l'appareil (${Math.round(texte.length / 1000)} ko) : relu à chaque démarrage`);
     return true;
   }
   _construire(lignes, at, le) {
     const G = new Map();
     for (const l of lignes) {
-      const [societe, contact, fonction, code, ville, adresse, tel, mail, visite] = l.map((x) => String(x == null ? '' : x).trim());
+      // interne (10e colonne, 25/11/26) : sa propre société, ses collègues et lui-même — pas des clients
+      const [societe, contact, fonction, code, ville, adresse, tel, mail, visite, interne] = l.map((x) => String(x == null ? '' : x).trim());
       if (!contact) continue;
-      const id = code || 'S:' + (motsNom(societe).join('') || plat(societe) || plat(contact));
+      const id = (interne ? 'I:' : '') + (code || 'S:' + (motsNom(societe).join('') || plat(societe) || plat(contact)));
       let g = G.get(id);
-      if (!g) { g = { id, societe: societe || contact, code, ville: '', adresse: '', ms: motsNom(societe || contact), contacts: [] }; g.forts = g.ms.filter((t) => !FAIBLES.has(t) && t.length >= 2); g.compact = g.ms.join(''); G.set(id, g); }
+      if (!g) { g = { id, societe: societe || contact, code, ville: '', adresse: '', ms: motsNom(societe || contact), contacts: [], interne: !!interne }; g.forts = g.ms.filter((t) => !FAIBLES.has(t) && t.length >= 2); g.compact = g.ms.join(''); G.set(id, g); }
       if (!g.adresse && adresse) { g.adresse = adresse; g.ville = ville; }
       g.contacts.push({ nom: contact, fonction, tel, mail, visite, adresse, ville, societe: societe || contact, cle: cleContact(contact, societe), mc: motsNom(contact), mf: motsNom(fonction) });
     }
@@ -263,8 +265,10 @@ export class Annuaire {
   // Comment nommer un client à voix haute, et le texte de ses contacts pour Gemini.
   qui(g, contact = null) { return `${g.societe}${g.ville && plat(g.ville) !== plat(g.societe) && !plat(g.ville).includes(plat(g.societe)) ? ' à ' + g.ville : g.ville ? ' (' + g.ville + ')' : ''}${contact ? `, ${nomDit(contact.nom)}${contact.fonction ? ' (' + contact.fonction + ')' : ''}` : ''}`; }
   texte(g, { contact = null, mails = false } = {}) {
-    const un = (c) => `${c.nom}${c.fonction ? ' (' + c.fonction + ')' : ''}${c.tel ? ', tél. ' + c.tel : ''}${mails && c.mail ? ', ' + c.mail : ''}`;
-    const L = [`Client : ${g.societe}${g.code ? ' (compte ' + g.code + ')' : ''}${g.ville ? ', ' + g.ville : ''}`];
+    // sa propre société (25/11/26) : ses collègues avec leur e-mail, et son adresse pro, toujours
+    const un = (c) => `${c.nom}${c.fonction ? ' (' + c.fonction + ')' : ''}${c.tel ? ', tél. ' + c.tel : ''}${(mails || g.interne) && c.mail ? ', ' + c.mail : ''}`;
+    const L = [g.interne ? `${g.societe} : la société de Timothée, PAS un client (pas de fiche, ni visites ni chiffres). Ses collègues enregistrés dans le CRM, et lui-même (son adresse e-mail professionnelle) :`
+      : `Client : ${g.societe}${g.code ? ' (compte ' + g.code + ')' : ''}${g.ville ? ', ' + g.ville : ''}`];
     if (g.adresse) L.push('Adresse : ' + g.adresse);
     if (contact) L.push('La personne dont il parle : ' + un(contact));
     L.push(`Contacts (${g.contacts.length}) : ` + g.contacts.slice(0, 14).map(un).join(' ; ') + (g.contacts.length > 14 ? ' ; …' : ''));

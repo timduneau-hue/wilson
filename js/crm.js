@@ -180,7 +180,7 @@ export const CRM_TOOLS = [
     description: "Tout ce que le CRM de Timothée sait d'un client (société ou contact, même mal prononcé, avec la ville si elle aide) : contacts et téléphones, prochain rendez-vous, sujets à voir au rendez-vous et tâches en retard (« À SIGNALER »), tout l'historique des visites et des échanges (comptes rendus de visites, d'appels et d'e-mails), tâches à faire et faites, chiffre d'affaires (exercice, mois en cours, comparaison avec l'an dernier), commandes, devis, articles achetés, réachats en retard, achats chez les concurrents, articles à proposer. Avant de l'appeler, dis « Je regarde dans le CRM… ».",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'le nom de la société ou du contact, tel que Timothée l\'a dit' } }, required: ['client'] } },
   { name: 'crm_contacts', behavior: 'BLOCKING',
-    description: "Les contacts d'un client, TOUT DE SUITE (annuaire du CRM gardé sur l'appareil, sans attente) : qui est le magasinier, l'acheteur, le dirigeant…, le nom de quelqu'un, sa fonction, son numéro de téléphone, l'adresse ou la ville de la société. Pour « qui est… chez X », « c'est quoi le numéro de… », « comment s'appelle… », « où est… » : cet outil, pas crm_question. Pour tout le reste (visites, comptes rendus, tâches, échanges, chiffres, commandes, devis) : crm_client ou crm_question.",
+    description: "Les contacts d'un client, TOUT DE SUITE (annuaire du CRM gardé sur l'appareil, sans attente) : qui est le magasinier, l'acheteur, le dirigeant…, le nom de quelqu'un, sa fonction, son numéro de téléphone, son adresse e-mail, l'adresse ou la ville de la société. Aussi ses collègues de Boschat Laveix (ADV…, même par le seul prénom) avec leur e-mail, et sa propre adresse e-mail professionnelle : client = « Boschat Laveix » ou le prénom du collègue. Pour « qui est… chez X », « c'est quoi le numéro de… », « comment s'appelle… », « où est… » : cet outil, pas crm_question. Pour tout le reste (visites, comptes rendus, tâches, échanges, chiffres, commandes, devis) : crm_client ou crm_question.",
     parameters: { type: 'OBJECT', properties: { client: { type: 'STRING', description: 'la société ou la personne, tel que Timothée l\'a dit' } }, required: ['client'] } },
   { name: 'crm_agenda', behavior: 'BLOCKING',
     description: "Rendez-vous et tâches d'un jour dans le CRM (« qui je vois aujourd'hui », « ma journée de demain », « jeudi »).",
@@ -411,6 +411,8 @@ export class Crm {
     if (!cle && !parCrm && this.annuaire.pret) {
       const Q = await this._qui(client, signal);
       if (Q.dire) return { ok: true, texte: Q.dire, choix: Q.choix || [] };
+      // sa propre société, un collègue (25/11/26) : pas de fiche client à demander au CRM, la liste de l'annuaire suffit
+      if (Q.soc.g && Q.soc.g.interne) return { ok: true, texte: this.annuaire.texte(Q.soc.g, { contact: Q.contact && Q.soc.g.contacts.find((c) => c.cle === Q.contact.cle) }) };
       if (Q.e) return { ok: true, e: Q.e, approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact };
       const garde = this._ficheDeSociete(Q.soc.societe);
       if (garde && this._utilisable(garde)) { this.last = garde; this.lastAt = Date.now(); this.log(`fiche gardée : ${garde.societe}`); return { ok: true, e: garde, cached: true, approx: !Q.sur, parmi: Q.parmi || '', contactDit: Q.contact }; }
@@ -517,10 +519,12 @@ export class Crm {
   async contacts({ client = '' } = {}, signal) {
     const Q = await this._qui(client, signal);
     if (Q.dire) return { ok: false, dire: Q.dire };
-    const S = Q.soc, un = (c) => `${c.nom}${c.fonction ? ' (' + c.fonction + ')' : ''}${c.tel ? ', tél. ' + c.tel : ''}`;
+    // 25/11/26 (remarque de Timothée : « je voudrais que tu puisses chercher n'importe quelle adresse dans le CRM ») : les
+    // adresses e-mail des contacts sont données aussi (avant : seulement le téléphone, l'adresse e-mail restait introuvable).
+    const S = Q.soc, un = (c) => `${c.nom}${c.fonction ? ' (' + c.fonction + ')' : ''}${c.tel ? ', tél. ' + c.tel : ''}${c.mail ? ', ' + c.mail : ''}`;
     const avant = Q.parmi ? `(${Q.parmi} J'ai pris ${S.societe}, celui dont vous parliez : commence par ce nom et demande-lui si c'est bien lui.)\n`
       : !Q.sur ? `(Nom entendu : « ${client} » ; j'ai trouvé ${S.societe}${S.ville ? ', ' + S.ville : ''}. Commence ta réponse par ce nom, pour qu'il puisse te corriger.)\n` : '';
-    const texte = S.g ? this.annuaire.texte(S.g, { contact: Q.contact && S.g.contacts.find((c) => c.cle === Q.contact.cle) })
+    const texte = S.g ? this.annuaire.texte(S.g, { contact: Q.contact && S.g.contacts.find((c) => c.cle === Q.contact.cle), mails: true })
       : [`Client : ${S.societe}${S.ville ? ', ' + S.ville : ''}`, S.adresse ? 'Adresse : ' + S.adresse : '', Q.contact ? 'La personne dont il parle : ' + un(Q.contact) : '', `Contacts (${S.contacts.length}) : ` + S.contacts.slice(0, 14).map(un).join(' ; ')].filter(Boolean).join('\n');
     return { ok: true, texte: avant + texte, soc: S, contact: Q.contact };
   }
@@ -538,6 +542,9 @@ export class Crm {
       // plusieurs clients possibles : il répond souvent par le nom de la personne (journal du 19/11/26, 17h11:19 et 17h11:30)
       if (Q.dire) return { ok: false, dire: Q.dire + (Q.choix && Q.choix.length ? ' S\'il te répond par le nom d\'une personne, ce n\'est pas qu\'il parle mal : rappelle crm_noter avec ce nom en contact et le client tel qu\'il l\'a dit, je prendrai la société où elle travaille.' : '') };
       const S = Q.soc; let c = Q.contact || null; nbContacts = S.contacts.length;
+      // un collègue ou sa propre société (25/11/26) : le CRM n'a pas de fiche client où l'écrire
+      const col = S.g && S.g.interne ? c || (a.contact ? personneParmi(S.contacts, a.contact).contact : null) : null;
+      if (S.g && S.g.interne) return { ok: false, dire: `${S.societe}, c'est sa société : ${col ? nomDit(col.nom) + ' est un collègue, pas' : 'pas'} un client, le CRM n'a pas de fiche où l'écrire. Pour une tâche personnelle, rappelle crm_noter sans client, avec le nom du collègue dans le texte ; sinon demande-lui de quel client il s'agit, sans rien préparer.` };
       if (a.contact && a.client && !libre) {
         const P = personneParmi(S.contacts, a.contact);
         if (P.contact) c = P.contact;
