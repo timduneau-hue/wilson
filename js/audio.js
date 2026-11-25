@@ -405,8 +405,12 @@ export class AudioIO {
   // Coupe la FIN de ce qui reste à jouer (les `sec` dernières secondes, si elles ne sont pas encore commencées) : la question
   // de trop à la fin d'une réponse (« Autre chose ? »). Ce qui est en train d'être dit n'est jamais coupé au milieu d'un mot
   // déjà lancé. Rend le nombre de secondes retirées.
+  // Remarque de Timothée du 25/11/26, 17h16 (« la dernière phrase a été coupée ») : quand la coupe voulue était déjà passée
+  // (la question avait commencé à être dite), on coupait quand même « maintenant », en plein mot (« De rien ! Tu as b… »).
+  // Une question déjà commencée n'est plus coupée : elle finit (rend 0, « trop tard pour la couper »).
   couperFin(sec) {
-    const now = this.ctx.currentTime, depuis = Math.max(this.nextTime - sec, now + 0.05);
+    const now = this.ctx.currentTime, cible = this.nextTime - sec, depuis = Math.max(cible, now + 0.05);
+    if (cible < now - 0.02) return 0;
     if (!(this.nextTime > depuis)) return 0;
     let ote = 0;
     // 16/11/26 : le morceau à cheval sur la coupe est arrêté pile à la coupe (stop programmé), plus gardé en entier.

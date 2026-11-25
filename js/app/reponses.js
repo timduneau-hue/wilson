@@ -417,6 +417,14 @@ export class ReponsesMethodes {
     let t0 = T.joue; for (const [a, r] of T.held) { segs.push({ t0, f: a, r, i16: true }); t0 += a.length / r; }
     const silence = this._tropSilence(segs, coupe);
     if (silence != null) coupe = silence;
+    // Remarque de Timothée du 25/11/26, 17h16 (« la dernière phrase a été coupée ») : le texte de la question arrive parfois
+    // quand sa voix est déjà en train de la dire ; la couper là, c'était couper en plein mot. Déjà commencée : elle finit.
+    const ctx = this.audio.ctx, enFileSec = ctx ? Math.max(0, (this.audio.nextTime || 0) - ctx.currentTime) : 0;
+    if (coupe < T.joue - enFileSec - 0.02) {
+      this._tropJouer(Infinity); T.held = []; T.heldSec = 0;
+      this.log(`Question de trop à la fin de sa réponse (« ${T.trop} ») : trop tard pour la couper (déjà commencée : dite en entier, jamais coupée en plein mot)`, true);
+      return;
+    }
     let ote = 0;
     if (coupe < T.joue) ote = this.audio.couperFin(T.joue - coupe);   // le son était en avance sur le texte : fin déjà en file
     this._tropJouer(coupe);
@@ -442,6 +450,18 @@ export class ReponsesMethodes {
       if (!best || s < best.s || (s === best.s && Math.abs(t - cible) < Math.abs(best.t - cible))) best = { t, s };
     }
     return best ? best.t : null;
+  }
+  // Journal du 25/11/26, 20h39:50 (tablette) : « Allume la grande lumière. » → « C'est allumé. Au fait… » (sa réponse de 17h12
+  // recopiée) sans aucun appel à maison_commande : rien n'était allumé. Une action de la maison dite faite sans aucun outil
+  // depuis 15 s : il doit la faire pour de bon, tout de suite (une fois par demande).
+  _maisonSansOutil(user, wilson) {
+    if (!this.maison || !this.maison.on || !VP.demandeMaison(user) || !VP.annonceMaisonFaite(wilson)) return false;
+    const now = performance.now();
+    if (now - (this._toolAt || 0) < 15000 || now - (this._maisonForceAt || 0) < 30000) return false;
+    this._maisonForceAt = now;
+    this.log(`Maison : « ${wilson.slice(0, 60)} » dit sans avoir rien commandé (aucun outil) — je lui fais faire pour de bon`, true);
+    this.brain.sendText(`[ATTENTION : tu viens de dire que c'était fait, mais tu n'as appelé AUCUN outil : RIEN n'a été fait dans la maison. Appelle maintenant maison_commande pour sa demande (« ${String(user).slice(0, 160)} »), sans rien dire avant, puis dis seulement le résultat en quelques mots.]`);
+    return true;
   }
   _travailRecent() { return !!this._travailAt && this._travailConv === this.convId && performance.now() - this._travailAt < 120000; }   // même discussion, 2 min
 

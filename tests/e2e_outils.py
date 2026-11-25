@@ -201,6 +201,8 @@ async def main():
         await page.evaluate("wilson.outils.fermer()")
         nv = await page.evaluate("(localStorage.removeItem('wilson.nouveautesDites'), wilson.settings.nvDites = '', wilson._lireNouveautes()).then(() => [wilson._system(), wilson._system()])")
         check('Nouveautés de version.json dans la consigne, à dire une seule fois (G3)', 'Ta dernière mise à jour' in nv[0] and 'première discussion depuis' in nv[0] and 'première discussion depuis' not in nv[1], nv[0][-400:])
+        check('… ensuite : « déjà racontées, ne les redis jamais de toi-même » ; derniers échanges = discussions passées (journal du 25/11/26, 20h39)',
+              'Tu les as déjà racontées' not in nv[0] and 'ne les redis jamais de toi-même' in nv[1] and 'discussions PASSÉES' in nv[1] and 'appelle l\'outil à chaque fois' in nv[1], nv[1][-500:])
         check('Aucune erreur JavaScript', not any(l.startswith('PAGEERROR') for l in logs), str([l for l in logs if l.startswith('PAGEERROR')]))
         await ctx.close(); await b.close()
     print(f'\n{sum(results)}/{len(results)} OK'); raise SystemExit(0 if all(results) else 1)

@@ -119,6 +119,51 @@ async def main():
             coupe = [l for l in logs[n:] if 'Question de trop' in l]
             check(f'Question de trop, {nom} : phrase d\'avant jouée en entier ({d1:.1f} s), question jamais ({joue:.2f} s jouées)',
                   coupe and 'phrase d\'avant dite en entier' in coupe[0] and d1 - 0.05 <= joue <= d1 + pause + 0.1, f'{joue:.2f} s {coupe} {logs[n:][-6:]}')
+        # Remarque de Timothée du 25/11/26, 17h16 (« la dernière phrase a été coupée ») : texte de la question reçu quand sa
+        # voix la disait déjà → elle n'est plus coupée en plein mot (« Tu as b… »), elle est dite jusqu'au bout.
+        await page.wait_for_function('!wilson.audio.playing', timeout=15000); await page.wait_for_timeout(1200)
+        await page.evaluate("window.__parle(900)"); await page.wait_for_timeout(950)
+        conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Pourquoi la voiture ne chauffait pas ?'}}}))
+        n = len(logs); j0 = await page.evaluate('wilson.audio.playedSec')
+        envoi_audio(pcm)
+        await page.wait_for_timeout(int((d1 + pause + 0.5) * 1000))     # la question est commencée depuis 0,5 s
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': phrase + question}}}))
+        await page.wait_for_timeout(150)
+        conn['ws'].send(json.dumps({'serverContent': {'turnComplete': True}}))
+        await page.wait_for_timeout(400)
+        joue = (await page.evaluate('wilson.audio.playedSec')) - j0
+        coupe = [l for l in logs[n:] if 'Question de trop' in l]
+        check(f'Question de trop déjà commencée (remarque du 25/11/26, 17h16) : dite jusqu\'au bout, jamais coupée en plein mot ({joue:.2f} s jouées sur {d1 + pause + d2:.2f} s)',
+              coupe and 'trop tard pour la couper' in coupe[0] and joue >= d1 + pause + d2 - 0.05, f'{joue:.2f} s {coupe} {logs[n:][-6:]}')
+        await page.wait_for_function('!wilson.audio.playing', timeout=15000)
+
+        # Journal du 25/11/26, 20h39:50 : « Allume la grande lumière. » → « C'est allumé. » sans maison_commande (rien d'allumé)
+        await page.evaluate("() => { Object.defineProperty(wilson.maison, 'on', { get: () => true, configurable: true }); wilson._toolAt = 0; wilson._maisonForceAt = 0; }")
+        await page.wait_for_timeout(1200)
+        await page.evaluate("window.__parle(900)"); await page.wait_for_timeout(950)
+        n = len(logs); t0 = len(conn['texts'])
+        conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Allume la grande lumière.'}}}))
+        envoi_audio(voix(0.8))
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': "C'est allumé."}}}))
+        await page.wait_for_timeout(150)
+        conn['ws'].send(json.dumps({'serverContent': {'turnComplete': True}}))
+        await attendre(lambda: len(conn['texts']) > t0, 3.0)
+        force = [x for x in conn['texts'][t0:] if "RIEN n'a été fait dans la maison" in x]
+        check('« C\'est allumé » sans aucun outil (25/11/26, 20h39:50) : signalé, et il doit appeler maison_commande pour de bon',
+              force and 'maison_commande' in force[0] and 'Allume la grande lumière' in force[0] and any('dit sans avoir rien commandé' in l for l in logs[n:]), f'{conn["texts"][t0:]} {logs[n:][-5:]}')
+        # … mais pas quand l'outil a bien été appelé juste avant
+        await page.wait_for_function('!wilson.audio.playing', timeout=15000); await page.wait_for_timeout(600)
+        await page.evaluate("() => { wilson._toolAt = performance.now(); wilson._maisonForceAt = 0; }")
+        await page.evaluate("window.__parle(900)"); await page.wait_for_timeout(950)
+        n = len(logs); t0 = len(conn['texts'])
+        conn['ws'].send(json.dumps({'serverContent': {'inputTranscription': {'text': 'Éteins la télé.'}}}))
+        envoi_audio(voix(0.6))
+        conn['ws'].send(json.dumps({'serverContent': {'outputTranscription': {'text': "C'est éteint."}}}))
+        await page.wait_for_timeout(150)
+        conn['ws'].send(json.dumps({'serverContent': {'turnComplete': True}}))
+        await page.wait_for_timeout(800)
+        check('… mais rien quand maison_commande vient d\'être appelé', not any("RIEN n'a été fait dans la maison" in x for x in conn['texts'][t0:]) and not any('dit sans avoir rien commandé' in l for l in logs[n:]), str(conn['texts'][t0:]))
+        await page.evaluate("() => { delete wilson.maison.on; }")
         await page.wait_for_function('!wilson.audio.playing', timeout=15000)
 
         # ---------- 3. Sans Home Assistant sur l'appareil : il le dit, sans inventer ----------

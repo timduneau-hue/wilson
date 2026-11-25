@@ -229,5 +229,19 @@ for (const w of ['Tu veux que je le note ?', 'Pour quel client ?', "D'accord, je
 check("« j'ai un problème pour l'enregistrer, je vais le noter comme tâche » parle d'écrire", V.parleEcriture("Pardon, j'ai un problème pour l'enregistrer. Je vais le noter comme tâche, on est d'accord ?"));
 check('« Je viens de te le dire. » seul n\'est pas une écriture (c\'est ce que Wilson disait qui compte)', !V.estEcriture('Je viens de te le dire.'));
 
+// « Saint » pour « ST » du CRM (journal du 25/11/26, 10h07:33 : phrase coupée et « Pardon, je me suis trompé » pour rien)
+check('« Saint Jean des Bois » pour « ST JEAN DES BOIS » : rien d\'inventé', V.nomsInventes('Plusieurs clients possibles pour Monsieur Martin : MARTIN SARL à Saint Jean des Bois, ou Menuiserie Dubois. C\'est lequel ?', V.motsDe('Plusieurs clients possibles pour « Monsieur Martin » : MARTIN SARL à ST JEAN DES BOIS ; MENUISERIE DUBOIS. Ajoute une tâche euh pour Monsieur Martin.')).length === 0);
+check('… mais un vrai nom inventé reste repéré', V.nomsInventes('MARTIN SARL à Saint Jean des Bois, ou Menuiserie Rault.', V.motsDe('MARTIN SARL à ST JEAN DES BOIS ; MENUISERIE DUBOIS')).includes('Rault'));
+
+// Maison : action dite faite sans outil (journal du 25/11/26, 20h39:50 : « Allume la grande lumière. » → « C'est allumé. » sans maison_commande)
+for (const t of ['Allume la grande lumière.', 'Éteins la télé.', 'Mets la radio.', 'Ferme les volets du salon.', 'Baisse le son.'])
+  check(`demande pour la maison : « ${t} »`, V.demandeMaison(t));
+for (const t of ['Ajoute une tâche pour Monsieur Martin.', 'Quelle heure est-il ?', 'Ouvre la fiche de Dupont.', 'Super. Merci.'])
+  check(`pas une demande pour la maison : « ${t} »`, !V.demandeMaison(t));
+for (const w of ["C'est allumé. Au fait, je connais maintenant les e mails de tes collègues de Boschat Laveix et ton adresse pro.", "C'est éteint.", "J'ai allumé la grande lumière.", 'La télé est allumée.'])
+  check(`action de la maison dite faite : « ${w.slice(0, 50)} »`, V.annonceMaisonFaite(w));
+for (const w of ['Tu veux laquelle, la jaune ou la grande ?', "Je n'arrive pas à joindre la lumière.", 'Je regarde.', "C'est allumé ?"])
+  check(`pas une action de la maison dite faite : « ${w} »`, !V.annonceMaisonFaite(w));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

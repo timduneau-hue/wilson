@@ -37,7 +37,7 @@ import { EcranMethodes } from './app/ecran.js';
 import { OUTILS_VOITURE, appli, pont, VOITURE_QUITTE_MS, RE_CONSIGNE_FONDEE, MAJ_VERIF_MS, PREROLL_MS, VISAGE_ATTENTE_MS, SEG_GAP_MS, SEG_VU_MIN, TAIL_MS, TAIL_NOAEC_MS, TURN_GATE_MS, LOOK_GRACE_MS, REGARD_DIALOGUE_MS, LOOKED_IDLE_MS, VOITURE, APRES_OUTIL_MS, ATTENTE_GOOGLE_MS, ATTENTE_EXPLIQUE_MS, MICRO_RETENU_MS, REPONDS_APRES_MS, LENT_APRES_FORCE_MS, CAR_IDLE_MS, BYNAME_IDLE_MS, NAME_GATE_MS, ECO_TAIL_MS, pad, $, enAnglais, cleanSpeech, emotionDuTexte, realPhrase, shorten, isNetErr, concat } from './app/commun.js';
 export { emotionDuTexte, texteCompare, memeDebut } from './app/commun.js';
 
-const VERSION = '1.45.31';
+const VERSION = '1.45.32';
 
 class App {
   constructor() {
@@ -294,6 +294,10 @@ class App {
       try { this.settings.nvDites = VERSION; this.applySettings('nvDites'); } catch (_) {}
       t += ' C\'est ta première discussion depuis : après avoir répondu à ce qu\'on te demande, dis en une phrase courte ce qui a changé (une seule fois).';
       n.aDire = false; try { localStorage.setItem('wilson.nouveautesDites', VERSION); } catch (_) {}
+    } else if (!n.aDire) {
+      // Journal du 25/11/26 : nouveautés de la 1.45.31 dites à 17h12 sur la tablette, puis redites mot pour mot à 20h39 (copiées
+      // de ses derniers échanges), avec un « C'est allumé » sans avoir rien allumé. Déjà dites : plus jamais de lui-même.
+      t += ' Tu les as déjà racontées à Timothée : ne les redis jamais de toi-même, même si tes derniers échanges en parlent.';
     }
     return t;
   }
@@ -1045,6 +1049,7 @@ class App {
         return;
       }
       if (wilson) this._nvSuivi(wilson);
+      if (wilson && user) this._maisonSansOutil(user, wilson);   // « C'est allumé » sans rien commander (25/11/26, 20h39)
       if (wilson) this._lastTurnAt = performance.now();   // un tour muet (puis relance) ne compte pas : délai réellement ressenti
       // La suite d'une demande (outil) est dite : la permission donnée par l'outil s'arrête ; la prochaine phrase devra être
       // dite en le regardant (R1). Le toucher et les boutons gardent leurs 30 s.
