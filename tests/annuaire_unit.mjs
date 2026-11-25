@@ -109,5 +109,26 @@ check('« entreprise Bonnet », « Bonnais » → Bonnais en premier', g1('entre
 check('… mais pas « sûr » sur un nom seulement entendu (il fait confirmer)', !G.choisir('Bonnet').sur);
 check('« Laure Bonnel » → toujours Sofrelec', g1('Laure Bonnel') === 'SOFRELEC', g1('Laure Bonnel'));
 
+// --- 25/11/26 (téléphone en voiture) : « l'ADV de chez nous, Aurélien », « les adresses des contacts de Boschat Laveix »,
+// « mon adresse pro ». Avant : sa société était cherchée parmi les clients (deux clients au nom proche proposés). Le CRM
+// envoie maintenant ses collègues et lui-même, 10e colonne « interne ». Noms et adresses inventés.
+const I = new Annuaire({ stockage: { lire: () => null, ecrire: () => true } });
+I.charger({ ok: true, contacts: [
+  L('BROSSARD', 'M BROSSARD Aurélien', 'Gérant', 'C4000001', 'Clisson', '44190 Clisson', '02 40 00 00 07'),
+  L('BOURNAUD', 'M BOURNAUD Paul', '', 'C4000002', 'Vertou', '44120 Vertou'),
+  ['Boschat Laveix', 'Prénom NOM-DE-TIMOTHEE', 'Commercial itinérant, Timothée lui-même', '', '', '', '', 'courriel-pro-de-timothee', '', 'interne'],
+  ['Boschat Laveix', 'MARTEAU Aurélien', 'ADV Cholet', '', '', '', '', 'courriel-adv-1', '', 'interne'],
+  ['Boschat Laveix', 'LEGRAND Sophie', 'ADV Nantes', '', '', '', '', 'courriel-adv-2', '', 'interne'],
+] });
+const nous = I.choisir('Boschat Laveix');
+check('« Boschat Laveix » → sa société, sûr (pas deux clients au nom proche)', nous.un && nous.sur && nous.un.g.interne && nous.un.g.contacts.length === 3, JSON.stringify(nous.plusieurs ? nous.plusieurs.map((x) => x.g.societe) : nous));
+const tn = I.texte(nous.un.g);
+check('… texte : pas un client, collègues ET son adresse pro avec leur e-mail (même sans demande)', /PAS un client/.test(tn) && /courriel-adv-1/.test(tn) && /courriel-adv-2/.test(tn) && /courriel-pro-de-timothee/.test(tn) && !/Client : /.test(tn), tn);
+check('« Aurélien » chez sa société → l’ADV', (I.personne(nous.un.g, 'Aurélien').contact || {}).nom === 'MARTEAU Aurélien');
+check('Un client reste un client (pas « interne »), e-mails seulement sur demande', !I.choisir('Bournaud').un.g.interne && /^Client : /.test(I.texte(I.choisir('Bournaud').un.g)));
+check('Ancienne réponse du CRM (9 colonnes) : rien d’interne', A.groupes.every((g) => !g.interne));
+const av = new Annuaire({ stockage: { lire: () => JSON.stringify({ v: 1, at: Date.now() - 60000, contacts: CONTACTS }), ecrire: () => true } });
+check('Annuaire gardé avant la 1.45.31 (sans ses collègues) : utilisable, mais relu tout de suite (pas dans 6 h)', av.pret && av.aRelire() && av.charger({ ok: true, contacts: CONTACTS }) && !av.aRelire());
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

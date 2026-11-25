@@ -78,7 +78,7 @@ export class CrmMethodes {
       case 'crm_contacts': {                                                         // l'annuaire gardé sur l'appareil : immédiat
         const r = await C.contacts({ client: a.client || '' }, signal);
         if (!r.ok) return { info: r.dire };
-        return { info: `${r.texte}\n${a.question ? `Sa question : « ${String(a.question).slice(0, 200)} ». ` : ''}Réponds à sa question avec ces informations seulement (n'invente rien) : ${car ? 'une ou deux phrases très courtes, il conduit' : 'une à deux phrases'} ; dis les noms comme on les dit (« Jean Dupont », pas « M DUPONT Jean ») et un numéro chiffre par chiffre seulement s'il le demande. Ce qui n'y est pas (visites, commandes, chiffres) : crm_client ou crm_question.` };
+        return { info: `${r.texte}\n${a.question ? `Sa question : « ${String(a.question).slice(0, 200)} ». ` : ''}Réponds à sa question avec ces informations seulement (n'invente rien) : ${car ? 'une ou deux phrases très courtes, il conduit' : 'une à deux phrases'} ; dis les noms comme on les dit (« Jean Dupont », pas « M DUPONT Jean ») et un numéro chiffre par chiffre ou une adresse e-mail seulement s'il le demande. Ce qui n'y est pas (visites, commandes, chiffres) : crm_client ou crm_question.` };
       }
       case 'crm_agenda': return lu(await this._journee(a.jour, signal));
       case 'crm_bilan': {
@@ -718,7 +718,9 @@ export class CrmMethodes {
       return { echec: true, info: `REFUSÉ : ses e-mails sont privés, réservés à Timothée. Dis seulement : « ${dire} » Aucun contenu d'e-mail.`, dire };
     }
     if (!this.settings.mailsPro) boite = 'perso';
-    const r = await this._parClaude({ question: q, type: 'mail', boite, voiture: this.enVoiture, crm: true }, signal);
+    // 25/11/26 (« envoie-le à Aurélien, l'ADV de chez nous » : adresse « écrite nulle part ») : où sont les adresses de ses collègues
+    const contexte = "Adresses e-mail de ses collègues de Boschat Laveix (ADV…, souvent cités par le seul prénom) et la sienne, professionnelle : dans le CRM, fiche du client « Boschat Laveix » (crm_fiche_client), qui les liste. Ce ne sont pas des clients.";
+    const r = await this._parClaude({ question: q, type: 'mail', boite, voiture: this.enVoiture, crm: true, contexte }, signal);
     if (r.info) return r;
     const p = r.indispo || 'Claude, sur l\'ordinateur de la maison, n\'est pas relié sur cet appareil';
     return { echec: true, info: `Impossible de lire ses e-mails : ${p}. Dis-le simplement, sans rien inventer sur ses e-mails.`, dire: `Je ne peux pas lire tes e-mails pour le moment : ${p}.` };

@@ -111,14 +111,16 @@ async def main():
 
         # 7. E-mails pro coupés.
         r = await page.evaluate("""(async () => {
-          const W = wilson, demandes = [];
+          const W = wilson, demandes = [], ctx = [];
           W._crmAutorise = () => ({ ok: true });
-          W._parClaude = async (o) => { demandes.push(o.boite); return { info: 'ok' }; };
+          W._parClaude = async (o) => { demandes.push(o.boite); ctx.push(o.contexte || ''); return { info: 'ok' }; };
           const pro = await W._mails({ demande: 'mes derniers e-mails pro', boite: 'pro' });
           const deux = await W._mails({ demande: 'mes derniers e-mails' });
-          return { pro: !!pro.echec, demandes };
+          return { pro: !!pro.echec, demandes, ctx };
         })()""")
         check('E-mails : boîte pro coupée, « les deux » → Gmail perso seulement', r['pro'] and r['demandes'] == ['perso'], str(r))
+        # 25/11/26 : l'adresse de l'ADV (un collègue) « écrite nulle part » → Claude sait où sont celles de ses collègues et la sienne
+        check('E-mails : Claude sait où trouver les adresses de ses collègues et la sienne (fiche « Boschat Laveix » du CRM)', r['ctx'] and 'Boschat Laveix' in r['ctx'][0] and 'professionnelle' in r['ctx'][0], str(r))
 
         # 8. Résultat d'outil reçu : pas de veille avant qu'il soit dit.
         r = await page.evaluate("""(async () => {
