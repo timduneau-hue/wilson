@@ -54,7 +54,7 @@ await R.traiter(fileQ.shift());
 const rendu = envoyes.find((x) => x.action === 'claude_rendre');
 check('Relais : réponse rendue avec le secret, l\'id, ce qu\'il faut dire et la durée', rendu && rendu.secret === 'x'.repeat(40) && rendu.id === 'q1' && rendu.ok === true && /120/.test(rendu.dire) && rendu.etapes === 7 && typeof rendu.duree === 'number', JSON.stringify(rendu));
 const j = envoyes.find((x) => !x.action);
-check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 11 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
+check('Relais : question et réponse écrites dans le journal de Wilson', j && j.version === 'relais 12 · PC' && j.lignes.some((l) => /question reçue \(internet, en voiture\)/.test(l.m)) && j.lignes.some((l) => /réponse en \d+ s \(7 étape/.test(l.m)), JSON.stringify(j && j.lignes));
 check('Relais : plus rien en cours', R.enCours === 0);
 envoyes.length = 0;
 await R.traiter({ id: 'q2', type: 'internet', question: 'plante' });
@@ -81,7 +81,7 @@ const tours = (async () => { await new Promise((res) => setTimeout(res, 50)); R.
 await Promise.race([R.boucle(), new Promise((res) => setTimeout(res, 300))]); await tours;
 await new Promise((res) => setTimeout(res, 50));
 const pris = envoyes.find((x) => x.action === 'claude_prendre');
-check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 11');
+check('Relais : attend une question 25 s, avec son secret et sa version', pris && pris.attente === 25 && pris.secret === 'x'.repeat(40) && pris.version === 'relais 12');
 check('Relais : la question prise est traitée', envoyes.some((x) => x.action === 'claude_rendre' && x.id === 'q3'));
 
 // ---------- Lot 4 : arrêt de tout l'arbre (W15), limite signalée au script (W16), effort réduit (W16) ----------
@@ -125,6 +125,23 @@ check('Relais : la question prise est traitée', envoyes.some((x) => x.action ==
   const t0 = Date.now(); await R5.boucle();
   check('W15 : trois appels vides rapides → pauses croissantes (≥ 2 s puis ≥ 4 s)', pris2.length === 3 && pris2[1].t - pris2[0].t >= 1900 && pris2[2].t - pris2[1].t >= 3900, pris2.map((x) => x.t - t0).join(','));
   check('W16 : la limite en cours est envoyée au script à chaque appel', pris2.every((x) => x.limite && x.limite.texte === 'x'));
+}
+
+// Relais 12 (26/11/26) : script injoignable des heures durant, PC allumé (« fetch failed » toutes les 70 s, réglé seulement par un
+// redémarrage) → la cause est notée, et au bout de 10 min de suite le relais s'arrête pour être relancé par boucle.cmd.
+{
+  const lg = []; let code = null;
+  const fx = async () => { throw new TypeError('fetch failed', { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }); };
+  const R6 = new Relais({ config: { script: 'S', secret: 'x'.repeat(40) }, log: (m) => lg.push(m), fetchImpl: fx });
+  R6.koMaxMs = 0; R6.quitter = (c) => { code = c; };
+  await Promise.race([R6.boucle(), new Promise((res) => setTimeout(res, 2000))]);
+  check('Relais 12 : « fetch failed » noté avec sa cause (UND_ERR_CONNECT_TIMEOUT)', lg.some((m) => /fetch failed \(UND_ERR_CONNECT_TIMEOUT\)/.test(m)), lg.join(' | ').slice(0, 300));
+  check('Relais 12 : script injoignable trop longtemps → le relais s\'arrête (code 0 : boucle.cmd le relance)', code === 0 && R6.stop && lg.some((m) => /je redémarre/.test(m)), String(code));
+  const lg2 = []; let code2 = null;
+  const R7 = new Relais({ config: { script: 'S', secret: 'x'.repeat(40) }, log: (m) => lg2.push(m), fetchImpl: fx });
+  R7.koMaxMs = 0; R7.quitter = (c) => { code2 = c; }; R7.enCours = 1; R7.atelier = true;
+  const fin = Promise.race([R7.boucle(), new Promise((res) => setTimeout(res, 300))]); await fin; R7.stop = true;
+  check('Relais 12 : jamais pendant une question ou une correction', code2 === null && !lg2.some((m) => /je redémarre/.test(m)), lg2.join(' | ').slice(0, 200));
 }
 
 // ---------- Home Assistant surveillé par le relais (11/11/26 : machine virtuelle sans adresse du 07/11 au 11/11) ----------
