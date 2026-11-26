@@ -186,11 +186,13 @@ async def main():
         r = await page.evaluate("wilson.outils.remarque({ texte: 'Ne te mets pas en veille quand je te fais un reproche' })")
         journal = await page.evaluate("localStorage.getItem('wilson.remarques') || ''") + ' '.join(logs[-30:])
         # 05/11/26 : le résultat est la phrase à dire (« C'est noté. ») ; Gemini 3.1 lisait l'ancienne consigne à voix haute.
-        check('Remarque (F7) : notée pour la prochaine mise à jour, gardée dans le journal ; résultat « C\'est noté. »', r == "C'est noté, je lance la correction : compte une heure environ." and 'reproche' in journal and 'REMARQUE DE TIMOTHÉE : Ne te mets pas en veille' in journal, r + journal[-200:])
+        check('Remarque (F7) : notée pour la prochaine mise à jour, gardée dans le journal ; résultat « C\'est noté. »', r.startswith("C'est noté") and 'au plus tard' in r and 'une heure' not in r and 'reproche' in journal and 'REMARQUE DE TIMOTHÉE : Ne te mets pas en veille' in journal, r + journal[-200:])
         await page.evaluate("wilson.outils.remarque({ texte: '(notée par l\\'appli : test interne)' })")
         r = await page.evaluate("wilson.outils.run('mes_remarques', {})")
         sysm = await page.evaluate("wilson._system()")
         check('Accord du 01/11/26 : « tu te rappelles ce que je t\'ai fait noter ? » → mes_remarques relit ses remarques datées (pas les notes internes), consigne à jour', 'reproche' in r and 'notée par l' not in r and '/' in r and 'mes_remarques' in sysm, r)
+        # 26/11/26, 11h38 : « C'est où la mise à jour que j'avais demandée ? » envoyé à l'analyste du CRM → mes_remarques dit où en est chaque correction
+        check('… et où en est leur correction (26/11/26 : « elle est où la mise à jour ? » → mes_remarques, jamais crm_question)', 'au plus tard' in r and "n'invente aucun autre délai" in r and 'jamais crm_question' in sysm, r[-300:])
         await page.evaluate("wilson._noteHeard('mets-le par écrit')")
         e0 = await page.evaluate("wilson.outils.afficher({ titre: 'Court', texte: 'Une ligne' }).then(() => wilson.outils._ecranMs)")
         e1 = await page.evaluate("wilson.outils.afficher({ titre: 'Long', texte: Array.from({length: 12}, (_, i) => 'ligne ' + i).join('\\n') }).then(() => wilson.outils._ecranMs)")

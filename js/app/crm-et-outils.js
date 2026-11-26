@@ -532,6 +532,11 @@ export class CrmMethodes {
   }
 
   async _crmTool(call) {
+    if (call.name === 'crm_noter' && this._dicteeVoulue(call)) { this._dicteeOuvrir(call); return; }   // le contenu n'est pas encore dicté (26/11/26)
+    if (call.name === 'crm_noter' && this._dictee && this._dictee.conv === this.convId) {   // dictée juste ouverte, pas encore annoncée
+      if (this.brain.open && !call.annule) this.brain.respond([{ id: call.id, name: call.name, response: { result: 'Dictée en cours : rien à préparer maintenant. Ne dis rien de plus ; l\'appli te donnera tout son texte quand il aura fini.' } }]);
+      return;
+    }
     if (call.name === 'itineraire') {
       const P = await this._itinerairePermis((call.args || {}).client || (call.args || {}).lieu || '');
       this._itiOui = !!P.oui;
@@ -558,6 +563,11 @@ export class CrmMethodes {
       if (VP.ordreEcriture(qa)) {
         this.log(`crm_question refusé : « ${qa.slice(0, 80)} » est une écriture, pas une question`, true);
         if (this.brain.open) this.brain.respond([{ id: call.id, name: call.name, response: { result: "REFUSÉ : c'est une écriture, pas une question (crm_question ne peut rien enregistrer). Appelle crm_noter : type (compte_rendu pour une visite ou un appel), client = la société, contact = la personne vue s'il l'a citée, texte = ce qu'il a dicté ; puis relis-lui la phrase préparée et demande « Je l'enregistre ? »." } }]);
+        return;
+      }
+      if (VP.questionSurWilson(qa)) {                       // sur Wilson lui-même, pas sur le CRM (26/11/26, 09h26 et 11h38)
+        this.log(`crm_question refusé : « ${qa.slice(0, 80)} » parle de Wilson lui-même (remarque ou mise à jour), pas du CRM`, true);
+        if (this.brain.open) this.brain.respond([{ id: call.id, name: call.name, response: { result: "REFUSÉ : ce n'est pas une question sur le CRM, c'est sur ton propre fonctionnement, et le CRM n'en sait rien. Une nouvelle remarque (un bug, quelque chose à changer) : appelle remarque. Où en est une correction ou une mise à jour qu'il a demandée : appelle mes_remarques. Ne promets aucune correction toi-même." } }]);
         return;
       }
       // Qui, fonction, numéro, adresse : l'annuaire gardé sur l'appareil répond tout de suite, sans IA.
@@ -621,7 +631,7 @@ export class CrmMethodes {
     }
     this._searches.delete(call.id); this._noteToolMs(performance.now() - t0);
     this.face.clearEmotion(); if (pid) this.pillEnd(pid, true, '');
-    // Il a continué de dicter après la demande (20/11/26, 11h50:40 : « … le reste de la commande qui était », puis les crémones)
+    // Il a continué de dicter après la demande (20/11/26, 11h50:40 : « … le reste de la commande qui était », puis les poignées)
     if (call.suite && res.info) res.info = `Attention, il a continué de parler après ta demande (« ${call.suite.slice(0, 300)} ») : si cela complète ou corrige sa note, rappelle crm_noter avec le texte complet au lieu de relire celle-ci. Sinon : ${res.info}`;
     if (ctl.annule) {
       // Journal du 04/11/26, 11h45:53 : crm_noter (tâche Karine Viola) annulé par Google parce qu'il parlait encore → rien

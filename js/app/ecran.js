@@ -1,6 +1,7 @@
 // Wilson — méthodes de la classe App (js/app.js) : cartes à l’écran (itinéraire, réponse, appel, confirmation), appels téléphoniques, photo.
 // Rangées ici le 24/11/26, recopiées telles quelles ; js/app.js les ajoute à App.prototype (même « this », même comportement).
 import { deviceName } from '../remote.js';
+import * as VP from '../voiture.js';
 import { appli, pont, $, esc } from './commun.js';
 
 export class EcranMethodes {
@@ -149,7 +150,11 @@ export class EcranMethodes {
   _refuseTap() {
     this.crm.pending = null; this.hideCard('confirm'); this.log('Écriture annulée à l\'écran');
     this._permettre(30000, 'bouton Non');
-    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText('[Timothée a touché « Non » : rien n\'est enregistré. Demande-lui en une phrase ce qu\'il faut changer.]');
+    // Journal du 26/11/26, 09h18:05-09h18:17 : il venait de dire « pas besoin de la réenregistrer », touche « Non », et
+    // Wilson demande « Qu'est-ce que tu veux changer à cette tâche ? ». S'il a déjà dit qu'il ne voulait rien écrire : rien à demander.
+    const H = this._heard || [], der = H[H.length - 1];
+    const refus = !!der && performance.now() - der.t < 30000 && VP.refusEcriture(der.text);
+    if (this.state === 'conversation' && this.mode === 'live' && this.brain.open) this.brain.sendText(refus ? '[Timothée a touché « Non » : rien n\'est enregistré, comme il l\'a dit. Ne lui pose aucune question ; dis seulement « D\'accord, je n\'enregistre rien. »]' : '[Timothée a touché « Non » : rien n\'est enregistré. Demande-lui en une phrase ce qu\'il faut changer.]');
   }
   // Appel lancé : Wilson se tait ; au retour, il propose le compte rendu de l'appel.
   _calling(t) {

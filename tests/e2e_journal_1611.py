@@ -199,13 +199,15 @@ async def main():
           C._ask = async (o) => o.action === 'claude_etat' ? { ok: true, pc: { vivant: false }, corrections: true } : { ok: true, accepte: true, pc: { vivant: false } };
           const c = await W.outils.run('remarque', { texte: 'Troisième remarque, PC éteint' });
           C._ask = ask0; delete C.on;
-          return { a, nA, b, d, c };
+          const m = await W.outils.run('mes_remarques', {});
+          return { a, nA, b, d, c, m };
         })()""")
-        check('Remarque : script Google pas encore à jour → rien n\'envoyé au PC, « compte une heure »', r['nA'] == 0 and 'compte une heure' in r['a'], str(r)[:300])
+        check('Remarque : script Google pas encore à jour → rien n\'envoyé au PC, « ce soir au plus tard » (plus de « compte une heure » sans PC, 26/11/26)', r['nA'] == 0 and 'au plus tard' in r['a'] and 'une heure' not in r['a'], str(r)[:300])
         d = r['d']
         check('Remarque : envoyée tout de suite au PC (type correction), avec le journal des 15 dernières minutes', d.get('type') == 'correction' and 'devis à relancer' in d.get('question', '') and 'Journal de l\'appareil, 15 dernières minutes' in d.get('contexte', '') and 'allume la lumière' in d.get('contexte', ''), str(d)[:300])
         check('… Wilson dit « je lance la correction tout de suite : compte une demi-heure »', 'tout de suite' in r['b'] and 'demi-heure' in r['b'], r['b'])
-        check('… PC éteint : « la correction partira dès qu\'il sera rallumé »', 'rallumé' in r['c'], r['c'])
+        check('… PC qui ne répond pas : « la correction partira dès qu\'il répondra, sinon ce soir au plus tard » (26/11/26, 09h24 : « compte une heure » promis, rien fait)', 'dès qu\'il répondra' in r['c'] and 'au plus tard' in r['c'] and 'une heure' not in r['c'], r['c'])
+        check('… mes_remarques dit où en est chacune : envoyée au PC, en attente (PC éteint), ce soir au plus tard', "envoyée à l'ordinateur de la maison" in r['m'] and "en attente : l'ordinateur de la maison ne répondait pas" in r['m'] and 'au plus tard' in r['m'], r['m'][-400:])
 
         await page.evaluate("wilson.__aut0 = wilson._crmAutorise; wilson._crmAutorise = () => ({ ok: true, pourquoi: 'essai' })")   # Timothée reconnu
         # ---------- 7. Remarque inventée (tablette, 19h23:24 : « j'ai une nouvelle remarque » → « visage trop statique ») ----------

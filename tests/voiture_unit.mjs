@@ -243,5 +243,15 @@ for (const w of ["C'est allumé. Au fait, je connais maintenant les e mails de t
 for (const w of ['Tu veux laquelle, la jaune ou la grande ?', "Je n'arrive pas à joindre la lumière.", 'Je regarde.', "C'est allumé ?"])
   check(`pas une action de la maison dite faite : « ${w} »`, !V.annonceMaisonFaite(w));
 
+// Journal du 26/11/26 (1.45.33) : remarques sur Wilson envoyées à l'analyste du CRM (09h26, 09h27, 11h38) ; « Oui, la tâche a bien
+// été enregistrée » (vrai) retenu par le verrou (09h17:38) ; « pas besoin de la réenregistrer » pas compris comme un refus (09h18:05).
+for (const q of ['Problème de coupure de parole lors de la dictée de longs textes ou comptes rendus.', 'Correction immédiate du problème de coupure de parole lors de la dictée.', "C'est où la mise à jour que j'avais demandé tout à l'heure ?"])
+  check(`question sur Wilson lui-même, pas pour le CRM : « ${q.slice(0, 50)} »`, V.questionSurWilson(q));
+for (const q of ['rappel contenu dernier email envoyé au client que je vais voir', 'mise à jour du devis de Dupont', 'Quels clients ont commandé du joints ?', 'Dernières commandes de Dupont'])
+  check(`question pour le CRM : « ${q.slice(0, 50)} »`, !V.questionSurWilson(q));
+check('« Oui, la tâche a bien été enregistrée dans le CRM… » confirme une écriture', V.confirmeEcriture("Oui, la tâche a bien été enregistrée dans le CRM. C'était pour envoyer le mail avec le catalogue deeaux."));
+for (const w of ["Rien n'est enregistré.", "Je l'enregistre ?", "Ce n'est pas encore enregistré, je te relis la phrase."]) check(`ne confirme pas une écriture : « ${w} »`, !V.confirmeEcriture(w));
+check('« si c\'est déjà enregistré, il y a pas besoin de la réenregistrer » : refus d\'écrire', V.refusEcriture("Bah non du coup si c'est déjà enregistré, il y a pas besoin de la réenregistrer."));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);

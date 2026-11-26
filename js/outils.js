@@ -38,10 +38,10 @@ export const OUTILS = [
     description: "Envoie le brouillon d'e-mail (Gmail personnel) que Claude vient de préparer avec l'outil mails. SEULEMENT après lui avoir relu le destinataire et le texte, lui avoir demandé « Je l'envoie ? » et avoir entendu son « oui » clair. action : envoyer ; annuler s'il dit non ou veut le changer (pour le changer, rappelle ensuite mails avec sa correction). Jamais pour la boîte pro : ses brouillons pro restent dans Outlook, il les envoie lui-même.",
     parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', enum: ['envoyer', 'annuler'] } }, required: ['action'] } },
   { name: 'remarque', behavior: 'BLOCKING',
-    description: "Remarque de Timothée sur ton fonctionnement ou sur son CRM (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile. Une seule fois par remarque. Une correction qui vaut pour toujours (la prononciation d'un nom, la façon d'appeler quelqu'un) : appelle AUSSI memoriser, pour l'appliquer dès maintenant. Ensuite, dis seulement le résultat de l'outil (« C'est noté, je lance la correction : compte une heure environ. » : depuis le 16/11/26, chaque remarque lance la correction toute seule, Claude corrige et publie dans l'heure, et Timothée reçoit une notification), puis réponds au reste de ce qu'il a dit ou écoute la suite.",
+    description: "Remarque de Timothée sur ton fonctionnement ou sur son CRM (un bug, une fonction qui manque, une façon de répondre à changer) : texte = sa remarque mise au propre, avec le contexte utile. Une seule fois par remarque. Une correction qui vaut pour toujours (la prononciation d'un nom, la façon d'appeler quelqu'un) : appelle AUSSI memoriser, pour l'appliquer dès maintenant. Ensuite, dis EXACTEMENT le résultat de l'outil, avec le délai qu'il donne et aucun autre (tout de suite si l'ordinateur de la maison est allumé, sinon plus tard : 26/11/26, « compte une heure » promis alors que l'ordinateur de la maison ne répondait pas), puis réponds au reste de ce qu'il a dit ou écoute la suite.",
     parameters: { type: 'OBJECT', properties: { texte: S }, required: ['texte'] } },
   { name: 'mes_remarques', behavior: 'BLOCKING',   // accord de Timothée du 01/11/26 (« je t'avais demandé de noter des choses hier »)
-    description: "Relire les remarques que Timothée t'a faites pour tes mises à jour (« qu'est-ce que je t'ai demandé de changer ? », « tu te rappelles ce que je t'ai fait noter hier ? »), avec leur date." },
+    description: "Relire les remarques que Timothée t'a faites pour tes mises à jour (« qu'est-ce que je t'ai demandé de changer ? », « tu te rappelles ce que je t'ai fait noter hier ? »), avec leur date et où en est leur correction. Aussi « elle est où la mise à jour que j'ai demandée ? », « c'est corrigé ? » (jamais crm_question : le CRM n'en sait rien)." },
 ];
 export const OUTILS_NAMES = OUTILS.map((t) => t.name);
 
@@ -49,6 +49,8 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': 
 const $ = (id) => document.getElementById(id);
 const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 const pad = (n) => String(n).padStart(2, '0');
+// Analyse du soir (tâche planifiée, vers 22h40) : elle rattrape les corrections que l'ordinateur de la maison n'a pas faites.
+const passeDuSoir = (t) => { const d = new Date(t); return d.getHours() * 60 + d.getMinutes() < 22 * 60 + 30 ? 'ce soir vers 23h00' : 'demain soir vers 23h00'; };
 const PHOTO_MS = 5000;   // photo seule à l'écran : 5 s (remarque de Timothée du 01/11/26)
 // Règle de Timothée du 04/11/26 : photos, météo et autres images 5 s par défaut (« réaffiche » pour les revoir plus
 // longtemps) ; du texte à l'écran seulement s'il le demande (« montre-moi », « affiche », « mets-le par écrit »).
@@ -117,13 +119,18 @@ export class Outils {
   }
 
   // ---------- F1 : l'écran ----------
-  _montrer(html, { titre = '', large = false, ms = 90000, garder = true } = {}) {   // demande du 30/10/26 : l'écran s'efface tout seul
-    const el = $('ecran'); if (!el) return;
+  _montrer(html, { titre = '', large = false, ms = 90000, garder = true, toujours = false } = {}) {   // demande du 30/10/26 : l'écran s'efface tout seul
+    const el = $('ecran'); if (!el) return false;
+    // Remarque de Timothée du 26/11/26, 09h25 (en voiture, suivi bourse affiché sur une phrase mal comprise) : « je ne veux
+    // plus que tu affiches des petites fenêtres, tu laisses ta petite tête ». En voiture, plus aucune fenêtre d'information
+    // (bourse, météo, idées…) : tout est dit à voix haute. Restent les boutons à toucher (Oui / Non, appeler, J'ai fini).
+    if (this.app.enVoiture && !toujours) { this.log(`Écran : « ${String(titre).slice(0, 40)} » pas affiché en voiture (seulement la tête de Wilson)`); return false; }
     if (garder) this._dernier = { html, titre, large, ms };       // pour « réaffiche » (04/11/26)
     el.innerHTML = `<div class="ecran-in${large ? ' large' : ''}"><div class="ecran-h"><div class="ecran-t">${esc(titre)}</div><button class="ecran-x" type="button" aria-label="Fermer">×</button></div><div class="ecran-b">${html}</div></div>`;
     el.hidden = false;
     el.querySelector('.ecran-x').addEventListener('click', () => this.fermer());
     clearTimeout(this._ecranT); this._ecranMs = ms; this._ecranT = setTimeout(() => this.fermer(), ms);
+    return true;
   }
   reafficher({ duree_sec } = {}) {
     const D = this._dernier;
@@ -261,7 +268,7 @@ export class Outils {
   _sonner(phrase, titre) {
     const app = this.app;
     this.log(`Alarme : ${phrase}`, true);
-    this._montrer(`<p class="alarme">${esc(phrase)}</p><p class="fine">Touche l'écran pour arrêter.</p>`, { titre, ms: 10 * 60000, garder: false });
+    this._montrer(`<p class="alarme">${esc(phrase)}</p><p class="fine">Touche l'écran pour arrêter.</p>`, { titre, ms: 10 * 60000, garder: false, toujours: true });
     const el = $('ecran'); if (el) el.addEventListener('click', () => this._arreterSonnerie(), { once: true });
     if (this._sonne) clearInterval(this._sonne.t);
     const t0 = Date.now();
@@ -331,9 +338,9 @@ export class Outils {
     });
     const html = `<div class="meteo-now"><span class="meteo-ico">${icoC}</span><span class="meteo-t">${Math.round(c.temperature_2m)}°</span><span class="meteo-m">${esc(motC)}<br><small>ressenti ${Math.round(c.apparent_temperature)}°, vent ${Math.round(c.wind_speed_10m)} km/h</small></span></div>`
       + `<div class="meteo-j">${jl.map((j) => `<div class="mj"><div class="mj-n">${esc(j.nom)}</div><div class="mj-i">${j.ico}</div><div class="mj-t">${j.max}° <small>${j.min}°</small></div><div class="mj-p">💧 ${j.pluie ?? '—'} %</div></div>`).join('')}</div>`;
-    this._montrer(html, { titre: `Météo — ${lieu.name}`, ms: IMAGE_MS });   // 5 s (règle du 04/11/26)
+    const affiche = this._montrer(html, { titre: `Météo — ${lieu.name}`, ms: IMAGE_MS });   // 5 s (règle du 04/11/26)
     this.log(`Météo : ${lieu.name}, ${Math.round(c.temperature_2m)}°, ${motC}`, true);
-    return `Météo à ${lieu.name} (affichée 5 s à l'écran ; « réaffiche » pour la revoir). Maintenant : ${Math.round(c.temperature_2m)}°, ${motC}, ressenti ${Math.round(c.apparent_temperature)}°, vent ${Math.round(c.wind_speed_10m)} km/h ; risque de pluie dans les 12 heures : ${maxH} %. `
+    return `Météo à ${lieu.name}${affiche ? ' (affichée 5 s à l\'écran ; « réaffiche » pour la revoir)' : ''}. Maintenant : ${Math.round(c.temperature_2m)}°, ${motC}, ressenti ${Math.round(c.apparent_temperature)}°, vent ${Math.round(c.wind_speed_10m)} km/h ; risque de pluie dans les 12 heures : ${maxH} %. `
       + jl.map((j) => `${j.nom} : ${j.mot}, ${j.min} à ${j.max}°, pluie ${j.pluie} %`).join(' ; ') + '. Résume à l\'oral en une ou deux phrases.';
   }
 
@@ -405,11 +412,11 @@ export class Outils {
       return /action inconnue/.test(e) ? "Le suivi bourse n'est pas encore relié : le script de Wilson doit être mis à jour (fichier bourse.gs). Dis-le simplement."
         : `Le suivi bourse ne répond pas (${e}). Dis-le simplement.`;
     }
-    if (action === 'afficher') this._montrer(`<pre style="white-space:pre-wrap;font:inherit;font-size:.8em">${esc(r.texte)}</pre>`, { titre: '📈 Suivi bourse', large: true });
+    const affiche = action === 'afficher' && this._montrer(`<pre style="white-space:pre-wrap;font:inherit;font-size:.8em">${esc(r.texte)}</pre>`, { titre: '📈 Suivi bourse', large: true });
     const voiture = !!A.enVoiture;
     return `${r.texte}
 
-RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus tels quels (arrondis à l'oral : « environ 1 750 euros », « moins 11 pour cent ») ; ne calcule rien de toi-même si le chiffre est déjà là ; ne récite pas tout${voiture ? ' ; il conduit : une ou deux phrases' : ''}. Le statut et les limites de vente sont ses propres règles : tu peux les rappeler. Tu ne donnes pas de conseil d'achat ou de vente ; pour une analyse poussée, il peut te la demander et tu la passes à question_difficile.${action === 'afficher' ? ' Le détail est affiché à l’écran.' : ''}`;
+RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus tels quels (arrondis à l'oral : « environ 1 750 euros », « moins 11 pour cent ») ; ne calcule rien de toi-même si le chiffre est déjà là ; ne récite pas tout${voiture ? ' ; il conduit : une ou deux phrases' : ''}. Le statut et les limites de vente sont ses propres règles : tu peux les rappeler. Tu ne donnes pas de conseil d'achat ou de vente ; pour une analyse poussée, il peut te la demander et tu la passes à question_difficile.${affiche ? ' Le détail est affiché à l’écran.' : action === 'afficher' ? ' En voiture, rien ne s’affiche à l’écran : dis-le à voix haute, sans dire que tu l’affiches.' : ''}`;
   }
 
   // ---------- F8 : envoyer le brouillon d'e-mail préparé par Claude (Gmail perso ; réservé à Timothée, après son « oui ») ----------
@@ -462,8 +469,8 @@ RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus te
       return "Je ne peux pas encore envoyer l'e-mail moi-même (script de Wilson pas à jour) : un bouton « Envoyer par e-mail » est affiché à l'écran, il appuie dessus. Dis-le-lui.";
     }
     if (!liste.length) return 'Aucune idée notée pour l\'instant.';
-    if (action === 'afficher') this._montrer(`<ul>${liste.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${lien ? '<p class="fine">Dans le document Google « Wilson — mes idées ».</p>' : ''}`, { titre: '💡 Mes idées' });
-    return `Ses idées (${liste.length}, la plus récente en dernier) : ${liste.slice(-10).join(' ; ')}.${action === 'afficher' ? ' Affichées à l\'écran.' : ''}`;
+    const affiche = action === 'afficher' && this._montrer(`<ul>${liste.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>${lien ? '<p class="fine">Dans le document Google « Wilson — mes idées ».</p>' : ''}`, { titre: '💡 Mes idées' });
+    return `Ses idées (${liste.length}, la plus récente en dernier) : ${liste.slice(-10).join(' ; ')}.${affiche ? ' Affichées à l\'écran.' : ''}`;
   }
 
   // ---------- F7 : remarques pour la prochaine mise à jour (lues chaque nuit par Claude dans le journal) ----------
@@ -474,7 +481,8 @@ RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus te
     const l = lire('wilson.remarques', []), cle = norm(t), now = Date.now();
     if (l.some((r) => r && now - r.t < 10 * 60000 && norm(r.texte) === cle)) { this.log(`Remarque déjà notée (pas de doublon) : ${t.slice(0, 80)}`); return "C'est noté, la correction est déjà lancée."; }
     this.log(`REMARQUE DE TIMOTHÉE : ${t}`, true);
-    l.push({ t: now, texte: t }); ecrire('wilson.remarques', l.slice(-50));
+    const R0 = { t: now, texte: t, v: this.app.version || '' };
+    l.push(R0); ecrire('wilson.remarques', l.slice(-50));
     // Remarque du 04/11/26, 11h51 : « noter mes remarques en arrière-plan, sans rester bloqué ni arrêter de m'écouter ».
     // 05/11/26, 09h46:11 : Gemini 3.1 a lu à voix haute le résultat « {result: Remarque notée. Dis « C'est noté. » (trois
     // mots)… » → le résultat est maintenant la phrase à dire elle-même ; la consigne est dans la description de l'outil.
@@ -482,16 +490,28 @@ RÈGLES : réponds seulement à ce qu'il demande, avec les chiffres ci-dessus te
     // publie ; Timothée reçoit un e-mail. Sans PC ni script : la tâche horaire du cloud la reprendra depuis le journal.
     let r = null;
     try { r = this.app.lancerCorrection ? await Promise.race([this.app.lancerCorrection(t), new Promise((ok) => setTimeout(() => ok(null), 8000))]) : null; } catch (_) {}
-    if (r && r.accepte && r.pcLa) return "C'est noté, je lance la correction tout de suite : compte une demi-heure environ.";
-    if (r && r.accepte) return "C'est noté. L'ordinateur de la maison ne répond pas : la correction partira dès qu'il sera rallumé.";
-    return "C'est noté, je lance la correction : compte une heure environ.";
+    // 26/11/26, 09h24-09h26 : l'ordinateur de la maison ne répondait plus depuis la veille ; l'outil le disait, mais Wilson a
+    // promis « compte une heure environ » (la phrase toute faite de ses consignes) et rien n'est venu. Le résultat dit
+    // maintenant le vrai délai, et la remarque garde son état pour mes_remarques (« elle est où la mise à jour ? »).
+    R0.etat = r && r.accepte ? (r.pcLa ? 'pc' : 'attente') : 'soir';
+    ecrire('wilson.remarques', l.slice(-50));
+    if (R0.etat === 'pc') return "C'est noté, je lance la correction tout de suite : compte une demi-heure environ.";
+    const soir = passeDuSoir(now);
+    if (R0.etat === 'attente') return `C'est noté. L'ordinateur de la maison ne répond pas (éteint, ou son programme arrêté) : la correction partira dès qu'il répondra, sinon ${soir} au plus tard, avec l'analyse du soir. Dis-le tel quel, sans promettre d'autre délai.`;
+    return `C'est noté. Je n'ai pas pu joindre l'ordinateur de la maison : la correction se fera ${soir} au plus tard, avec l'analyse du soir. Dis-le tel quel, sans promettre d'autre délai.`;
   }
 
   mesRemarques() {
     const l = lire('wilson.remarques', []).filter((r) => r && r.texte && !/^\(notée par l'appli/.test(r.texte)).slice(-10);
     if (!l.length) return 'Aucune remarque notée sur cet appareil.';
     const d = (t) => { const x = new Date(t); return `${pad(x.getDate())}/${pad(x.getMonth() + 1)}/${String(x.getFullYear()).slice(2)} ${pad(x.getHours())}h${pad(x.getMinutes())}`; };
-    return `Ses remarques pour tes mises à jour (${l.length}, la plus récente en dernier) : ${l.map((r) => `${d(r.t)} : ${r.texte}`).join(' ; ')}. Celles d'avant la dernière mise à jour ont pu être prises en compte (les nouveautés de ta mise à jour le disent). Résume-les simplement.`;
+    // 26/11/26, 11h38 : « C'est où la mise à jour que j'avais demandée ? » envoyé à l'analyste du CRM (« rien trouvé pour
+    // ce client »). Chaque remarque dit maintenant où en est sa correction.
+    const V = this.app.version || '', ou = (r) => r.v && V && r.v !== V ? `mise à jour reçue depuis (tu étais en ${r.v}, tu es en ${V}) : ses nouveautés disent ce qui a été corrigé`
+      : r.etat === 'pc' ? "envoyée à l'ordinateur de la maison, pas encore de mise à jour reçue"
+      : r.etat === 'attente' ? `en attente : l'ordinateur de la maison ne répondait pas ; sinon corrigée ${passeDuSoir(r.t)} au plus tard`
+      : r.etat === 'soir' ? `corrigée ${passeDuSoir(r.t)} au plus tard, avec l'analyse du soir` : 'pas encore de mise à jour reçue';
+    return `Ses remarques pour tes mises à jour (${l.length}, la plus récente en dernier) : ${l.map((r) => `${d(r.t)} : ${r.texte} (${ou(r)})`).join(' ; ')}. Résume-les simplement, avec où en est la correction de celles dont il parle ; n'invente aucun autre délai.`;
   }
 
   // Pour la consigne : ce qui est en cours.
