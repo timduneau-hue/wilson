@@ -20,6 +20,12 @@ export class OutilsMethodes {
       const a = c.args || {};
       // 19/11/26 (remarque de Timothée, 18h24) : chaque outil demandé par Gemini est noté, avec ce qu'il demande.
       if (c.name !== 'exprimer_emotion') this.log(`Outil demandé : ${c.name} ${JSON.stringify(a).slice(0, 300)}`);
+      // Dictée en cours (26/11/26) : ni relecture ni écriture à chaque pause ; tout son texte lui sera donné à la fin.
+      if (c.name !== 'exprimer_emotion' && this._dicteeEcoute()) {
+        this.log(`Outil ${c.name} refusé : dictée en cours (tout sera donné à « J'ai fini »)`);
+        res.push({ id: c.id, name: c.name, response: { result: "Dictée en cours : ne fais rien et ne dis rien, n'appelle aucun outil. L'appli te donnera tout son texte quand il aura fini." } });
+        continue;
+      }
       // Journal du 11/11/26, 11h55:28 et 21h03:30 : « Je regarde où tu en es… » / « Je prépare ton briefing… » dit (permis),
       // puis l'outil du MÊME tour refusé (« voix 0.0 s ») : la fin de cette petite phrase remettait le compte à zéro, et
       // Timothée a dû redemander. Un outil appelé dans un tour qui a déjà eu le droit de parler est permis.

@@ -28,11 +28,12 @@ export function estTravail(t, { clients = [] } = {}) {
 // fait déjà. T'as pas besoin de me rajouter une tâche… ») : « Pardon, je n'ajoute rien » a été retenu par le verrou de vérité,
 // qui a exigé crm_noter (« tâche » = écriture) : un compte rendu en trop a été préparé, qu'il a fallu supprimer. Vrai seulement
 // si, une fois les refus ôtés, il ne reste aucune autre demande d'écrire (« pas besoin de valider, note plutôt… » en est une).
-const REFUS_ECRITURE = /\b(?:pas (?:besoin|la peine)|inutile)(?: de| d')\s*(?:me |m'|le |la |l'|les |lui |en |une |un )*(?:r?ajout\w*|not\w*|valid\w*|enregistr\w*|mettre|met|cre\w*|marqu\w*|fair\w* (?:une?|de) (?:tache|note|compte[- ]rendu))\b[^.!?,;]*|\b(?:ne|n') ?(?:me |m'|le |la |l'|en )?(?:r?ajoute|note|mets|met|cree|enregistre|marque)s? (?:rien|pas|plus)\b[^.!?,;]*/g;
+const REFUS_ECRITURE = /\b(?:pas (?:besoin|la peine)|inutile)(?: de| d')\s*(?:me |m'|le |la |l'|les |lui |en |une |un )*(?:r?ajout\w*|not\w*|valid\w*|(?:re)?enregistr\w*|mettre|met|cre\w*|marqu\w*|fair\w* (?:une?|de) (?:tache|note|compte[- ]rendu))\b[^.!?,;]*|\b(?:ne|n') ?(?:me |m'|le |la |l'|en )?(?:r?ajoute|note|mets|met|cree|enregistre|marque)s? (?:rien|pas|plus)\b[^.!?,;]*/g;
 export function refusEcriture(t) {
   const x = plat(t);
   if (!x.match(REFUS_ECRITURE)) return false;
-  return !estEcriture(x.replace(REFUS_ECRITURE, ' '));
+  // « si c'est déjà enregistré, pas besoin de la réenregistrer » (26/11/26, 09h18:05) : « déjà enregistré » n'est pas un ordre d'écrire
+  return !estEcriture(x.replace(REFUS_ECRITURE, ' ').replace(/\b(?:c'est |elle est |il est |a ete |est )?deja (?:ete )?(?:enregistree?s?|notee?s?|faite?s?)\b/g, ' '));
 }
 // Wilson dit qu'il a écrit (pas un simple « c'est noté » d'accord) : jamais vrai sans crm_confirmer.
 // Journal du 20/11/26, 12h00:02 à 12h00:43 (en voiture) : « J'ai préparé la tâche suivante : « … ». Je l'enregistre ? » sans
@@ -42,6 +43,8 @@ export function annonceBrouillon(t) { return /\bj'ai (bien )?prepare\b|\bc'est p
 // Wilson parle d'écrire dans le CRM (« je vais le noter comme tâche », « j'ai un problème pour l'enregistrer ») : la suite
 // est une écriture, même si sa dernière phrase à lui (« Je viens de te le dire. ») n'en dit rien.
 export function parleEcriture(t) { return annonceBrouillon(t) || annonceEcritureFaite(t) || /\b(l'enregistrer|le noter|la noter|les noter)\b/.test(plat(t)); }
+// « Oui, la tâche a bien été enregistrée », « c'est noté dans tes tâches » (pas « ce n'est pas enregistré »).
+export function confirmeEcriture(t) { const x = plat(t); return /\benregistre(e|es|s)?\b|\bc'est (note|fait|pret)\b/.test(x) && !/\b(pas|rien|jamais|plus)\b[^.!?]{0,25}(enregistr|note|fait)|\?\s*$/.test(x); }
 export function annonceEcritureFaite(t) { return /\b(c'est (enregistre|ajoute|cree)|j'ai (ajoute|enregistre|cree|prepare)|c'est pret dans (le|ton) crm)\b/.test(plat(t)); }
 // Une écriture demandée (visite, compte rendu, tâche, rendez-vous) : jamais l'analyste (lecture seule) à sa place.
 export function estEcriture(t) {
@@ -329,6 +332,14 @@ export function questionContacts(t) {
 }
 // crm_question avec une écriture (journal du 12/11/26, 09h55 : « Enregistre la visite chez … » envoyé à Claude, en lecture
 // seule : « je ne peux pas enregistrer »). Une demande d'écrire n'est jamais une question.
+// Journal du 26/11/26, 09h26-09h27 et 11h38 : ses remarques sur Wilson lui-même (« coupure de parole pendant la dictée »,
+// « c'est où la mise à jour que j'avais demandée ? ») envoyées à l'analyste du CRM, qui a promis « je corrigerai
+// immédiatement » ou cherché une mise à jour chez un client. Une question sur le fonctionnement de Wilson n'est pas pour le CRM.
+export function questionSurWilson(t) {
+  const x = plat(t);
+  return /\b(bugs?|beugs?|bogues?)\b|\bcoup(e|es|er|ure|ures)( de)?( la)? parole|\btu (me )?coupes\b|\bmise a jour (que|qu'|de wilson|logicielle|du logiciel|de l'appli|demandee|promise)|\bta (derniere |prochaine )?mise a jour\b|\bcorrection (immediate|du probleme|du bug|de wilson|que j|demandee|promise)|\bton (propre )?fonctionnement\b|\bmes remarques\b/.test(x);
+}
+
 export function ordreEcriture(t) { return /^\s*(enregistre[rsz]?|note[rsz]?|ajoute[rsz]?|indique[rsz]?|cree[rsz]?|saisi[srt]?|saisir|marque[rsz]?|inscri[srt]|mets|mettre)\b/.test(plat(t)); }
 
 // Remarque inventée (journal du 16/11/26, tablette, 19h23:24) : Timothée a seulement dit « j'ai une nouvelle remarque » et

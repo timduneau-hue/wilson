@@ -273,6 +273,19 @@ export class ReponsesMethodes {
       vv.held = [];
       return null;
     }
+    // Journal du 26/11/26, 09h17:38 : la tâche venait d'être enregistrée (« Oui » touché à l'écran) ; à « elle est enregistrée ? »,
+    // « Oui, la tâche a bien été enregistrée… » a été retenu (« sans outil ») et crm_noter exigé : la même tâche repréparée.
+    // Confirmer une écriture que le CRM vient vraiment de faire (5 min) est dit, sans chiffre ni nom venus d'ailleurs.
+    const DE = this.crm.on && this.crm.dernierEnregistre;
+    if (!brouillonFaux && DE && Date.now() - DE.at < 5 * 60000 && VP.confirmeEcriture(wilson)) {
+      const motsDE = new Set([...mots, ...VP.motsDe(DE.relu)]), N = new Set(VP.nombresDe(DE.relu));
+      if (VP.nombresDe(wilson).every((n) => N.has(n)) && !VP.nomsInventes(wilson, motsDE).length) {
+        for (const [a, r] of vv.held) this.audio.play(a, r);
+        if (vv.held.length) { this.lastActivity = performance.now(); this.log(`Verrou de vérité : il confirme l'écriture faite il y a ${Math.round((Date.now() - DE.at) / 1000)} s, dite (« ${wilson.slice(0, 100)} »)`, true); }
+        vv.held = [];
+        return null;
+      }
+    }
     // Journal du 19/11/26, 16h13:00 : il refusait qu'on écrive (« pas besoin de me rajouter une tâche ») ; « Pardon, je
     // n'ajoute rien » a été retenu, puis crm_noter exigé : un compte rendu en trop. Un « d'accord, je n'ajoute rien » est dit.
     if (!brouillonFaux && VP.refusEcriture(vv.user || user) && !VP.annonceEcritureFaite(wilson) && !VP.annonceGuidage(wilson) && !VP.annonceRecherche(wilson)) {

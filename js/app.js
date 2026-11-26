@@ -34,10 +34,11 @@ import { OutilsMethodes } from './app/outils-gemini.js';
 import { VoitureMethodes } from './app/en-voiture.js';
 import { CrmMethodes } from './app/crm-et-outils.js';
 import { EcranMethodes } from './app/ecran.js';
+import { DicteeMethodes } from './app/dictee.js';
 import { OUTILS_VOITURE, appli, pont, VOITURE_QUITTE_MS, RE_CONSIGNE_FONDEE, MAJ_VERIF_MS, PREROLL_MS, VISAGE_ATTENTE_MS, SEG_GAP_MS, SEG_VU_MIN, TAIL_MS, TAIL_NOAEC_MS, TURN_GATE_MS, LOOK_GRACE_MS, REGARD_DIALOGUE_MS, LOOKED_IDLE_MS, VOITURE, APRES_OUTIL_MS, ATTENTE_GOOGLE_MS, ATTENTE_EXPLIQUE_MS, MICRO_RETENU_MS, REPONDS_APRES_MS, LENT_APRES_FORCE_MS, CAR_IDLE_MS, BYNAME_IDLE_MS, NAME_GATE_MS, ECO_TAIL_MS, pad, $, enAnglais, cleanSpeech, emotionDuTexte, realPhrase, shorten, isNetErr, concat } from './app/commun.js';
 export { emotionDuTexte, texteCompare, memeDebut } from './app/commun.js';
 
-const VERSION = '1.45.32';
+const VERSION = '1.45.33';
 
 class App {
   constructor() {
@@ -766,10 +767,11 @@ class App {
       this.brain.sendText(`[Nouvelles de la voiture, arrivées il y a ${min} min, pendant que personne ne te regardait : ${nouvelleVoiture.phrase} Dis-le-lui d'abord, en une phrase, sans rien ajouter.]`);
       this.log('Voiture : nouvelle gardée, donnée au début de la discussion', true);
     }
-    const PA = reason === 'toucher' && this.enVoiture && !this._aDire && !nouvelleVoiture ? this._propAppelGardee() : null;
-    if (reason === 'toucher' && !this._aDire && !nouvelleVoiture) this.brain.sendText(PA ? this._propAppelTexte(PA) : this.enVoiture ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
+    const DR = this._dictee && this._dictee.etat === 'coupee' && reason !== 'test' && this._dicteeReprendre();   // dictée coupée par un appel : elle reprend
+    const PA = reason === 'toucher' && this.enVoiture && !this._aDire && !nouvelleVoiture && !DR ? this._propAppelGardee() : null;
+    if (reason === 'toucher' && !this._aDire && !nouvelleVoiture && !DR) this.brain.sendText(PA ? this._propAppelTexte(PA) : this.enVoiture ? '[Timothée vient de toucher l\'écran pour te parler : dis seulement « Oui ? » et écoute.]' : "[Quelqu'un vient de toucher ton visage sur l'écran pour te parler. Salue-le très brièvement et écoute.]");
     if (reason === 'apres_appel') { this.brain.sendText(this._apresAppelTexte()); this._propAppelNote(reason); }
-    if (reason === 'apres_appel_entrant') { this.brain.sendText(this._apresAppelEntrantTexte()); this._propAppelNote(reason); }
+    if (reason === 'apres_appel_entrant' && !DR) { this.brain.sendText(this._apresAppelEntrantTexte()); this._propAppelNote(reason); }
     if (reason === 'reponse_tardive' && !this._aDireEnvoyer() && this._lateText) this.brain.sendText(this._lateText);
     if (reason === 'message' && this._messageText) { this.brain.sendText(this._messageText); this._messageText = null; }
     if (reason === 'prenom' && this._wakeText) {
@@ -797,6 +799,7 @@ class App {
     }
     this.log(`Fin de conversation (${why}) — dernière parole de Wilson il y a ${depuis(this.playEndAt)}, de Timothée il y a ${depuis(this._heardAt)}${this._voitureBt ? ', en voiture' : ''}`); this._byName = false; this.convId++; this.endAfterSpeech = false; this._liveTurn = null; this.paused = false; this._searchMs = 0; this._vv = null; this._vvHerite = null;
     this._nvSuivi('');   // 1.43.0 : nouvelle de la voiture pas encore dite → gardée pour la suivante
+    if (this._dictee) this._dicteeVeille();   // dictée coupée (appel, réseau) : ce qu'il a dicté est gardé pour la suivante (26/11/26)
     { const PA = this._propAppel;                                       // 24/11/26 : proposition d'après l'appel pas encore dite → gardée
       if (PA && PA.conv === this.convId - 1) { PA.conv = null; PA.at = Date.now(); this.log(`Proposition d'après l'appel${PA.call && PA.call.nom ? ' (' + PA.call.nom + ')' : ''} pas encore dite : gardée pour la discussion suivante`); } }
     // Une réponse du CRM envoyée mais pas encore dite (journal du 05/11/26, 11h04:22) : elle reste à dire ; en voiture, il
@@ -952,6 +955,7 @@ class App {
     b.on('audio', (i16, rate) => this._liveAudio(i16, rate));
     this._liveAudio = (i16, rate) => {
       if (this.discard || this.state !== 'conversation') return;
+      if (this._dicteeEcoute()) return;                                    // dictée (26/11/26) : il se tait jusqu'à « J'ai fini »
       // R1 (règle de Timothée du 01/11/26) : il ne parle que s'il est sûr qu'on le regardait en lui parlant.
       if (this._retenu === this._turnN || this._doublon === this._turnN) return;
       if (!this._liveTurn && !this.audio.playing && !this._reponsePermise()) {
@@ -1021,6 +1025,8 @@ class App {
       const coupee = /\[…\]\s*$/.test(String(wilson || ''));
       wilson = cleanSpeech(wilson);
       this._emoTour = null;
+      // Dictée (remarque du 26/11/26, 09h25) : ce qu'il dit est mis bout à bout, Wilson ne répond rien jusqu'à « J'ai fini ».
+      if (this._dicteeTour(user, wilson)) { this._liveTurn = null; this._modelTalking = 0; this._vv = null; this._vvHerite = null; $('subtitle').textContent = ''; return; }
       // Protocole voiture : verrou de vérité (réponse sans outil jamais dite, nom inventé corrigé).
       const vv = this._protocole && this._vv && this._vv.n === this._turnN - 1 ? this._vv : null;
       if (vv && this._vvFin(vv, user, wilson) === 'jete') {
@@ -1113,7 +1119,7 @@ class App {
     b.on('heard', (t) => {
       if (this.state !== 'conversation') return;
       this.lastActivity = this._heardAt = performance.now(); this._noteHeard(t); this._noteChiffres(t, 'dit');
-      if (this._protocole && String(t || '').trim()) {                   // protocole voiture : une demande de travail verrouille le tour
+      if (this._protocole && String(t || '').trim() && !this._dicteeEcoute()) {   // protocole voiture : une demande de travail verrouille le tour (pas pendant une dictée)
         const vv = this._vvTour(); vv.user = String(t);
         const travail = VP.estTravail(t, { clients: [...this.crm.cache.values()].map((e) => e.societe) }) || (this._travailRecent() && !VP.horsTravail(t) && !this._reaction(t));
         if (travail && !vv.travail) { vv.travail = true; this._travailAt = performance.now(); this._travailConv = this.convId; if (!vv.outil) this._vvRetenir(vv, 'demande de travail'); }
@@ -1124,7 +1130,7 @@ class App {
       if (this._gate && !this._gate.ok && nomDit(t)) this._gateOpen('nom entendu');
     });
     b.on('said', (t) => {
-      if (this._retenu === this._turnN || this._doublon === this._turnN) return;
+      if (this._retenu === this._turnN || this._doublon === this._turnN || this._dicteeEcoute()) return;
       if (VP.estDidascalie(t) || (!this._protocole && VP.ditPasPourMoi(t))) {   // didascalie (« (Wilson reste silencieux…) ») ou « ce n'est pas pour moi » dit à voix haute (14/11/26) : coupée
         this._doublon = this._turnN; this._didascalie = this._turnN; this.audio.flush(); this.face.setTalk(0); this._liveTurn = null; this._modelTalking = 0;
         $('subtitle').textContent = '';
@@ -1189,6 +1195,7 @@ class App {
       // Remarques de Timothée du 06/11/26, 08h48-08h49 : en voiture, retoucher l'écran pendant la discussion le rendort tout de
       // suite (sans attendre la minute de silence), sauf si une fenêtre à valider (Oui / Non, bouton…) est affichée.
       if (this.enVoiture && (this.state === 'conversation' || this.state === 'eveil')) {
+        if (this._dictee && this._dictee.conv === this.convId) { this._dicteeFinir('écran touché'); return; }   // dictée : toucher = « J'ai fini »
         const F = this._fenetreOuverte();
         if (!F) { this.log('Voiture : écran retouché pendant la discussion : je me rendors', true); this.endConversation('toucher'); return; }
         this.log(`Voiture : écran touché, mais ${F} est affiché(e) : je reste éveillé`);
@@ -1272,7 +1279,7 @@ class App {
       // veille aussitôt, la réponse n'est jamais dite ; remarque du 13/11/26, 07h10:34 : « donne la réponse dès que tu l'as,
       // même si je ne suis plus devant ») : un résultat d'outil reçu garde l'écoute ouverte jusqu'à ce qu'il soit dit (12 s au plus).
       const AOr = this._apresOutil, attendReponse = !!(AOr && AOr.conv === this.convId && now - AOr.at < 12000);
-      const searching = !!(this._searches && this._searches.size) || [...(this._analyses || new Map()).values()].some((A) => now - A.t0 < 90000) || this._aDireEnCours(now) || attendReponse;
+      const searching = !!(this._dictee && this._dictee.conv === this.convId) || !!(this._searches && this._searches.size) || [...(this._analyses || new Map()).values()].some((A) => now - A.t0 < 90000) || this._aDireEnCours(now) || attendReponse;
       // Images : aucune envoyée d'office (R6) ; seulement à la demande (outil « regarder »).
       const keep = this.car || this._voitureBt ? CAR_IDLE_MS : this.settings.convTimeout * 1000;
       const idle = now - Math.max(this.lastActivity, this.lastUserSpeech);
@@ -1416,7 +1423,7 @@ class App {
     // recherchait dans le CRM ») : aussi pendant le verrou de vérité (il attend le résultat d'un outil), et le bruit de la
     // route ne le fait plus taire (avant : rien tant que le micro croyait entendre une voix).
     const vvAttend = this._protocole && this._vv && this._vv.n === this._turnN && this._vv.hold && !this._vv.outil;
-    const cherche = this.state === 'conversation' && ((this._searches && this._searches.size) || (this._analyses && [...this._analyses.values()].some((A) => !A.cancelled || A.fond))
+    const cherche = this.state === 'conversation' && !this._dicteeEcoute() && ((this._searches && this._searches.size) || (this._analyses && [...this._analyses.values()].some((A) => !A.cancelled || A.fond))
       || this._outilsEnCours > 0 || !!this._apresOutil || vvAttend
       || !!(this._lent && this._lent.conv === this.convId && this._lent.tour === this._turnN && !this._liveTurn));   // réponse en retard (20/11/26)
     // (journal du 05/11/26, 11h03:19-11h04:20 : « Je cherche : petit son… » écrit 20 fois : le compteur repartait de zéro
@@ -1453,7 +1460,7 @@ class App {
 }
 
 // Méthodes rangées dans js/app/ (24/11/26) : ajoutées à App telles quelles (mêmes propriétés que des méthodes de classe).
-for (const M of [EcoMethodes, ConsignesMethodes, ReseauMethodes, ReponsesMethodes, OutilsMethodes, VoitureMethodes, CrmMethodes, EcranMethodes]) {
+for (const M of [EcoMethodes, ConsignesMethodes, ReseauMethodes, ReponsesMethodes, OutilsMethodes, VoitureMethodes, CrmMethodes, EcranMethodes, DicteeMethodes]) {
   for (const nom of Object.getOwnPropertyNames(M.prototype)) {
     if (nom === 'constructor') continue;
     if (Object.prototype.hasOwnProperty.call(App.prototype, nom)) throw new Error('méthode en double : ' + nom);

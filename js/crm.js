@@ -207,7 +207,7 @@ export const CRM_TOOLS = [
       type: { type: 'STRING', enum: ['tache', 'compte_rendu', 'rdv', 'note'] },
       client: { type: 'STRING', description: 'le client concerné : la société (vide pour une tâche personnelle)' },
       contact: { type: 'STRING', description: "la personne vue, appelée ou concernée, s'il la cite (« j'ai vu Julien », « avec le magasinier ») : son nom tel qu'il l'a dit" },
-      texte: { type: 'STRING', description: 'ce qu\'il a dit, mis au propre sans rien ajouter (vide pour un simple rendez-vous)' },
+      texte: { type: 'STRING', description: 'ce qu\'il a dit, mis au propre sans rien ajouter (vide pour un simple rendez-vous). VIDE aussi quand il annonce un compte rendu ou un long texte sans l\'avoir encore dicté (« note un compte rendu de visite pour X », « je vais te dicter ») : en voiture, l\'appli ouvre la dictée (bouton « J\'ai fini ») et te donnera tout son texte à la fin' },
       date: { type: 'STRING', description: "tel qu'il l'a dit : « demain », « jeudi », « le 30 », « 30/10 »… (tâche : jour du rappel, quand il veut y penser ; le jour d'un rendez-vous ou d'un envoi dont parle la tâche va dans le texte, pas ici : s'il précise ce jour-là ensuite, garde le jour du rappel qu'il a donné ; compte rendu : jour de l'échange, vide = aujourd'hui ; rdv : jour du rendez-vous)" },
       heure: { type: 'STRING', description: 'rendez-vous : « 10h00 »' },
       echange: { type: 'STRING', enum: ['visite', 'appel'], description: 'compte rendu : visite ou appel' } },
@@ -588,6 +588,13 @@ export class Crm {
     // aujourd'hui » → une 2e tâche préparée et enregistrée, et la 1re, fausse, restait dans Mes tâches sans qu'il le sache.
     // Le CRM ne permet pas à Wilson d'effacer : la relecture le lui dit, pour qu'il la supprime lui-même.
     const D = this.ecritRecent, ajout = D && Date.now() - D.at < DOUBLON_MS && D.type === type && (D.cle || '') === p.cle ? D : null;
+    // Journal du 26/11/26, 09h17:39 : la tâche venait d'être enregistrée (« Oui » touché à l'écran) ; à « elle est enregistrée ? »,
+    // la MÊME tâche a été préparée de nouveau, avec « il faudra supprimer la précédente », puis « qu'est-ce que tu veux
+    // changer ? ». Exactement la même écriture, à l'instant : rien n'est préparé, c'est déjà fait.
+    if (ajout && ajout.relu === p.relu) {
+      this.log(`déjà enregistré il y a ${Math.round((Date.now() - ajout.at) / 1000)} s, pas repréparé : ${p.relu}`, true);
+      return { ok: false, dire: `DÉJÀ ENREGISTRÉ il y a ${Math.max(1, Math.round((Date.now() - ajout.at) / 60000))} min, exactement la même chose (« ${p.relu} ») : rien n'est préparé en double. Dis-lui seulement que c'est déjà enregistré, sans rien proposer.` };
+    }
     this.pending = p; this.dernierEnregistre = null;     // nouvelle préparation : « déjà enregistré » ne vaut plus
     this.log(`à confirmer : ${p.relu}`, true);
     if (this.app.showConfirm) this.app.showConfirm(p);
