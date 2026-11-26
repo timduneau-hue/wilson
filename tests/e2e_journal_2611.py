@@ -258,7 +258,7 @@ async def main():
 
         # ---------- 9. 09h28 : deux clients possibles sans ville → aucune ville demandée (Wilson en avait inventé deux) ----------
         r = await page.evaluate("""(() => { const C = wilson.crm, g = (societe, ville) => ({ g: { societe, ville, contacts: [] }, contact: null });
-          return { sans: C._plusieursTexte('Atlantic Ouverture', [g('ATLANTIQUE OUVERTURES', ''), g('ATLANTIQUE OUVERTURES MAINTENANCE', '')]),
+          return { sans: C._plusieursTexte('Ouest Ouverture', [g('OUEST OUVERTURES', ''), g('OUEST OUVERTURES MAINTENANCE', '')]),
                    avec: C._plusieursTexte('Dupont', [g('DUPONT', 'Cholet'), g('DUPONT FERMETURES', 'Saumur')]),
                    une: C._plusieursTexte('Dupont', [g('DUPONT', 'Cholet'), g('DUPONT FERMETURES', '')]) }; })()""")
         check('09h28 : plusieurs clients sans ville dans le CRM → le résultat ne demande plus de citer leur ville (« n\'en cite aucune »)', 'la ville de chacun' not in r['sans'] and "n'en cite aucune" in r['sans'] and 'et la ville' not in r['sans'], r['sans'])
