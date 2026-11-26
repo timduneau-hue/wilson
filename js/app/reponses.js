@@ -320,7 +320,9 @@ export class ReponsesMethodes {
     // Journal du 20/11/26, 12h00:59 : « Je viens de te le dire. » (il parlait de la tâche que Wilson n'arrivait pas à
     // enregistrer) envoyé à l'analyste comme une question. Quand Wilson parlait d'écrire, c'est une écriture : crm_noter.
     const ecrit = VP.estEcriture(user) || VP.parleEcriture(dit);
+    const mails = !ecrit && VP.parleMails(user) && this.claude && this.claude.on;
     const quoi = VP.estItineraire(user) || VP.annonceGuidage(dit) ? 'itineraire avec le nom du client (rien n\'est lancé tant que l\'outil ne l\'a pas fait)'
+      : mails ? 'mails avec sa demande complète (ses e-mails ne sont pas dans le CRM : Claude, sur l\'ordinateur de la maison, lit sa messagerie)'
       : ecrit ? 'crm_noter avec ce qu\'il t\'a dicté (rien n\'est préparé dans le CRM tant que crm_noter ne l\'a pas fait ; une visite : type compte_rendu, échange visite, texte « Visite » et les personnes vues), puis relis-lui la phrase préparée'
       : VP.questionContacts(user) ? 'crm_contacts avec le nom du client'
       : /contact|telephone|numero|adresse|fiche|derniere visite|qui (est|sont)/.test(u) ? 'crm_client avec le nom du client'
@@ -329,7 +331,7 @@ export class ReponsesMethodes {
       this.brain.sendText(`[Ta réponse (« ${String(dit || '').slice(0, 100)} ») n'a PAS été dite : tu n'as consulté aucun outil, elle n'était pas vérifiée. Timothée a dit : « ${String(user || '').slice(0, 220)} ». Appelle maintenant ${quoi}, sans rien dire avant. Sans résultat d'outil, tu ne sais rien. Si tu n'as pas compris sa demande, demande-lui simplement de la redire.]`);
       return;
     }
-    if (ecrit || VP.estItineraire(user) || VP.annonceGuidage(dit) || !this.crm.on || !user) {
+    if (ecrit || mails || VP.estItineraire(user) || VP.annonceGuidage(dit) || !this.crm.on || !user) {
       this.log('Verrou de vérité : toujours aucun outil — je lui fais redemander');
       this._vvDicte('[Dis-lui seulement : « Je n\'ai pas réussi. Redis-moi le nom du client et ce que tu veux, s\'il te plaît. »]');
       return;

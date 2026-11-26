@@ -297,9 +297,16 @@ export class Crm {
     const P = this.annuaire.principal(g);
     return { societe: g.societe, ville: g.ville, adresse: g.adresse, code: g.code, contacts, principal: contacts.find((c) => c.cle === P.cle) || contacts[0], g };
   }
+  // Journal du 26/11/26, 09h28 : deux clients sans ville dans l'annuaire, et le résultat demandait quand même « cite le nom
+  // et la ville de chacun » : Wilson a inventé deux villes, le verrou de vérité l'a coupé, puis « Pardon, je me suis trompé ».
+  // La ville n'est demandée que pour ceux dont le CRM la donne ; jamais devinée.
   _plusieursTexte(dit, liste) {
     const qui = (x) => this.annuaire.qui(x.g, x.contact);
-    return `Plusieurs clients possibles pour « ${dit} » : ${liste.map(qui).join(' ; ')}. Demande-lui lequel (cite le nom et la ville de chacun), puis rappelle l'outil avec le nom exact et la ville.`;
+    const villes = liste.filter((x) => x.g && String(x.g.ville || '').trim()).length;
+    const cite = villes === liste.length ? 'cite le nom et la ville de chacun'
+      : villes ? 'cite le nom de chacun, et la ville seulement pour ceux dont elle est écrite ci-dessus ; n\'invente aucune ville'
+      : 'cite le nom de chacun ; le CRM ne donne pas leur ville : n\'en cite aucune';
+    return `Plusieurs clients possibles pour « ${dit} » : ${liste.map(qui).join(' ; ')}. Demande-lui lequel (${cite}), puis rappelle l'outil avec le nom exact${villes ? ' et la ville' : ''}.`;
   }
   // De qui parle-t-il ? { soc, contact (la personne reconnue, ou null), sur, e (fiche, si elle a été lue) } — ou { dire } :
   // ce qu'il faut lui dire (plusieurs clients possibles, client inconnu, CRM muet). L'annuaire d'abord (immédiat, sans

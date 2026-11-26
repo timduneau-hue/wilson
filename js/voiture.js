@@ -330,6 +330,14 @@ export function questionContacts(t) {
   if (/\b(commandes?|devis|chiffre|ca|visites?|vu|vus|dernier|derniere|dernieres|achete|achat|achats|comptes?[- ]rendus?|taches?|rendez-vous|rdv|quand|combien|sujets?|briefing|mails?|e-mails?|relance|objectif)\b/.test(x)) return false;
   return /\b(qui (est|sont|s'occupe|gere|fait)|c'est qui|comment s'appelle|le nom d|numero|telephone|portable|adresse|ou (est|sont|se trouve)|quelle ville|contacts?|interlocuteurs?|magasinier|acheteu\w*|dirigeant\w*|gerant\w*|patron\w*|responsable|comptable|secretaire|fonction)\b/.test(x);
 }
+// Ses e-mails (journal du 26/11/26, 10h29 : « je lui avais fait un email … tu peux me rappeler tout ce qu'il y avait dans cet
+// email ? ») : Wilson a dit « je regarde tes e-mails » sans outil, et le verrou de vérité a exigé crm_question : l'analyste a
+// cherché dans les comptes rendus du CRM. Une demande sur ses e-mails va à l'outil mails (Claude du PC lit sa messagerie).
+// Pas « l'adresse e-mail de … » (une fiche du CRM), ni une écriture dans le CRM (« note que je dois lui envoyer un mail »).
+export function parleMails(t) {
+  const x = plat(t);
+  return /\b(e-?mails?|e mails?|mails?|courriels?|messagerie|boite (mail|de reception))\b/.test(x) && !/\badresses? (e-?mail|e mail|mail|electronique)\b/.test(x);
+}
 // crm_question avec une écriture (journal du 12/11/26, 09h55 : « Enregistre la visite chez … » envoyé à Claude, en lecture
 // seule : « je ne peux pas enregistrer »). Une demande d'écrire n'est jamais une question.
 // Journal du 26/11/26, 09h26-09h27 et 11h38 : ses remarques sur Wilson lui-même (« coupure de parole pendant la dictée »,

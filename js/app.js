@@ -38,7 +38,7 @@ import { DicteeMethodes } from './app/dictee.js';
 import { OUTILS_VOITURE, appli, pont, VOITURE_QUITTE_MS, RE_CONSIGNE_FONDEE, MAJ_VERIF_MS, PREROLL_MS, VISAGE_ATTENTE_MS, SEG_GAP_MS, SEG_VU_MIN, TAIL_MS, TAIL_NOAEC_MS, TURN_GATE_MS, LOOK_GRACE_MS, REGARD_DIALOGUE_MS, LOOKED_IDLE_MS, VOITURE, APRES_OUTIL_MS, ATTENTE_GOOGLE_MS, ATTENTE_EXPLIQUE_MS, MICRO_RETENU_MS, REPONDS_APRES_MS, LENT_APRES_FORCE_MS, CAR_IDLE_MS, BYNAME_IDLE_MS, NAME_GATE_MS, ECO_TAIL_MS, pad, $, enAnglais, cleanSpeech, emotionDuTexte, realPhrase, shorten, isNetErr, concat } from './app/commun.js';
 export { emotionDuTexte, texteCompare, memeDebut } from './app/commun.js';
 
-const VERSION = '1.45.33';
+const VERSION = '1.45.34';
 
 class App {
   constructor() {
