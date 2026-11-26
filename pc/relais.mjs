@@ -15,12 +15,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 'relais 11';
+export const VERSION = 'relais 12';
 const DEPOT = 'https://raw.githubusercontent.com/timduneau-hue/wilson/main/pc/';
 const FICHIERS = ['relais.mjs', 'crm-mcp.mjs', 'consigne.md', 'mail-mcp.mjs', 'garde-chrome.mjs', 'consigne-mail.md', 'consigne-correction.md'];
 const MAJ_MS = 6 * 3600000;            // le relais se met à jour tout seul depuis GitHub, toutes les 6 h (demande du 06/11/26)
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const MAX_EN_COURS = 2;                 // deux questions en même temps au plus
+// Relais 12 (26/11/26) : deux fois (24/11 15h31 → 25/11 07h36, puis 25/11 10h35 → 26/11), chaque appel au script et à GitHub
+// a échoué (« fetch failed », 10 s chacun) pendant des heures, PC allumé, alors que la tablette et le téléphone joignaient le
+// script ; la première fois, seul un redémarrage du relais l'a rétabli. Script injoignable 10 min de suite : le relais
+// s'arrête et boucle.cmd le relance 15 s plus tard (jamais pendant une question ni une correction).
+const KO_REDEMARRAGE_MS = 10 * 60000;
 const CLAUDE_MAX_MS = 4 * 60000;        // au-delà, Claude est arrêté (Wilson a dit qu'il attendait 4 min au plus)
 const MAX_TOURS = 30;
 const OUTILS = 'WebSearch,WebFetch';
@@ -280,6 +285,7 @@ export class Relais {
     this.log = log || ((m) => this._log(m));
     this.gardeHA = new GardeHA({ cfg: this.cfg, fetchImpl, journal: (m) => { this.log('maison : ' + m); this.lignes.push({ t: Date.now(), m: 'Maison (PC) : ' + m }); } });
     this.scriptOkAt = 0;
+    this.koDepuis = 0; this.koMaxMs = KO_REDEMARRAGE_MS; this.quitter = (code) => process.exit(code);   // relais 12
     this.vides = 0;          // appels « claude_prendre » restés vides à la suite (W15)
     this.limite = null;      // { jusqua, texte } : limite d'utilisation de Claude atteinte (W16)
   }
@@ -361,6 +367,7 @@ export class Relais {
         const r = await this.post({ action: 'claude_prendre', secret: this.cfg.secret, attente: 25, occupe: this.enCours, version: VERSION, limite: this.limiteActive() }, 45000);
         if (!r.ok) throw new Error(r.erreur || 'refus du script');
         attente = 5000; this.scriptOkAt = Date.now();
+        if (this.koDepuis) { this.log(`script de nouveau joignable (injoignable pendant ${Math.round((Date.now() - this.koDepuis) / 60000)} min)`); this.koDepuis = 0; }
         if (r.question) { this.vides = 0; this.traiter(r.question); }
         else {
           // W15 : pause entre deux appels vides. Le script attend d'ordinaire ~25 s ; s'il répond tout de suite (quota, panne),
@@ -370,7 +377,15 @@ export class Relais {
           else await pause(500);
         }
       } catch (e) {
-        this.log(`script injoignable ou refus : ${e.message} — nouvel essai dans ${Math.round(attente / 1000)} s`);
+        // « fetch failed » seul ne dit rien : la cause (UND_ERR_CONNECT_TIMEOUT, ENOTFOUND, ECONNRESET…) est notée (relais 12).
+        const c = e && e.cause, cause = c ? String(c.code || c.message || c).slice(0, 120) : '';
+        this.log(`script injoignable ou refus : ${e.message}${cause ? ` (${cause})` : ''} — nouvel essai dans ${Math.round(attente / 1000)} s`);
+        if (!this.koDepuis) this.koDepuis = Date.now();
+        const ko = Date.now() - this.koDepuis;
+        if (ko >= this.koMaxMs && !this.enCours && !this.atelier) {
+          this.log(`script injoignable depuis ${Math.round(ko / 60000)} min : je redémarre (relancé dans 15 s par boucle.cmd)`);
+          this.stop = true; this.quitter(0); return;
+        }
         await pause(attente); attente = Math.min(attente * 2, 60000);
       }
     }
