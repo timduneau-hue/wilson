@@ -13,6 +13,10 @@
     la même tâche repréparée (« il faudra supprimer la précédente »), puis « Non » touché → « qu'est-ce que tu veux changer ? ».
     → confirmer une écriture faite à l'instant est dit ; la même écriture n'est pas repréparée ; « Non » après « pas besoin » :
       aucune question.
+ 5. 09h28 : « plusieurs clients possibles » sans ville dans le CRM, mais le résultat demandait « cite le nom et la ville » :
+    deux villes inventées, phrase coupée par le verrou, « Pardon, je me suis trompé ». → la ville n'est demandée que si le CRM la donne.
+ 6. 10h29 : « tu peux me rappeler ce qu'il y avait dans cet email ? » → le verrou a exigé crm_question (comptes rendus du CRM).
+    → une demande sur ses e-mails exige l'outil mails.
 """
 import asyncio, re, json, os, base64
 import numpy as np
@@ -251,6 +255,31 @@ async def main():
         await page.wait_for_timeout(300)
         t = conn['texts'][n4:]
         check('« Non » touché juste après « pas besoin de la réenregistrer » : aucune question (« je n\'enregistre rien »)', any("je n'enregistre rien" in x for x in t) and not any('ce qu\'il faut changer' in x for x in t), str(t)[:200])
+
+        # ---------- 9. 09h28 : deux clients possibles sans ville → aucune ville demandée (Wilson en avait inventé deux) ----------
+        r = await page.evaluate("""(() => { const C = wilson.crm, g = (societe, ville) => ({ g: { societe, ville, contacts: [] }, contact: null });
+          return { sans: C._plusieursTexte('Atlantic Ouverture', [g('ATLANTIQUE OUVERTURES', ''), g('ATLANTIQUE OUVERTURES MAINTENANCE', '')]),
+                   avec: C._plusieursTexte('Dupont', [g('DUPONT', 'Cholet'), g('DUPONT FERMETURES', 'Saumur')]),
+                   une: C._plusieursTexte('Dupont', [g('DUPONT', 'Cholet'), g('DUPONT FERMETURES', '')]) }; })()""")
+        check('09h28 : plusieurs clients sans ville dans le CRM → le résultat ne demande plus de citer leur ville (« n\'en cite aucune »)', 'la ville de chacun' not in r['sans'] and "n'en cite aucune" in r['sans'] and 'et la ville' not in r['sans'], r['sans'])
+        check('… avec leur ville → nom et ville de chacun, comme avant', 'cite le nom et la ville de chacun' in r['avec'] and 'Cholet' in r['avec'], r['avec'])
+        check('… une seule ville connue → seulement celle-là, aucune inventée', "n'invente aucune ville" in r['une'], r['une'])
+
+        # ---------- 10. 10h29 : une demande sur ses e-mails, sans outil → l'outil mails, plus l'analyste du CRM ----------
+        r = await page.evaluate("""(() => { const W = wilson, out = [], s0 = W.brain.sendText;
+          Object.defineProperty(W.claude, 'on', { get: () => true, configurable: true });
+          W.brain.sendText = (t) => out.push(t);
+          try {
+            W._sansOutil = null; W._vvForcer("pour mon client là que je vais voir. Je lui avais fait un email avec les choses qu'il fallait qu'on regarde ensemble. Est-ce que tu peux me rappeler tout ce qu'il y avait dans cet email ?", 'Je regarde tes e mails. De quel client parles-tu ?');
+            const un = out.slice(); out.length = 0;
+            W._sansOutil = null; W._vvForcer("C'est quoi l'adresse mail de Monsieur Martin ?", 'Je regarde.');
+            const adr = out.slice(); out.length = 0;
+            W._sansOutil = null; W._vvForcer('Quels clients ont commandé du joint ce mois-ci ?', 'Je regarde.');
+            return { un, adr, crm: out.slice() };
+          } finally { W.brain.sendText = s0; delete W.claude.on; W._sansOutil = null; } })()""")
+        check('10h29 : « tu peux me rappeler ce qu\'il y avait dans cet email ? » sans outil → mails exigé, plus crm_question', any('Appelle maintenant mails' in t for t in r['un']) and not any('crm_question' in t for t in r['un']), str(r['un'])[:300])
+        check('… « l\'adresse mail de Monsieur Martin » reste une fiche du CRM (crm_client)', any('crm_client' in t for t in r['adr']) and not any('Appelle maintenant mails' in t for t in r['adr']), str(r['adr'])[:300])
+        check('… une question sur ses clients reste pour l\'analyste du CRM', any('crm_question' in t for t in r['crm']), str(r['crm'])[:300])
 
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])

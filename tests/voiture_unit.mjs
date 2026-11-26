@@ -253,5 +253,11 @@ check('« Oui, la tâche a bien été enregistrée dans le CRM… » confirme un
 for (const w of ["Rien n'est enregistré.", "Je l'enregistre ?", "Ce n'est pas encore enregistré, je te relis la phrase."]) check(`ne confirme pas une écriture : « ${w} »`, !V.confirmeEcriture(w));
 check('« si c\'est déjà enregistré, il y a pas besoin de la réenregistrer » : refus d\'écrire', V.refusEcriture("Bah non du coup si c'est déjà enregistré, il y a pas besoin de la réenregistrer."));
 
+// Journal du 26/11/26, 10h29 : une demande sur ses e-mails envoyée à l'analyste du CRM (comptes rendus) au lieu de l'outil mails.
+for (const t of ["pour mon client là que je vais voir. Je lui avais fait un email avec euh les choses qu'il fallait qu'on regarde ensemble. Euh est-ce que tu peux me rappeler tout ce qu'il y avait dans cet email ou tu as pas accès ?", "Est-ce que j'ai reçu des mails de Dupont ?", 'Lis-moi mes derniers e-mails.', 'Regarde dans ma messagerie le courriel de ce matin.'])
+  check(`demande sur ses e-mails : « ${t.slice(0, 50)} »`, V.parleMails(t));
+for (const t of ["C'est quoi l'adresse mail de Monsieur Martin ?", 'Dernières commandes de Dupont', "Donne-moi l'adresse e-mail d'Aurélien.", 'Ajoute une tâche pour Monsieur Martin.'])
+  check(`pas une demande sur ses e-mails : « ${t.slice(0, 50)} »`, !V.parleMails(t));
+
 console.log(`\n${ok}/${ok + ko} vérifications réussies`);
 process.exit(ko ? 1 : 0);
