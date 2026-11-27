@@ -170,6 +170,8 @@ export function finDeTrop(t) {
 // veut. » : un bout de sa consigne lu à voix haute. Comme une didascalie, c'est coupé.
 export function estDidascalie(t) {
   const x = plat(t);
+  // Journal du 27/11/26, 08h09:27 (en voiture, radio entendue) : « Silencieux. » dit à voix haute au lieu de se taire.
+  if (/^\s*(silence|silencieux|silencieuse|muet|chut)\s*[.!…]*\s*$/.test(x)) return true;
   return /^\s*[([*]/.test(x) || /\becoute ce qu'il (veut|dit|demande)\b/.test(x) || /\b(je reste|il reste|wilson reste|reste|rester|demeure) (silencieux|muet)\b|ne (me )?semble pas s'adresser a (lui|moi)|[([*]\s*(silence|pause|wilson|il se tait|se tait|attend|ne dit rien|ne repond pas)\b/.test(x);
 }
 

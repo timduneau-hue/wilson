@@ -17,6 +17,9 @@
     deux villes inventées, phrase coupée par le verrou, « Pardon, je me suis trompé ». → la ville n'est demandée que si le CRM la donne.
  6. 10h29 : « tu peux me rappeler ce qu'il y avait dans cet email ? » → le verrou a exigé crm_question (comptes rendus du CRM).
     → une demande sur ses e-mails exige l'outil mails.
+Journal du 27/11/26 (téléphone en voiture, 1.45.34) — correction de la 1.45.35.
+ 7. 11h09 : « Appelle papi » cherché parmi les clients (quatre clients au nom vaguement proche proposés), puis « c'est dans mon
+    répertoire, c'est pas un client ». → un proche (papi, mamie, maman…) n'est jamais cherché dans le CRM : dit tout de suite.
 """
 import asyncio, re, json, os, base64
 import numpy as np
@@ -280,6 +283,19 @@ async def main():
         check('10h29 : « tu peux me rappeler ce qu\'il y avait dans cet email ? » sans outil → mails exigé, plus crm_question', any('Appelle maintenant mails' in t for t in r['un']) and not any('crm_question' in t for t in r['un']), str(r['un'])[:300])
         check('… « l\'adresse mail de Monsieur Martin » reste une fiche du CRM (crm_client)', any('crm_client' in t for t in r['adr']) and not any('Appelle maintenant mails' in t for t in r['adr']), str(r['adr'])[:300])
         check('… une question sur ses clients reste pour l\'analyste du CRM', any('crm_question' in t for t in r['crm']), str(r['crm'])[:300])
+
+        # ---------- 11. 27/11/26, 11h09 : « Appelle papi » → un proche, pas un client : rien cherché dans le CRM ----------
+        r = await page.evaluate("""(async () => { const C = wilson.crm, q0 = C._qui, vus = [];
+          C._qui = async (client) => { vus.push(client); return { dire: 'Plusieurs clients possibles pour « ' + client + ' » : PIPO, PAPIN.' }; };
+          try {
+            const papi = await C.callTarget({ client: 'papi' }), mamie = await C.callTarget({ client: 'ma grand-mère' });
+            const vusProches = vus.slice();
+            const client = await C.callTarget({ client: 'Papin' });
+            return { papi, mamie, vusProches, vus: vus.slice(), client };
+          } finally { C._qui = q0; } })()""")
+        check('11h09 : « Appelle papi » → « un proche, pas un client », sans liste de clients', not r['papi']['ok'] and 'un proche, pas un client' in r['papi']['dire'] and 'Plusieurs clients' not in r['papi']['dire'], str(r['papi'])[:300])
+        check('… « ma grand-mère » aussi, et le CRM n\'est jamais interrogé pour un proche', 'un proche' in r['mamie']['dire'] and r['vusProches'] == [], str(r)[:300])
+        check('… un vrai nom de client est toujours cherché dans le CRM', r['vus'] == ['Papin'] and 'Plusieurs clients' in r['client']['dire'], str(r)[:300])
 
         errs = [l for l in logs if 'PAGEERROR' in l]
         check('Aucune erreur JavaScript', not errs, '; '.join(errs)[:300])
