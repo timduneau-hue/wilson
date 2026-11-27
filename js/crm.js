@@ -108,6 +108,14 @@ export function parseHeure(txt) {
 // Un « oui » clair, sans « non », « attends », « change »… (le verrou des écritures, C2).
 const OUI = /\b(oui|ouais|ouai|yes|vas[- ]?y|go|confirme|confirmer|je confirme|c'?est bon|c'?est ca|d'?accord|ok|okay|valide|enregistre|enregistre[sz]?|parfait|exact|exactement|tout a fait|bien sur|allez|nickel|impeccable)\b/;
 const NON = /\b(non|pas|attends?|annule|annuler|stop|change|changer|modifie|modifier|corrige|corriger|faux|erreur|plutot|mais)\b/;
+// Journal du 27/11/26, 11h09 (téléphone, en voiture) : « Appelle papi » a été cherché parmi les clients ; quatre clients au
+// nom vaguement proche ont été proposés, puis « c'est dans mon répertoire, c'est pas un client ». Un proche désigné par un
+// mot de la famille n'est jamais un client du CRM : il est dit tout de suite, sans liste de clients.
+export function estProche(txt) {
+  const t = plat(txt).replace(/[^a-z' ]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^(mon |ma |mes |a |au |le |la )/, '').trim();
+  return /^(papi|papy|pepe|mamie|mamy|meme|maman|papa|mere|pere|tonton|tata|parrain|marraine|beau pere|belle mere|belle maman|beau papa|femme|mari|cherie?|frere|soeur|fils|fille|grand pere|grand mere)$/.test(t);
+}
+
 export function estOui(txt) { const t = plat(txt); return OUI.test(t) && !NON.test(t); }
 
 // Ressemblance de noms dits à voix haute (même méthode que le CRM, section 53) : pour retrouver une fiche gardée.
@@ -787,6 +795,10 @@ export class Crm {
 
   // ---- appeler (C4) ----
   async callTarget({ client = '', contact = '' } = {}, signal) {
+    if (estProche(client) && !String(contact || '').trim()) {
+      this.log(`appeler : « ${client} » est un proche, pas un client — rien cherché dans le CRM`);
+      return { ok: false, dire: `« ${client} » est un proche, pas un client : tu ne peux appeler que ses clients du CRM, pas encore les contacts de son téléphone. Dis-le-lui simplement en une phrase, sans proposer de client.` };
+    }
     const Q = await this._qui(client, signal);
     if (Q.dire) return { ok: false, dire: Q.dire };
     const S = Q.soc, e = { societe: S.societe, cle: (S.principal || {}).cle || '', contact: (S.principal || {}).nom || '' };

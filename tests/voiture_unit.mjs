@@ -47,6 +47,9 @@ check('« Oui vas-y » : un oui', V.estOui('Oui vas-y') && !V.estOui('Oui mais p
 // Didascalies lues à voix haute (09/11, 17h52:33)
 check('« (Wilson reste silencieux…) » : didascalie', V.estDidascalie("(Wilson reste silencieux car la conversation ne semble pas s'adresser à lui.)"));
 check('« *attend* », « [silence] » : didascalies', V.estDidascalie('*attend*') && V.estDidascalie('[silence]'));
+// Journal du 27/11/26, 08h09:27 (en voiture, radio entendue) : « Silencieux. » dit à voix haute au lieu de se taire → coupé.
+check('« Silencieux. », « Silence. », « Muet. » seuls : didascalies', V.estDidascalie('Silencieux.') && V.estDidascalie(' Silence… ') && V.estDidascalie('Muet.'));
+check('… une vraie phrase avec « silence » est gardée', !V.estDidascalie('Silence radio de son côté depuis lundi.') && !V.estDidascalie("Le moteur est silencieux, d'après sa fiche."));
 // Journal du 14/11/26 (10h48:41 … 21h27:18) : « ce n'est pas pour moi » dit à voix haute → coupé comme une didascalie.
 for (const p of ["On dirait que ce n'est pas pour moi. Préviens-moi si tu as besoin de quoi que ce soit.",
   "On dirait que vous papotez entre vous, je ne m'immisce pas. Faites-moi signe si vous avez besoin de moi !",
